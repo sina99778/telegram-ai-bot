@@ -56,7 +56,13 @@ async def menu_vip(message: Message) -> None:
 @menu_router.message(F.text == "📞 Support")
 async def menu_support(message: Message) -> None:
     """Handle the Support button."""
-    await message.answer("📞 Need help? Contact our support team at @YourAdminUsername", parse_mode="HTML")
+    text = (
+        "📞 <b>Support Team</b>\n\n"
+        "If you have any questions, face any issues, or want to purchase a VIP subscription via direct transfer, "
+        "please contact our admin:\n\n"
+        "👉 <b>@ThereIsStillSina</b>"
+    )
+    await message.answer(text, parse_mode="HTML")
 
 @menu_router.message(F.text.in_({"💬 Chat with AI", "🖼️ Generate Image", "🎙️ Voice Assistant"}))
 async def menu_tools(message: Message) -> None:
