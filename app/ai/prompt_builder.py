@@ -25,8 +25,8 @@ class PromptBuilder:
         system_prompt: str,
         history: Sequence[MessageLike],
         current_user_message: str,
-        image_bytes: bytes | None = None,
-        mime_type: str = "image/jpeg",
+        media_bytes: bytes | None = None,
+        mime_type: str | None = None,
     ) -> list[types.Content]:
         
         trimmed = list(history)[-self._max_messages:]
@@ -40,8 +40,8 @@ class PromptBuilder:
             )
 
         user_parts = []
-        if image_bytes:
-            user_parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+        if media_bytes and mime_type:
+            user_parts.append(types.Part.from_bytes(data=media_bytes, mime_type=mime_type))
         
         user_parts.append(types.Part.from_text(text=current_user_message))
         contents.append(types.Content(role="user", parts=user_parts))

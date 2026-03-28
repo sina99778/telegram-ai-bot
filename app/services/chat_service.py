@@ -27,14 +27,16 @@ class ChatService:
         username: str | None,
         first_name: str | None,
         text: str,
-        image_bytes: bytes | None = None,
-        mime_type: str = "image/jpeg",
+        media_bytes: bytes | None = None,
+        mime_type: str | None = None,
     ) -> str:
 
         user = await self._repo.get_or_create_user(telegram_id=telegram_id, username=username, first_name=first_name)
         conversation = await self._repo.get_or_create_active_conversation(user_id=user.id)
 
-        db_content = f"[Attached Image]\n{text}" if image_bytes else text
+        db_content = text
+        if media_bytes:
+            db_content = f"[Attached Media: {mime_type}]\n{text}"
 
         await self._repo.add_message(conversation_id=conversation.id, role="user", content=db_content)
 
@@ -49,7 +51,7 @@ class ChatService:
             system_prompt=system_prompt,
             history=history,
             current_user_message=text,
-            image_bytes=image_bytes,
+            media_bytes=media_bytes,
             mime_type=mime_type,
         )
 

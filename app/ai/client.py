@@ -111,28 +111,89 @@ class GeminiClient:
             self._model,
         )
 
-    async def generate_response(self, messages: list[types.Content]) -> str:
+    # ── public API ───────────────────────────────
+
+    async def generate_response(self, messages: list[dict[str, Any]]) -> str:
+        """Send *messages* to the Gemini model and return the text response.
+
+        Parameters
+        ----------
+        messages:
+            A list of message dicts compatible with the GenAI
+            ``contents`` format, e.g.::
+
+                [{"role": "user", "parts": [{"text": "Hi"}]}]
+
+        Returns
+        -------
+        str
+            The model's text reply.
+
+        Raises
+        ------
+        AIException
+            If the request fails after all retry attempts.
+        """
         return await self._call_with_retries(messages)
 
+    # ── internal retry wrapper ───────────────────
+
     @retry(
+        # Retry up to 3 attempts (initial call + 2 retries)
         stop=stop_after_attempt(3),
+        # Exponential back-off: 1 s → 2 s → 4 s (capped)
         wait=wait_exponential(multiplier=1, min=1, max=10),
+        # Only retry our sentinel exception
         retry=retry_if_exception_type(_RetryableAIError),
+        # Log each retry at WARNING level
         before_sleep=before_sleep_log(logger, logging.WARNING),
+        # Don't re-raise RetryError – we handle it below
         reraise=False,
     )
-    async def _call_with_retries(self, messages: list[types.Content]) -> str:
+    async def _call_with_retries(self, messages: list[dict[str, Any]]) -> str:
+        """Execute the actual API call, raising ``_RetryableAIError`` for
+        transient failures so that tenacity handles the back-off logic.
+        """
         try:
+            logger.info(
+                "Calling Gemini API  ·  model=%s  ·  message_count=%d",
+                self._model,
+                len(messages),
+            )
+
+            # ── Async call via the official SDK ──
             response = await self._client.aio.models.generate_content(
                 model=self._model,
                 contents=messages,
             )
-            return response.text or ""
+
+            # Extract the text from the response
+            text: str = response.text or ""
+
+            logger.info(
+                "Gemini API responded  ·  chars=%d",
+                len(text),
+            )
+            return text
+
         except Exception as exc:
+            # Decide whether this error is worth retrying
             if _is_retryable(exc):
+                logger.warning(
+                    "Retryable error from Gemini API: %s",
+                    type(exc).__name__,
+                )
                 raise _RetryableAIError(str(exc)) from exc
-            logger.error("Non-retryable Gemini API error: %s", type(exc).__name__, exc_info=True)
-            raise AIException(f"AI request failed. Please try again later.") from None
+
+            # Non-retryable → wrap immediately so the key never leaks
+            logger.error(
+                "Non-retryable Gemini API error: %s",
+                type(exc).__name__,
+            )
+            raise AIException(
+                f"AI request failed ({type(exc).__name__}). "
+                "Please try again later."
+            ) from None  # 'from None' strips the original traceback
 
     # Override __del__ isn't needed – the genai client manages its own
     # resources, but we add a graceful shutdown hook for completeness.
