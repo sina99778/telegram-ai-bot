@@ -1,68 +1,48 @@
-"""
-app/bot/handlers/base.py
-~~~~~~~~~~~~~~~~~~~~~~~~~
-Handlers for core bot commands: ``/start``, ``/help``, and ``/new``.
-"""
-
 from __future__ import annotations
 
-import logging
-
 from aiogram import Router
-from aiogram.filters import Command
+from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
 
+from app.bot.keyboards.reply import get_main_menu
 from app.services.chat_service import ChatService
 
-logger = logging.getLogger(__name__)
-
-# ── Router ────────────────────────────────────
 base_router = Router(name="base")
 
-
-# ── /start & /help ────────────────────────────
-
-@base_router.message(Command("start", "help"))
-async def cmd_start_help(message: Message) -> None:
-    """Greet the user and explain what the bot can do."""
-
-    welcome_text = (
-        "👋 <b>Welcome to the AI Assistant Bot!</b>\n"
-        "\n"
-        "I'm powered by Google Gemini and I can help you with "
-        "questions, creative writing, coding, and more.\n"
-        "\n"
-        "<b>Commands:</b>\n"
-        "  /start · /help — Show this message\n"
-        "  /new  — Start a fresh conversation\n"
-        "\n"
-        "Simply type any message and I'll respond. "
-        "Your conversation history is preserved until you use /new."
+@base_router.message(CommandStart())
+async def cmd_start(message: Message, chat_service: ChatService) -> None:
+    """Handle the /start command and show the main menu."""
+    if message.from_user is None:
+        return
+        
+    # Ensure user exists in DB
+    await chat_service._repo.get_or_create_user(
+        telegram_id=message.from_user.id,
+        username=message.from_user.username,
+        first_name=message.from_user.first_name
     )
 
-    await message.answer(welcome_text, parse_mode="HTML")
+    welcome_text = (
+        f"👋 Welcome to the AI Hub, <b>{message.from_user.first_name}</b>!\n\n"
+        "I am your advanced multi-modal assistant. Choose an option from the menu below to get started, "
+        "or simply type a message to chat with me.\n\n"
+        "💡 <i>Tip: VIP members get access to Gemini 3.1 Pro and Nano Banana 2 Image Generation!</i>"
+    )
 
-
-# ── /new ──────────────────────────────────────
+    await message.answer(
+        welcome_text,
+        reply_markup=get_main_menu(),
+        parse_mode="HTML"
+    )
 
 @base_router.message(Command("new"))
-async def cmd_new_conversation(
-    message: Message,
-    chat_service: ChatService,
-) -> None:
-    """Reset the user's active conversation context."""
-
+async def cmd_new(message: Message, chat_service: ChatService) -> None:
+    """Reset the current conversation."""
     if message.from_user is None:
         return
 
-    success: bool = await chat_service.reset_conversation(
-        telegram_id=message.from_user.id,
-    )
-
+    success = await chat_service.reset_conversation(message.from_user.id)
     if success:
-        reply = "🔄 Conversation cleared! Send me a new message to start fresh."
+        await message.answer("🔄 Conversation cleared! Let's start fresh.", reply_markup=get_main_menu())
     else:
-        reply = "ℹ️ You don't have an active conversation yet. Just type a message to begin!"
-
-    await message.answer(reply)
-    logger.info("User %d reset conversation → %s", message.from_user.id, success)
+        await message.answer("You don't have an active conversation to clear.")
