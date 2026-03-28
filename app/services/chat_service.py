@@ -80,3 +80,6 @@ class ChatService:
         conversation.is_active = False
         await self._session.commit()
         return True
+
+    async def get_bot_stats(self) -> dict[str, int]:
+        return await self._repo.get_bot_stats()

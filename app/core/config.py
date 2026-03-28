@@ -34,7 +34,17 @@ class Settings(BaseSettings):
     POSTGRES_DB: str
     POSTGRES_HOST: str
 
+    # ── Admin ─────────────────────────────────
+    ADMIN_IDS: str = ""  # Comma-separated Telegram user IDs, e.g. "123456,789012"
+
     # ── Computed ──────────────────────────────
+
+    @property
+    def admin_ids_list(self) -> list[int]:
+        """Parse ADMIN_IDS comma-separated string into a list of ints."""
+        if not self.ADMIN_IDS:
+            return []
+        return [int(x.strip()) for x in self.ADMIN_IDS.split(",") if x.strip()]
 
     @property
     def database_url(self) -> str:

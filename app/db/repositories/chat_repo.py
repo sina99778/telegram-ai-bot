@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Conversation, Message, User
@@ -236,3 +236,19 @@ class ChatRepository:
             len(messages),
         )
         return messages
+
+    # ──────────────────────────────────────────
+    #  Statistics
+    # ──────────────────────────────────────────
+
+    async def get_bot_stats(self) -> dict[str, int]:
+        """Fetch total counts of users, conversations, and messages."""
+        users_count = await self._session.scalar(select(func.count(User.id))) or 0
+        conv_count = await self._session.scalar(select(func.count(Conversation.id))) or 0
+        msg_count = await self._session.scalar(select(func.count(Message.id))) or 0
+        
+        return {
+            "users": users_count,
+            "conversations": conv_count,
+            "messages": msg_count
+        }
