@@ -67,6 +67,8 @@ class ChatService:
         username: str | None,
         first_name: str | None,
         text: str,
+        image_bytes: bytes | None = None,
+        mime_type: str = "image/jpeg",
     ) -> str:
         """Full request lifecycle: persist → build prompt → call AI → persist.
 
@@ -80,6 +82,12 @@ class ChatService:
             Telegram display name (may be ``None``).
         text:
             The raw message text from the user.
+        image_bytes:
+            Optional raw bytes of an attached image.  Passed to the
+            PromptBuilder but **not** stored in the database to save
+            space — only a ``[Attached Image]`` marker is persisted.
+        mime_type:
+            MIME type of the attached image (default ``"image/jpeg"``).
 
         Returns
         -------
@@ -101,10 +109,14 @@ class ChatService:
         )
 
         # 3️⃣  Persist the incoming user message.
+        #      If an image was attached, prefix the text with a marker
+        #      so the DB history knows an image was sent (without storing
+        #      the heavy bytes).
+        db_content = f"[Attached Image]\n{text}" if image_bytes else text
         await self._repo.add_message(
             conversation_id=conversation.id,
             role="user",
-            content=text,
+            content=db_content,
         )
 
         # 4️⃣  Fetch the conversation history from DB.
@@ -127,6 +139,8 @@ class ChatService:
             system_prompt=system_prompt,
             history=history,
             current_user_message=text,
+            image_bytes=image_bytes,
+            mime_type=mime_type,
         )
 
         # 8️⃣  Call the AI model (with retries handled internally).

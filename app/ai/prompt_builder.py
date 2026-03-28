@@ -12,6 +12,7 @@ Responsibilities:
 
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Any, Protocol, Sequence
 
@@ -118,6 +119,8 @@ class PromptBuilder:
         system_prompt: str,
         history: Sequence[MessageLike],
         current_user_message: str,
+        image_bytes: bytes | None = None,
+        mime_type: str = "image/jpeg",
     ) -> list[dict[str, Any]]:
         """Build the ``contents`` list for ``generate_content()``.
 
@@ -134,6 +137,12 @@ class PromptBuilder:
             expose ``.role`` (``"user"`` | ``"model"``) and ``.content``.
         current_user_message:
             The latest message from the user that triggered this call.
+        image_bytes:
+            Optional raw bytes of an image attachment.  When provided,
+            the final user turn will include an ``inline_data`` part
+            alongside the text.
+        mime_type:
+            MIME type of the attached image (default ``"image/jpeg"``).
 
         Returns
         -------
@@ -155,8 +164,21 @@ class PromptBuilder:
             self._message_to_dict(msg) for msg in trimmed
         ]
 
-        # 3. Append the current user turn
-        contents.append(self._text_to_dict("user", current_user_message))
+        # 3. Append the current user turn (optionally with an image)
+        if image_bytes is not None:
+            b64_data = base64.b64encode(image_bytes).decode("utf-8")
+            user_parts: list[dict[str, Any]] = [
+                {"inline_data": {"mime_type": mime_type, "data": b64_data}},
+                {"text": current_user_message},
+            ]
+            contents.append({"role": "user", "parts": user_parts})
+            logger.info(
+                "Attached image  ·  mime=%s  ·  size=%d bytes",
+                mime_type,
+                len(image_bytes),
+            )
+        else:
+            contents.append(self._text_to_dict("user", current_user_message))
 
         logger.info(
             "Prompt built  ·  history_kept=%d/%d  ·  total_turns=%d",
