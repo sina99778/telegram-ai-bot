@@ -10,18 +10,29 @@ menu_router = Router(name="menu")
 
 @menu_router.message(F.text == "👤 My Profile")
 async def menu_profile(message: Message, chat_service: ChatService) -> None:
-    """Handle the Profile button."""
+    """Handle the Profile button and show real DB stats."""
     if message.from_user is None:
         return
         
+    user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        await message.answer("User profile not found. Please type /start first.")
+        return
+
+    plan_name = "👑 VIP Premium" if user.is_vip else "🆓 Free Tier"
+    expire_text = f"\n📅 <b>Expires:</b> {user.vip_expire_date.strftime('%Y-%m-%d')}" if user.vip_expire_date else ""
+
     text = (
         f"👤 <b>User Profile</b>\n\n"
-        f"<b>Name:</b> {message.from_user.first_name}\n"
-        f"<b>ID:</b> <code>{message.from_user.id}</code>\n\n"
-        f"🏷️ <b>Current Plan:</b> Free Tier\n"
-        f"🪙 <b>Image Credits:</b> 0\n\n"
-        f"<i>Upgrade to VIP to access Gemini 3.1 Pro and Nano Banana 2!</i>"
+        f"<b>Name:</b> {user.first_name}\n"
+        f"<b>ID:</b> <code>{user.telegram_id}</code>\n\n"
+        f"🏷️ <b>Current Plan:</b> {plan_name}{expire_text}\n"
+        f"🪙 <b>Image Credits:</b> {user.image_credits}\n\n"
     )
+    
+    if not user.is_vip:
+        text += f"<i>Upgrade to VIP to access Gemini 3.1 Pro and Nano Banana 2!</i>"
+
     await message.answer(text, reply_markup=get_profile_keyboard(), parse_mode="HTML")
 
 @menu_router.message(F.text == "👑 VIP Premium")

@@ -252,3 +252,33 @@ class ChatRepository:
             "conversations": conv_count,
             "messages": msg_count
         }
+
+    # ──────────────────────────────────────────
+    #  User Lookup & VIP Management
+    # ──────────────────────────────────────────
+
+    async def get_user_by_telegram_id(self, telegram_id: int) -> User | None:
+        """Fetch a user by their Telegram ID."""
+        stmt = select(User).where(User.telegram_id == telegram_id)
+        return await self._session.scalar(stmt)
+
+    async def deduct_image_credit(self, telegram_id: int) -> bool:
+        """Deduct one image credit if the user has enough. Returns True if successful."""
+        user = await self.get_user_by_telegram_id(telegram_id)
+        if user and user.image_credits > 0:
+            user.image_credits -= 1
+            await self._session.commit()
+            return True
+        return False
+
+    async def upgrade_to_vip(self, telegram_id: int, add_credits: int, expire_date: datetime | None = None) -> bool:
+        """Upgrade a user to VIP status and add credits."""
+        user = await self.get_user_by_telegram_id(telegram_id)
+        if user:
+            user.is_vip = True
+            user.image_credits += add_credits
+            if expire_date:
+                user.vip_expire_date = expire_date
+            await self._session.commit()
+            return True
+        return False
