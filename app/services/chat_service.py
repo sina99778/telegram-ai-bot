@@ -39,8 +39,8 @@ class ChatService:
         
         # 2. Economy & Model Routing
         use_pro_model = user.is_vip
-        # EXACT MODEL STRINGS FOR GEMINI 3.1:
-        target_model_str = "gemini-3.1-pro" if use_pro_model else "gemini-3.1-flash"
+        # EXACT MODEL STRINGS ACCORDING TO GOOGLE API DOCS:
+        target_model_str = "gemini-3.1-pro-preview" if use_pro_model else "gemini-2.5-flash"
 
         # Apply Economy Pricing
         if use_pro_model:
