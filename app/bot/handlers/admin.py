@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
+import math
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
@@ -176,51 +177,88 @@ async def cmd_broadcast(message: Message, command: CommandObject, chat_service: 
         parse_mode="HTML"
     )
 
-@admin_router.message(Command("user"))
-async def admin_manage_user(message: Message, command: CommandObject, chat_service: ChatService) -> None:
-    if not command.args:
-        await message.answer("⚠️ Usage: `/user <Telegram_ID>`", parse_mode="Markdown")
-        return
-        
-    try:
-        target_id = int(command.args)
-    except ValueError:
-        await message.answer("⚠️ ID must be a number.")
-        return
-        
-    target_user = await chat_service._repo.get_user_by_telegram_id(target_id)
-    if not target_user:
-        await message.answer("❌ User not found in database.")
-        return
+async def show_users_page(message_or_callback, chat_service: ChatService, page: int):
+    """Helper function to generate and send/edit the paginated users list."""
+    limit = 8 # Users per page
+    offset = (page - 1) * limit
+    
+    total_users = await chat_service._repo.get_total_users_count()
+    total_pages = math.ceil(total_users / limit) if total_users > 0 else 1
+    
+    users = await chat_service._repo.get_users_paginated(limit, offset)
+    
+    text = f"👨💻 <b>Admin Control Panel</b>\n\n👥 <b>Total Users:</b> {total_users}\n\n<i>Click on a user to manage them:</i>"
+    from app.bot.keyboards.inline import get_users_list_keyboard
+    kb = get_users_list_keyboard(users, page, total_pages)
+    
+    if isinstance(message_or_callback, CallbackQuery):
+        await message_or_callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    else:
+        await message_or_callback.answer(text, reply_markup=kb, parse_mode="HTML")
+
+@admin_router.message(Command("users"))
+async def cmd_users_list(message: Message, chat_service: ChatService):
+    await show_users_page(message, chat_service, page=1)
+
+@admin_router.callback_query(F.data.startswith("adm_page_"))
+async def cq_admin_page(callback: CallbackQuery, chat_service: ChatService):
+    page = int(callback.data.split("_")[2])
+    await show_users_page(callback, chat_service, page)
+    await callback.answer()
+
+@admin_router.callback_query(F.data.startswith("adm_u_"))
+async def cq_admin_user_detail(callback: CallbackQuery, chat_service: ChatService):
+    target_id = int(callback.data.split("_")[2])
+    # Extract current page from previous message's inline keyboard if possible, default to 1
+    current_page = 1 
+    if callback.message.reply_markup and callback.message.reply_markup.inline_keyboard:
+        for row in callback.message.reply_markup.inline_keyboard:
+            for btn in row:
+                if btn.callback_data and btn.callback_data.startswith("adm_page_"):
+                    # Quick hack to remember which page we were on
+                    parts = btn.callback_data.split("_")
+                    if len(parts) > 2:
+                        try:
+                            if "Next" in btn.text:
+                                current_page = int(parts[2]) - 1
+                            elif "Prev" in btn.text:
+                                current_page = int(parts[2]) + 1
+                            else:
+                                current_page = int(parts[2])
+                        except ValueError:
+                            pass
+                        
+    user = await chat_service._repo.get_user_by_telegram_id(target_id)
+    if not user:
+        return await callback.answer("User not found.", show_alert=True)
         
     text = (
-        f"👨💻 <b>Admin User Panel</b>\n\n"
-        f"<b>ID:</b> <code>{target_user.telegram_id}</code>\n"
-        f"<b>Name:</b> {target_user.first_name}\n"
-        f"<b>VIP Status:</b> {'Yes 👑' if target_user.is_vip else 'No'}\n"
-        f"<b>Banned:</b> {'Yes 🚫' if target_user.is_banned else 'No'}\n"
-        f"<b>Normal Credits:</b> {target_user.normal_credits}\n"
-        f"<b>Premium Credits:</b> {target_user.premium_credits}\n"
-        f"<b>Total Invites:</b> {target_user.total_invites}\n"
+        f"👤 <b>Managing User</b>\n\n"
+        f"<b>ID:</b> <code>{user.telegram_id}</code>\n"
+        f"<b>Name:</b> {user.first_name}\n"
+        f"<b>VIP Status:</b> {'Yes 👑' if user.is_vip else 'No'}\n"
+        f"<b>Banned:</b> {'Yes 🚫' if user.is_banned else 'No'}\n"
+        f"<b>Normal Credits:</b> {user.normal_credits}\n"
+        f"<b>Premium Credits:</b> {user.premium_credits}\n"
+        f"<b>Total Invites:</b> {user.total_invites}\n"
     )
     
     from app.bot.keyboards.inline import get_admin_user_keyboard
-    await message.answer(
+    await callback.message.edit_text(
         text, 
-        reply_markup=get_admin_user_keyboard(target_user.telegram_id, target_user.is_vip, target_user.is_banned),
+        reply_markup=get_admin_user_keyboard(user.telegram_id, user.is_vip, user.is_banned, current_page),
         parse_mode="HTML"
     )
 
 @admin_router.callback_query(F.data.startswith("adm_"))
-async def admin_callbacks(callback: CallbackQuery, chat_service: ChatService) -> None:
-    parts = callback.data.split("_")
-    if len(parts) < 3: return
-    action, target_id_str = parts[1], parts[2]
-    
-    try:
-        target_id = int(target_id_str)
-    except ValueError:
+async def cq_admin_actions(callback: CallbackQuery, chat_service: ChatService):
+    # Ignore the previously handled prefixes
+    if callback.data.startswith("adm_page_") or callback.data.startswith("adm_u_"):
         return
+        
+    parts = callback.data.split("_")
+    if len(parts) < 4: return
+    action, target_id, current_page = parts[1], int(parts[2]), int(parts[3])
     
     user = await chat_service._repo.get_user_by_telegram_id(target_id)
     if not user:
@@ -241,24 +279,8 @@ async def admin_callbacks(callback: CallbackQuery, chat_service: ChatService) ->
     await chat_service._session.commit()
     await callback.answer(msg, show_alert=True)
     
-    # Keep text but update keyboard explicitly relying on the edited DB user instance
+    # Refresh the detailed view keyboard
     from app.bot.keyboards.inline import get_admin_user_keyboard
-    text = (
-        f"👨💻 <b>Admin User Panel</b>\n\n"
-        f"<b>ID:</b> <code>{user.telegram_id}</code>\n"
-        f"<b>Name:</b> {user.first_name}\n"
-        f"<b>VIP Status:</b> {'Yes 👑' if user.is_vip else 'No'}\n"
-        f"<b>Banned:</b> {'Yes 🚫' if user.is_banned else 'No'}\n"
-        f"<b>Normal Credits:</b> {user.normal_credits}\n"
-        f"<b>Premium Credits:</b> {user.premium_credits}\n"
-        f"<b>Total Invites:</b> {user.total_invites}\n"
+    await callback.message.edit_reply_markup(
+        reply_markup=get_admin_user_keyboard(user.telegram_id, user.is_vip, user.is_banned, current_page)
     )
-    
-    try:
-        await callback.message.edit_text(
-            text,
-            reply_markup=get_admin_user_keyboard(user.telegram_id, user.is_vip, user.is_banned),
-            parse_mode="HTML"
-        )
-    except Exception:
-        pass

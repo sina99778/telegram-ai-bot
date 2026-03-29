@@ -1,4 +1,5 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from app.db.models import User
 
 def get_profile_keyboard(user: User) -> InlineKeyboardMarkup:
@@ -44,15 +45,43 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
-def get_admin_user_keyboard(user_id: int, is_vip: bool, is_banned: bool) -> InlineKeyboardMarkup:
+def get_users_list_keyboard(users: list, current_page: int, total_pages: int) -> InlineKeyboardMarkup:
+    """Builds a paginated inline keyboard of users."""
+    builder = InlineKeyboardBuilder()
+    
+    for u in users:
+        # Show a crown if VIP, and ban icon if banned
+        status = "👑" if u.is_vip else ("🚫" if u.is_banned else "👤")
+        name = u.first_name if u.first_name else "User"
+        text = f"{status} {name} ({u.telegram_id})"
+        builder.row(InlineKeyboardButton(text=text, callback_data=f"adm_u_{u.telegram_id}"))
+        
+    # Pagination Row
+    nav_row = []
+    if current_page > 1:
+        nav_row.append(InlineKeyboardButton(text="⬅️ Prev", callback_data=f"adm_page_{current_page - 1}"))
+        
+    nav_row.append(InlineKeyboardButton(text=f"📄 {current_page}/{total_pages}", callback_data="ignore"))
+    
+    if current_page < total_pages:
+        nav_row.append(InlineKeyboardButton(text="Next ➡️", callback_data=f"adm_page_{current_page + 1}"))
+        
+    if nav_row:
+        builder.row(*nav_row)
+        
+    return builder.as_markup()
+
+def get_admin_user_keyboard(user_id: int, is_vip: bool, is_banned: bool, current_page: int = 1) -> InlineKeyboardMarkup:
+    """Updated user detail keyboard with a Back to List button."""
     vip_text = "❌ Remove VIP" if is_vip else "👑 Make VIP"
     ban_text = "✅ Unban User" if is_banned else "🚫 Ban User"
     
     keyboard = [
-        [InlineKeyboardButton(text="➕ Add 50 Premium Credits", callback_data=f"adm_cred_{user_id}")],
+        [InlineKeyboardButton(text="➕ Add 50 Premium Credits", callback_data=f"adm_cred_{user_id}_{current_page}")],
         [
-            InlineKeyboardButton(text=vip_text, callback_data=f"adm_vip_{user_id}"),
-            InlineKeyboardButton(text=ban_text, callback_data=f"adm_ban_{user_id}")
-        ]
+            InlineKeyboardButton(text=vip_text, callback_data=f"adm_vip_{user_id}_{current_page}"),
+            InlineKeyboardButton(text=ban_text, callback_data=f"adm_ban_{user_id}_{current_page}")
+        ],
+        [InlineKeyboardButton(text="🔙 Back to Users List", callback_data=f"adm_page_{current_page}")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

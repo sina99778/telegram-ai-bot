@@ -329,6 +329,18 @@ class ChatRepository:
             return True
         return False
 
+    async def get_total_users_count(self) -> int:
+        """Returns the total number of registered users."""
+        result = await self._session.execute(select(func.count(User.id)))
+        return result.scalar() or 0
+
+    async def get_users_paginated(self, limit: int = 10, offset: int = 0) -> list[User]:
+        """Fetches a paginated list of users ordered by newest first."""
+        result = await self._session.execute(
+            select(User).order_by(User.created_at.desc()).limit(limit).offset(offset)
+        )
+        return list(result.scalars().all())
+
     async def get_all_users(self) -> list[User]:
         """Fetch all users from the database for broadcasting."""
         stmt = select(User)
