@@ -39,14 +39,14 @@ class ChatService:
         
         # 2. Economy & Model Routing
         use_pro_model = user.is_vip
-        # FIX: Use the actual API strings required by Google's GenAI SDK
-        target_model_str = "gemini-1.5-pro" if use_pro_model else "gemini-1.5-flash"
+        # EXACT MODEL STRINGS FOR GEMINI 3.1:
+        target_model_str = "gemini-3.1-pro" if use_pro_model else "gemini-3.1-flash"
 
         # Apply Economy Pricing
         if use_pro_model:
             cost = 7
             if user.premium_credits < cost:
-                return f"⚠️ <b>Not enough credits!</b>\n\nPro AI requires {cost} credits per message. You have {user.premium_credits} credits left. Please recharge."
+                return f"⚠️ <b>Not enough credits!</b>\n\nGemini 3.1 Pro requires {cost} credits per message. You have {user.premium_credits} credits left. Please recharge."
             user.premium_credits -= cost
         else:
             cost = 1
