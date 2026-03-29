@@ -146,7 +146,7 @@ class GeminiClient:
 
         try:
             result = await self._client.aio.models.generate_images(
-                model='gemini-3.1-flash-image-preview',
+                model='imagen-4.0-generate-001',
                 prompt=prompt,
                 config=types.GenerateImagesConfig(
                     number_of_images=1,
