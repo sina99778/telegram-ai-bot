@@ -30,23 +30,36 @@ class ChatService:
         media_bytes: bytes | None = None,
         mime_type: str | None = None,
     ) -> str:
+        # 1. Ensure daily credits & get user
+        user = await self._repo.ensure_daily_credits(telegram_id)
+        if not user:
+            user = await self._repo.get_or_create_user(telegram_id, username, first_name)
 
-        user = await self._repo.get_or_create_user(telegram_id=telegram_id, username=username, first_name=first_name)
+        # 2. Model Routing & Credit Check
+        use_pro_model = user.is_vip
+        target_model = "gemini-3.1-pro" if use_pro_model else "gemini-2.5-flash"
+
+        if use_pro_model:
+            if user.premium_credits <= 0:
+                return "⚠️ <b>Out of Premium Credits!</b>\n\nYou have exhausted your VIP credits. Please use the referral system to earn more, or wait for the daily reset."
+            user.premium_credits -= 1
+        else:
+            if user.normal_credits <= 0:
+                return "⚠️ <b>Out of Normal Credits!</b>\n\nYou have used your 50 free messages for today. Please upgrade to VIP or wait until tomorrow."
+            user.normal_credits -= 1
+
+        await self._session.commit()
+
+        # 3. Standard DB Logging & Generation
         conversation = await self._repo.get_or_create_active_conversation(user_id=user.id)
-
-        db_content = text
-        if media_bytes:
-            db_content = f"[Attached Media: {mime_type}]\n{text}"
-
+        db_content = f"[Attached Media: {mime_type}]\n{text}" if media_bytes else text
         await self._repo.add_message(conversation_id=conversation.id, role="user", content=db_content)
 
         history = await self._repo.get_conversation_history(conversation_id=conversation.id)
-        
         if history and history[-1].role == "user":
             history = history[:-1]
 
-        system_prompt: str = self._builder.get_system_instruction()
-
+        system_prompt = self._builder.get_system_instruction()
         messages = self._builder.build_messages(
             system_prompt=system_prompt,
             history=history,
@@ -56,7 +69,7 @@ class ChatService:
         )
 
         try:
-            ai_response_text: str = await self._ai.generate_response(messages)
+            ai_response_text = await self._ai.generate_response(messages, override_model=target_model)
         except AIException:
             logger.error("AI service unavailable for user %d", telegram_id)
             return _AI_ERROR_REPLY
@@ -83,3 +96,24 @@ class ChatService:
 
     async def get_bot_stats(self) -> dict[str, int]:
         return await self._repo.get_bot_stats()
+
+    async def generate_image_for_user(self, telegram_id: int, prompt: str) -> bytes | str:
+        """Handles image generation request, deducting premium credits."""
+        user = await self._repo.ensure_daily_credits(telegram_id)
+        if not user:
+            return "User not found."
+
+        if user.premium_credits <= 0:
+            return "⚠️ <b>Not enough Premium Credits!</b>\n\nImage generation requires Premium Credits. Please upgrade to VIP or invite friends."
+
+        user.premium_credits -= 1
+        await self._session.commit()
+
+        image_bytes = await self._ai.generate_image(prompt)
+        if not image_bytes:
+            # Refund if failed
+            user.premium_credits += 1
+            await self._session.commit()
+            return "⚠️ <b>Generation Failed.</b>\n\nThe AI couldn't generate an image for this prompt. Your credit has been refunded."
+
+        return image_bytes

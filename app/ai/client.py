@@ -105,95 +105,56 @@ class GeminiClient:
     def __init__(self) -> None:
         # Initialise the genai client with the API key from settings.
         self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self._model: str = settings.GEMINI_MODEL
+        self._default_model: str = settings.GEMINI_MODEL
         logger.info(
             "GeminiClient initialised  ·  model=%s",
-            self._model,
+            self._default_model,
         )
 
     # ── public API ───────────────────────────────
 
-    async def generate_response(self, messages: list[dict[str, Any]]) -> str:
-        """Send *messages* to the Gemini model and return the text response.
-
-        Parameters
-        ----------
-        messages:
-            A list of message dicts compatible with the GenAI
-            ``contents`` format, e.g.::
-
-                [{"role": "user", "parts": [{"text": "Hi"}]}]
-
-        Returns
-        -------
-        str
-            The model's text reply.
-
-        Raises
-        ------
-        AIException
-            If the request fails after all retry attempts.
-        """
-        return await self._call_with_retries(messages)
-
-    # ── internal retry wrapper ───────────────────
+    async def generate_response(self, messages: list[types.Content], override_model: str | None = None) -> str:
+        model_to_use = override_model or self._default_model
+        return await self._call_with_retries(messages, model_to_use)
 
     @retry(
-        # Retry up to 3 attempts (initial call + 2 retries)
         stop=stop_after_attempt(3),
-        # Exponential back-off: 1 s → 2 s → 4 s (capped)
         wait=wait_exponential(multiplier=1, min=1, max=10),
-        # Only retry our sentinel exception
         retry=retry_if_exception_type(_RetryableAIError),
-        # Log each retry at WARNING level
         before_sleep=before_sleep_log(logger, logging.WARNING),
-        # Don't re-raise RetryError – we handle it below
         reraise=False,
     )
-    async def _call_with_retries(self, messages: list[dict[str, Any]]) -> str:
-        """Execute the actual API call, raising ``_RetryableAIError`` for
-        transient failures so that tenacity handles the back-off logic.
-        """
+    async def _call_with_retries(self, messages: list[types.Content], model: str) -> str:
         try:
-            logger.info(
-                "Calling Gemini API  ·  model=%s  ·  message_count=%d",
-                self._model,
-                len(messages),
-            )
-
-            # ── Async call via the official SDK ──
             response = await self._client.aio.models.generate_content(
-                model=self._model,
+                model=model,
                 contents=messages,
             )
-
-            # Extract the text from the response
-            text: str = response.text or ""
-
-            logger.info(
-                "Gemini API responded  ·  chars=%d",
-                len(text),
-            )
-            return text
-
+            return response.text or ""
         except Exception as exc:
-            # Decide whether this error is worth retrying
             if _is_retryable(exc):
-                logger.warning(
-                    "Retryable error from Gemini API: %s",
-                    type(exc).__name__,
-                )
                 raise _RetryableAIError(str(exc)) from exc
+            logger.error("Non-retryable API error: %s", type(exc).__name__, exc_info=True)
+            raise AIException("AI request failed. Please try again later.") from None
 
-            # Non-retryable → wrap immediately so the key never leaks
-            logger.error(
-                "Non-retryable Gemini API error: %s",
-                type(exc).__name__,
+    async def generate_image(self, prompt: str) -> str | None:
+        """Generates an image using Nano Banana 2 (Gemini Imagen 3) and returns the bytes."""
+        try:
+            result = await self._client.aio.models.generate_images(
+                model='imagen-3.0-generate-001',
+                prompt=prompt,
+                config=types.GenerateImagesConfig(
+                    number_of_images=1,
+                    output_mime_type="image/jpeg",
+                    aspect_ratio="1:1"
+                )
             )
-            raise AIException(
-                f"AI request failed ({type(exc).__name__}). "
-                "Please try again later."
-            ) from None  # 'from None' strips the original traceback
+            for generated_image in result.generated_images:
+                return generated_image.image.image_bytes
+            return None
+        except Exception as exc:
+            logger.error("Image generation failed: %s", exc, exc_info=True)
+            return None
 
     # Override __del__ isn't needed – the genai client manages its own
     # resources, but we add a graceful shutdown hook for completeness.
