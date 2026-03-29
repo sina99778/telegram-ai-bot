@@ -8,14 +8,17 @@ from app.bot.handlers.admin import admin_router
 from app.bot.handlers.menu import menu_router
 from app.bot.handlers.callbacks import callback_router
 from app.bot.middlewares.db import DbSessionMiddleware
+from app.bot.middlewares.forced_join import CheckUserStatusMiddleware
 
 def get_dispatcher() -> Dispatcher:
     dp = Dispatcher()
 
     dp.update.outer_middleware(DbSessionMiddleware())
+    dp.message.outer_middleware(CheckUserStatusMiddleware())
 
     # Order matters! Specific routers first, general catch-all (chat_router) last.
     dp.include_router(base_router)
+
     dp.include_router(admin_router)
     dp.include_router(menu_router)      # Intercepts menu button texts
     dp.include_router(callback_router)  # Handles inline button clicks

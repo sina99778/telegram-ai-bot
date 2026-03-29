@@ -12,9 +12,18 @@ class User(Base, TimestampMixin):
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     
-    # Subscription fields
+    # VIP & Ban
     is_vip: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    image_credits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     vip_expire_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Credits System
+    normal_credits: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
+    premium_credits: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    last_credit_reset: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Referral System
+    referral_code: Mapped[str | None] = mapped_column(String(50), unique=True, index=True, nullable=True)
+    referred_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
