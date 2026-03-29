@@ -126,6 +126,29 @@ async def handle_document_message(message: Message, chat_service: ChatService) -
         logger.error("Error processing document: %s", e, exc_info=True)
         await message.answer("⚠️ Sorry, an error occurred while processing your file.", parse_mode=None)
 
+@chat_router.message(Command("stats"))
+async def cmd_my_stats(message: Message, chat_service: ChatService) -> None:
+    """Shows user personal statistics and usage."""
+    if message.from_user is None:
+        return
+        
+    user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        return
+        
+    join_date = user.created_at.strftime('%Y-%m-%d') if user.created_at else "Unknown"
+    
+    text = (
+        "📊 <b>Your Personal Stats</b>\n\n"
+        f"🗓 <b>Joined:</b> {join_date}\n"
+        f"💬 <b>Normal Credits:</b> {user.normal_credits}\n"
+        f"🪙 <b>Premium Credits:</b> {user.premium_credits}\n"
+        f"🔗 <b>Referred By:</b> <code>{user.referred_by or 'None'}</code>\n\n"
+        f"💡 <i>Tip: Normal credits reset automatically every night!</i>"
+    )
+    
+    await message.answer(text, parse_mode="HTML")
+
 @chat_router.message(F.voice)
 async def handle_voice_message(message: Message, chat_service: ChatService) -> None:
     """Handle Telegram voice notes."""
