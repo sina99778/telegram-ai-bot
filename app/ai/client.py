@@ -138,34 +138,29 @@ class GeminiClient:
             raise AIException("AI request failed. Please try again later.") from None
 
     async def generate_image(self, prompt: str) -> bytes | str:
-        """Bulletproof Image Generation bypassing Cloudflare."""
-        import aiohttp
-        import urllib.parse
+        """Generates an image using the official Google GenAI SDK (Imagen 4) on a paid account."""
+        from google.genai import types
         import logging
         
         logger = logging.getLogger(__name__)
 
         try:
-            encoded_prompt = urllib.parse.quote(prompt)
-            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
-            
-            # Masking the server as a standard Chrome browser
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
-            
-            async with aiohttp.ClientSession(headers=headers) as session:
-                # 25 second timeout to prevent hanging
-                async with session.get(url, timeout=25) as response:
-                    if response.status == 200:
-                        return await response.read()
-                    
-                    error_text = await response.text()
-                    return f"API Error {response.status}: {error_text[:100]}"
-                    
+            result = await self._client.aio.models.generate_images(
+                model='imagen-4.0-generate-001',
+                prompt=prompt,
+                config=types.GenerateImagesConfig(
+                    number_of_images=1,
+                    output_mime_type="image/jpeg",
+                    aspect_ratio="1:1"
+                )
+            )
+            for generated_image in result.generated_images:
+                if generated_image.image and generated_image.image.image_bytes:
+                    return generated_image.image.image_bytes
+            return "Error: No image data returned from Google."
         except Exception as exc:
-            logger.error("Image fetch failed: %s", exc, exc_info=True)
-            return f"Internal Server Error: {str(exc)}"
+            logger.error("Image generation failed: %s", exc, exc_info=True)
+            return f"API Error: {str(exc)}"
 
     # Override __del__ isn't needed – the genai client manages its own
     # resources, but we add a graceful shutdown hook for completeness.
