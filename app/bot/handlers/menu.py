@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 
 from app.bot.keyboards.inline import get_profile_keyboard
 from app.services.chat_service import ChatService
@@ -27,31 +27,44 @@ async def menu_invite(message: Message) -> None:
 
 @menu_router.message(F.text == "👤 My Profile")
 async def menu_profile(message: Message, chat_service: ChatService) -> None:
-    if message.from_user is None:
-        return
+    if message.from_user is None: return
         
-    # Ensure credits are updated before showing profile
     user = await chat_service._repo.ensure_daily_credits(message.from_user.id)
-    if not user:
-        await message.answer("User profile not found. Please type /start first.")
-        return
+    if not user: return # Should not happen
 
     plan_name = "👑 VIP Premium" if user.is_vip else "🆓 Free Tier"
-    expire_text = f"\n📅 <b>Expires:</b> {user.vip_expire_date.strftime('%Y-%m-%d')}" if user.vip_expire_date else ""
-
+    
     text = (
         f"👤 <b>User Profile</b>\n\n"
-        f"<b>Name:</b> {user.first_name}\n"
-        f"<b>ID:</b> <code>{user.telegram_id}</code>\n\n"
-        f"🏷️ <b>Current Plan:</b> {plan_name}{expire_text}\n"
-        f"💬 <b>Normal Credits:</b> {user.normal_credits} <i>(Resets Daily)</i>\n"
-        f"🪙 <b>Premium Credits:</b> {user.premium_credits} <i>(Images & Pro AI)</i>\n\n"
+        f"Name: {user.first_name}\n\n"
+        f"🏷️ Current Plan: {plan_name}\n"
+        f"💬 Normal Credits: {user.normal_credits} <i>(Free Daily)</i>\n"
+        f"🪙 Premium Credits: {user.premium_credits} <i>(Images / Pro Chat)</i>\n\n"
+        f"⚙️ Preferred Text Model:\n<b>{user.preferred_text_model.upper()}</b>"
     )
     
-    if not user.is_vip:
-        text += f"<i>Upgrade to VIP to access unlimited features!</i>"
+    # Pass user vip status and preferred model to get dynamic keyboard
+    await message.answer(text, reply_markup=get_profile_keyboard(user.is_vip, user.preferred_text_model), parse_mode="HTML")
 
-    await message.answer(text, reply_markup=get_profile_keyboard(), parse_mode="HTML")
+# Handle the model switch callback
+@menu_router.callback_query(F.data == "switch_text_model")
+async def callback_switch_model(callback: CallbackQuery, chat_service: ChatService) -> None:
+    """Toggles user's preferred model between Flash and Pro."""
+    user = await chat_service._repo.get_user_by_telegram_id(callback.from_user.id)
+    if not user: return
+
+    # Toggle logic
+    new_model = 'pro' if user.preferred_text_model == 'flash' else 'flash'
+    user.preferred_text_model = new_model
+    await chat_service._session.commit()
+    
+    text = f"✅ Your preferred text model is now set to <b>{new_model.upper()}</b>."
+    
+    # Answer callback so it doesn't spin
+    await callback.answer(text, show_alert=True)
+    
+    # Optionally, update the message to reflect the change visually
+    await callback.message.edit_reply_markup(reply_markup=get_profile_keyboard(user.is_vip, new_model))
 
 @menu_router.message(F.text == "👑 VIP Premium")
 async def menu_vip(message: Message) -> None:

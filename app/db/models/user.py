@@ -22,6 +22,9 @@ class User(Base, TimestampMixin):
     premium_credits: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     last_credit_reset: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # NEW FIELD: Stores user's preferred model ('flash' or 'pro')
+    preferred_text_model: Mapped[str] = mapped_column(String, default='flash')
+
     # Referral System
     referral_code: Mapped[str | None] = mapped_column(String(50), unique=True, index=True, nullable=True)
     referred_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

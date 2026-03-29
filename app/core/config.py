@@ -28,7 +28,10 @@ class Settings(BaseSettings):
 
     # ── Google Gemini AI ──────────────────────
     GEMINI_API_KEY: str
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    # Default/Free model
+    GEMINI_MODEL_NORMAL: str = "gemini-2.5-flash" 
+    # Latest/Paid model for VIP/switching
+    GEMINI_MODEL_PRO: str = "gemini-3.1-pro"
     SYSTEM_PROMPT: str = "You are a helpful AI assistant."
 
     # ── PostgreSQL ────────────────────────────

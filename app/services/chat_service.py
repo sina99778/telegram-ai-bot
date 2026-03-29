@@ -30,55 +30,83 @@ class ChatService:
         media_bytes: bytes | None = None,
         mime_type: str | None = None,
     ) -> str:
-        # 1. Ensure daily credits & get user
+        """Handles standard chat messages, enforcing bot economy (Pro vs Flash pricing)."""
+        from app.core.config import settings
+        # 1. Ensure credits & get user preference
         user = await self._repo.ensure_daily_credits(telegram_id)
         if not user:
             user = await self._repo.get_or_create_user(telegram_id, username, first_name)
-
-        # 2. Model Routing & Credit Check
-        use_pro_model = user.is_vip
-        target_model = "gemini-3.1-pro" if use_pro_model else "gemini-2.5-flash"
-
-        # Apply new Economy Pricing
-        if use_pro_model:
-            cost = 7
-            if user.premium_credits < cost:
-                return f"⚠️ <b>Not enough credits!</b>\n\nGemini 3.1 Pro requires {cost} credits per message. You have {user.premium_credits} credits left. Please recharge."
-            user.premium_credits -= cost
-        else:
-            cost = 1
-            if user.normal_credits >= cost:
-                user.normal_credits -= cost
-            elif user.premium_credits >= cost:
-                # Fallback to premium if normal is empty
-                user.premium_credits -= cost
+        
+        # 2. Economy & Model Routing
+        # Cost definitions (can be moved to config later if needed)
+        PRO_COST_PREMIUM = 7
+        FLASH_COST_NORMAL = 1
+        
+        target_model_str: str = ""
+        final_cost: int = 0
+        deduct_from_premium: bool = False
+        
+        # Scenario A: User prefers Pro Model
+        if user.preferred_text_model == 'pro':
+            target_model_str = settings.GEMINI_MODEL_PRO
+            final_cost = PRO_COST_PREMIUM
+            deduct_from_premium = True
+            
+            # Check premium credits
+            if user.premium_credits < PRO_COST_PREMIUM:
+                return (
+                    f"⚠️ <b>Not enough Premium Credits!</b>\n\n"
+                    f"You have selected <b>Gemini 3.1 Pro</b>, which costs {PRO_COST_PREMIUM} Premium Credits per message.\n"
+                    f"You have {user.premium_credits} Premium Credits.\n\n"
+                    f"Please switch back to the 'Flash' model in /profile, purchase credits, or invite friends."
+                )
+        
+        # Scenario B: User prefers Normal Flash Model
+        else: 
+            target_model_str = settings.GEMINI_MODEL_NORMAL
+            final_cost = FLASH_COST_NORMAL
+            
+            # Use Normal credits if available
+            if user.normal_credits >= FLASH_COST_NORMAL:
+                deduct_from_premium = False
+            # Use Premium credits as fallback if user has them
+            elif user.premium_credits >= FLASH_COST_NORMAL:
+                deduct_from_premium = True
             else:
-                return "⚠️ <b>Out of Credits!</b>\n\nYou have used your daily limit. Please invite friends or purchase VIP to continue."
+                return (
+                    "⚠️ <b>Out of Daily Credits!</b>\n\n"
+                    "Please wait for the daily reset, purchase VIP, or invite friends to earn credits."
+                )
 
+        # 3. Deduct Credits and Commit
+        if deduct_from_premium:
+            user.premium_credits -= final_cost
+        else:
+            user.normal_credits -= final_cost
+        
         await self._session.commit()
 
-        # 3. Standard DB Logging & Generation
+        # 4. Standard Message handling (keep repo logging)
         conversation = await self._repo.get_or_create_active_conversation(user_id=user.id)
         db_content = f"[Attached Media: {mime_type}]\n{text}" if media_bytes else text
         await self._repo.add_message(conversation_id=conversation.id, role="user", content=db_content)
-
-        history = await self._repo.get_conversation_history(conversation_id=conversation.id)
-        if history and history[-1].role == "user":
-            history = history[:-1]
-
+        
+        # AI Generation Call (Pass target model explicitly)
         system_prompt = self._builder.get_system_instruction()
+        history = await self._repo.get_conversation_history(conversation_id=conversation.id)
+        if history and history[-1].role == "user": 
+            history = history[:-1] # Remove last user message from history for ai_builder
+
         messages = self._builder.build_messages(
-            system_prompt=system_prompt,
-            history=history,
-            current_user_message=text,
-            media_bytes=media_bytes,
-            mime_type=mime_type,
+            system_prompt=system_prompt, history=history, current_user_message=text,
+            media_bytes=media_bytes, mime_type=mime_type,
         )
 
         try:
-            ai_response_text = await self._ai.generate_response(messages, override_model=target_model)
+            # IMPORTANT: Pass the determined model string
+            ai_response_text = await self._ai.generate_response(messages, override_model=target_model_str)
         except AIException:
-            logger.error("AI service unavailable for user %d", telegram_id)
+            # Handle AI fail (consider refunding credits here if important)
             return _AI_ERROR_REPLY
 
         await self._repo.add_message(conversation_id=conversation.id, role="model", content=ai_response_text)
