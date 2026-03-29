@@ -145,18 +145,18 @@ class GeminiClient:
         logger = logging.getLogger(__name__)
 
         try:
-            result = await self._client.aio.models.generate_images(
-                model='imagen-4.0-generate-001',
-                prompt=prompt,
-                config=types.GenerateImagesConfig(
-                    number_of_images=1,
-                    output_mime_type="image/jpeg",
-                    aspect_ratio="1:1"
-                )
+            target_model = 'gemini-3-pro-image-preview'
+            result = await self._client.aio.models.generate_content(
+                model=target_model,
+                contents=prompt,
             )
-            for generated_image in result.generated_images:
-                if generated_image.image and generated_image.image.image_bytes:
-                    return generated_image.image.image_bytes
+            
+            for candidate in result.candidates:
+                if candidate.content and candidate.content.parts:
+                    for part in candidate.content.parts:
+                        if part.inline_data and part.inline_data.data:
+                            return part.inline_data.data
+            
             return "Error: No image data returned from Google."
         except Exception as exc:
             logger.error("Image generation failed: %s", exc, exc_info=True)
