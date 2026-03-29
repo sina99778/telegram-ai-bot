@@ -25,6 +25,16 @@ def get_cancel_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
+def get_vip_plans_keyboard() -> InlineKeyboardMarkup:
+    """Returns the keyboard with the 3 new premium plans."""
+    keyboard = [
+        [InlineKeyboardButton(text="💳 Starter Pack ($1.99)", callback_data="buy_plan_starter")],
+        [InlineKeyboardButton(text="🔥 Popular Pack ($6.99)", callback_data="buy_plan_popular")],
+        [InlineKeyboardButton(text="👑 Pro Pack ($14.99)", callback_data="buy_plan_pro")],
+        [InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_action")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
 def get_admin_keyboard() -> InlineKeyboardMarkup:
     """Returns inline buttons for the Admin Panel."""
     return InlineKeyboardMarkup(

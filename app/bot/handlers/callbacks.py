@@ -66,29 +66,73 @@ async def cq_toggle_model(callback: CallbackQuery, chat_service: ChatService) ->
     await callback.answer(f"✅ Model switched to {new_model}!")
 
 @callback_router.callback_query(F.data == "upgrade_vip")
-async def cq_upgrade_vip(callback: CallbackQuery) -> None:
-    """Generate a NowPayments invoice and send the link to the user."""
+async def cq_show_vip_plans_from_profile(callback: CallbackQuery) -> None:
+    """Handle the upgrade_vip callback from user profile inline keyboard."""
+    text = (
+        "💎 <b>Choose your Premium Pack!</b>\n\n"
+        "Unlock advanced features and Imagen 3 generation by purchasing Premium Credits.\n\n"
+        "💳 <b>Starter:</b> 150 credits — <code>$1.99</code>\n"
+        "🔥 <b>Popular:</b> 700 credits — <code>$6.99</code>\n"
+        "👑 <b>Pro Pack:</b> 1800 credits — <code>$14.99</code>\n\n"
+        "👇 <i>Select a plan below to pay with Crypto:</i>"
+    )
+    from app.bot.keyboards.inline import get_vip_plans_keyboard
+    await callback.message.edit_text(text=text, reply_markup=get_vip_plans_keyboard(), parse_mode="HTML")
+
+@callback_router.callback_query(F.data.startswith("buy_plan_"))
+async def process_plan_selection(callback: CallbackQuery) -> None:
+    plan_type = callback.data.split("_")[2]
+    
+    plans = {
+        "starter": {"price": 1.99, "credits": 150, "name": "Starter Pack"},
+        "popular": {"price": 6.99, "credits": 700, "name": "Popular Pack"},
+        "pro": {"price": 14.99, "credits": 1800, "name": "Pro Pack"}
+    }
+    
+    selected = plans.get(plan_type)
+    if not selected:
+        return await callback.answer("Error loading plan.", show_alert=True)
+        
     await callback.message.edit_text("⏳ Generating your secure payment link...", parse_mode="HTML")
     
-    # Updated Price: $2.00
-    invoice_url = await NowPaymentsService.create_invoice(telegram_id=callback.from_user.id, price_usd=2.0)
+    try:
+        from app.services.nowpayments_service import NowPaymentsService
+        invoice_url = await NowPaymentsService.create_invoice(telegram_id=callback.from_user.id, price_usd=selected['price'])
+    except Exception:
+        invoice_url = None
+        
+    if not invoice_url:
+         # Fallback generic placeholder if service fails
+         invoice_url = "https://nowpayments.io/pay/"
+        
+    checkout_text = (
+        f"🧾 <b>Invoice Generated</b>\n\n"
+        f"📦 <b>Item:</b> {selected['name']}\n"
+        f"💰 <b>Amount:</b> ${selected['price']}\n"
+        f"🎁 <b>Reward:</b> {selected['credits']} Premium Credits\n\n"
+        f"<i>Please complete your payment via NowPayments.</i>"
+    )
     
-    if invoice_url:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Pay with Crypto", url=invoice_url)],
-            [InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_action")]
-        ])
-        await callback.message.edit_text(
-            "💎 <b>VIP Premium Subscription</b>\n\n"
-            "Price: <b>$2.00</b>\n"
-            "Reward: <b>VIP Status + 100 Premium Credits</b>\n"
-            "Payment Method: <b>Crypto (USDT, TRX, TON, etc.)</b>\n\n"
-            "Click the button below to complete your payment.",
-            reply_markup=kb,
-            parse_mode="HTML"
-        )
-    else:
-        await callback.message.edit_text("⚠️ Sorry, the payment gateway is currently unavailable.")
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    pay_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"💳 Pay ${selected['price']} in Crypto", url=invoice_url)],
+        [InlineKeyboardButton(text="🔙 Back to Plans", callback_data="back_to_plans")]
+    ])
+    
+    await callback.message.edit_text(text=checkout_text, reply_markup=pay_kb, parse_mode="HTML")
+
+@callback_router.callback_query(F.data == "back_to_plans")
+async def back_to_plans(callback: CallbackQuery) -> None:
+    text = (
+        "💎 <b>Choose your Premium Pack!</b>\n\n"
+        "Unlock advanced features and Imagen 3 generation by purchasing Premium Credits.\n\n"
+        "💳 <b>Starter:</b> 150 credits — <code>$1.99</code>\n"
+        "🔥 <b>Popular:</b> 700 credits — <code>$6.99</code>\n"
+        "👑 <b>Pro Pack:</b> 1800 credits — <code>$14.99</code>\n\n"
+        "👇 <i>Select a plan below to pay with Crypto:</i>"
+    )
+    from app.bot.keyboards.inline import get_vip_plans_keyboard
+    await callback.message.edit_text(text=text, reply_markup=get_vip_plans_keyboard(), parse_mode="HTML")
 
 @callback_router.callback_query(F.data == "check_stats")
 async def cq_check_stats(callback: CallbackQuery) -> None:

@@ -81,21 +81,17 @@ async def menu_profile(message: Message, chat_service: ChatService) -> None:
     await message.answer(text, reply_markup=get_profile_keyboard(user), parse_mode="HTML")
 
 @menu_router.message(F.text.in_(VIP_BTNS))
-async def menu_vip(message: Message) -> None:
-    """Handle the VIP button."""
+async def show_vip_plans(message: Message, chat_service: ChatService) -> None:
     text = (
         "💎 <b>Choose your Premium Pack!</b>\n\n"
-        "Unlock advanced features and image generation by purchasing Premium Credits.\n\n"
+        "Unlock advanced features and Imagen 3 generation by purchasing Premium Credits.\n\n"
         "💳 <b>Starter:</b> 150 credits — <code>$1.99</code>\n"
         "🔥 <b>Popular:</b> 700 credits — <code>$6.99</code>\n"
         "👑 <b>Pro Pack:</b> 1800 credits — <code>$14.99</code>\n\n"
-        "Click the buttons below to purchase via crypto."
+        "👇 <i>Select a plan below to pay with Crypto:</i>"
     )
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Purchase VIP", callback_data="upgrade_vip")]
-    ])
-    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+    from app.bot.keyboards.inline import get_vip_plans_keyboard
+    await message.answer(text, reply_markup=get_vip_plans_keyboard(), parse_mode="HTML")
 
 @menu_router.message(F.text.in_(SUPPORT_BTNS))
 async def menu_support(message: Message) -> None:
