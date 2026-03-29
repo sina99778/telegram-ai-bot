@@ -22,7 +22,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, status
 
 from app.bot.dispatcher import get_dispatcher
 from app.core.config import settings
-from app.db.session import engine, async_session_maker
+from app.db.session import engine, AsyncSessionLocal
 from app.db.repositories.chat_repo import ChatRepository
 from datetime import datetime, timedelta, timezone
 
@@ -146,7 +146,7 @@ async def nowpayments_webhook(request: Request) -> dict[str, str]:
     if payment_status == "finished" and order_id:
         try:
             telegram_id = int(order_id)
-            async with async_session_maker() as session:
+            async with AsyncSessionLocal() as session:
                 repo = ChatRepository(session)
                 
                 # Upgrade user for 30 days and add 500 premium credits
