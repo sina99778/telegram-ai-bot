@@ -311,3 +311,9 @@ class ChatRepository:
                 new_user.referred_by = referrer.id
                 referrer.premium_credits += 10 # Reward the referrer
                 await self._session.commit()
+
+    async def get_all_users(self) -> list[User]:
+        """Fetch all users from the database for broadcasting."""
+        stmt = select(User)
+        result = await self._session.scalars(stmt)
+        return list(result.all())

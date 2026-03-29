@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
@@ -136,3 +137,77 @@ async def cmd_set_vip(message: Message, command: CommandObject, chat_service: Ch
             await message.answer("⚠️ User not found in DB.")
     except Exception:
         await message.answer("⚠️ Invalid format. Use: /setvip <telegram_id> <days>")
+
+@admin_router.message(Command("broadcast"))
+async def cmd_broadcast(message: Message, command: CommandObject, chat_service: ChatService) -> None:
+    """Send a message to all registered users. Usage: /broadcast Hello everyone!"""
+    if not command.args:
+        await message.answer("⚠️ Please provide a message. Usage: /broadcast <message>")
+        return
+
+    users = await chat_service._repo.get_all_users()
+    if not users:
+        await message.answer("⚠️ No users found in the database.")
+        return
+
+    await message.answer(f"⏳ Starting broadcast to {len(users)} users...")
+    
+    success_count = 0
+    fail_count = 0
+    
+    for user in users:
+        try:
+            await message.bot.send_message(
+                chat_id=user.telegram_id,
+                text=f"📢 <b>Announcement</b>\n\n{command.args}",
+                parse_mode="HTML"
+            )
+            success_count += 1
+        except Exception:
+            fail_count += 1
+            
+        # Add a small delay to avoid hitting Telegram's rate limits
+        await asyncio.sleep(0.05)
+
+    await message.answer(
+        f"✅ <b>Broadcast Complete!</b>\n\n"
+        f"🟢 Successful: {success_count}\n"
+        f"🔴 Failed (blocked bot): {fail_count}",
+        parse_mode="HTML"
+    )
+
+@admin_router.message(Command("user"))
+async def cmd_user_info(message: Message, command: CommandObject, chat_service: ChatService) -> None:
+    """Get detailed info about a user. Usage: /user 123456789"""
+    if not command.args:
+        await message.answer("⚠️ Usage: /user <telegram_id>")
+        return
+
+    try:
+        target_id = int(command.args)
+        user = await chat_service._repo.get_user_by_telegram_id(target_id)
+        
+        if not user:
+            await message.answer("⚠️ User not found.")
+            return
+
+        status = "👑 VIP" if user.is_vip else "🆓 Free"
+        banned = "🔴 YES" if user.is_banned else "🟢 NO"
+        
+        text = (
+            f"👤 <b>User Information</b>\n\n"
+            f"<b>ID:</b> <code>{user.telegram_id}</code>\n"
+            f"<b>Name:</b> {user.first_name} (@{user.username or 'N/A'})\n"
+            f"<b>Status:</b> {status}\n"
+            f"<b>Banned:</b> {banned}\n\n"
+            f"💰 <b>Economy:</b>\n"
+            f"Normal Credits: {user.normal_credits}\n"
+            f"Premium Credits: {user.premium_credits}\n\n"
+            f"🔗 <b>Referral System:</b>\n"
+            f"Referred By: <code>{user.referred_by or 'None'}</code>\n"
+            f"Joined: {user.created_at.strftime('%Y-%m-%d %H:%M') if user.created_at else 'N/A'}"
+        )
+        await message.answer(text, parse_mode="HTML")
+        
+    except ValueError:
+        await message.answer("⚠️ Invalid Telegram ID. Please provide numbers only.")
