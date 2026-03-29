@@ -45,30 +45,42 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
+def get_admin_main_keyboard() -> InlineKeyboardMarkup:
+    """The main entry point for the Admin Dashboard."""
+    keyboard = [
+        [InlineKeyboardButton(text="📊 Live Statistics", callback_data="adm_main_stats")],
+        [InlineKeyboardButton(text="👥 Manage Users", callback_data="adm_page_1")],
+        [InlineKeyboardButton(text="📢 Broadcast Message", callback_data="adm_main_broadcast")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_admin_back_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Back to Dashboard", callback_data="adm_main_menu")]
+    ])
+
 def get_users_list_keyboard(users: list, current_page: int, total_pages: int) -> InlineKeyboardMarkup:
-    """Builds a paginated inline keyboard of users."""
+    """Builds a paginated inline keyboard of users with a back button."""
     builder = InlineKeyboardBuilder()
     
     for u in users:
-        # Show a crown if VIP, and ban icon if banned
         status = "👑" if u.is_vip else ("🚫" if u.is_banned else "👤")
         name = u.first_name if u.first_name else "User"
         text = f"{status} {name} ({u.telegram_id})"
         builder.row(InlineKeyboardButton(text=text, callback_data=f"adm_u_{u.telegram_id}"))
         
-    # Pagination Row
     nav_row = []
     if current_page > 1:
         nav_row.append(InlineKeyboardButton(text="⬅️ Prev", callback_data=f"adm_page_{current_page - 1}"))
-        
     nav_row.append(InlineKeyboardButton(text=f"📄 {current_page}/{total_pages}", callback_data="ignore"))
-    
     if current_page < total_pages:
         nav_row.append(InlineKeyboardButton(text="Next ➡️", callback_data=f"adm_page_{current_page + 1}"))
         
     if nav_row:
         builder.row(*nav_row)
         
+    # Add back to main admin menu button
+    builder.row(InlineKeyboardButton(text="🔙 Back to Dashboard", callback_data="adm_main_menu"))
     return builder.as_markup()
 
 def get_admin_user_keyboard(user_id: int, is_vip: bool, is_banned: bool, current_page: int = 1) -> InlineKeyboardMarkup:
