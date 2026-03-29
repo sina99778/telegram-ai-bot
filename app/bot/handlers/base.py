@@ -31,14 +31,18 @@ async def cmd_start(message: Message, command: CommandObject, chat_service: Chat
             pass
 
     # 3. Ensure daily credits
-    await chat_service._repo.ensure_daily_credits(message.from_user.id)
+    user = await chat_service._repo.ensure_daily_credits(message.from_user.id)
+    
+    # Get user language (fallback to "fa" if None for existing users)
+    user_lang = user.language if user and user.language else "fa"
 
-    # 4. Send Welcome Banner with Caption
+    # 4. Send Welcome Banner with localized text
     welcome_text = (
         f"👋 Welcome to the <b>AI Hub</b>, {message.from_user.first_name}!\n\n"
-        "I am your advanced multi-modal assistant. Choose an option from the menu below to get started, "
-        "or simply type a message to chat with me.\n\n"
-        "💡 <i>Tip: VIP members get access to Gemini 3.1 Pro and Nano Banana 2 Image Generation!</i>"
+        "I am your advanced multi-modal assistant. Choose an option from the menu below to get started."
+    ) if user_lang == "en" else (
+        f"👋 به <b>هاب هوش مصنوعی</b> خوش آمدید، {message.from_user.first_name} عزیز!\n\n"
+        "من دستیار پیشرفتهی شما هستم. برای شروع یکی از گزینههای منوی زیر را انتخاب کنید."
     )
 
     # Using a placeholder AI aesthetic image. You can replace this URL with your own banner later.
@@ -48,14 +52,14 @@ async def cmd_start(message: Message, command: CommandObject, chat_service: Chat
         await message.answer_photo(
             photo=URLInputFile(banner_url),
             caption=welcome_text,
-            reply_markup=get_main_menu(),
+            reply_markup=get_main_menu(user_lang),
             parse_mode="HTML"
         )
     except Exception:
         # Fallback to normal text if the image fails to load
         await message.answer(
             welcome_text,
-            reply_markup=get_main_menu(),
+            reply_markup=get_main_menu(user_lang),
             parse_mode="HTML"
         )
 
