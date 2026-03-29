@@ -13,24 +13,25 @@ async def cq_upgrade_vip(callback: CallbackQuery) -> None:
     """Generate a NowPayments invoice and send the link to the user."""
     await callback.message.edit_text("⏳ Generating your secure payment link...", parse_mode="HTML")
     
-    # Let's set the VIP price to $5.00 for example
-    invoice_url = await NowPaymentsService.create_invoice(telegram_id=callback.from_user.id, price_usd=5.0)
+    # Updated Price: $2.00
+    invoice_url = await NowPaymentsService.create_invoice(telegram_id=callback.from_user.id, price_usd=2.0)
     
     if invoice_url:
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Pay with Crypto (NowPayments)", url=invoice_url)],
+            [InlineKeyboardButton(text="💳 Pay with Crypto", url=invoice_url)],
             [InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_action")]
         ])
         await callback.message.edit_text(
             "💎 <b>VIP Premium Subscription</b>\n\n"
-            "Price: <b>$5.00</b>\n"
+            "Price: <b>$2.00</b>\n"
+            "Reward: <b>VIP Status + 100 Premium Credits</b>\n"
             "Payment Method: <b>Crypto (USDT, TRX, TON, etc.)</b>\n\n"
-            "Click the button below to complete your payment. Your account will be upgraded automatically within a few minutes after the transaction is confirmed.",
+            "Click the button below to complete your payment.",
             reply_markup=kb,
             parse_mode="HTML"
         )
     else:
-        await callback.message.edit_text("⚠️ Sorry, the payment gateway is currently unavailable. Please try again later.")
+        await callback.message.edit_text("⚠️ Sorry, the payment gateway is currently unavailable.")
 
 @callback_router.callback_query(F.data == "check_stats")
 async def cq_check_stats(callback: CallbackQuery) -> None:

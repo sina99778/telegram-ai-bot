@@ -39,14 +39,21 @@ class ChatService:
         use_pro_model = user.is_vip
         target_model = "gemini-3.1-pro" if use_pro_model else "gemini-2.5-flash"
 
+        # Apply new Economy Pricing
         if use_pro_model:
-            if user.premium_credits <= 0:
-                return "⚠️ <b>Out of Premium Credits!</b>\n\nYou have exhausted your VIP credits. Please use the referral system to earn more, or wait for the daily reset."
-            user.premium_credits -= 1
+            cost = 7
+            if user.premium_credits < cost:
+                return f"⚠️ <b>Not enough credits!</b>\n\nGemini 3.1 Pro requires {cost} credits per message. You have {user.premium_credits} credits left. Please recharge."
+            user.premium_credits -= cost
         else:
-            if user.normal_credits <= 0:
-                return "⚠️ <b>Out of Normal Credits!</b>\n\nYou have used your 50 free messages for today. Please upgrade to VIP or wait until tomorrow."
-            user.normal_credits -= 1
+            cost = 1
+            if user.normal_credits >= cost:
+                user.normal_credits -= cost
+            elif user.premium_credits >= cost:
+                # Fallback to premium if normal is empty
+                user.premium_credits -= cost
+            else:
+                return "⚠️ <b>Out of Credits!</b>\n\nYou have used your daily limit. Please invite friends or purchase VIP to continue."
 
         await self._session.commit()
 
@@ -103,17 +110,18 @@ class ChatService:
         if not user:
             return "User not found."
 
-        if user.premium_credits <= 0:
-            return "⚠️ <b>Not enough Premium Credits!</b>\n\nImage generation requires Premium Credits. Please upgrade to VIP or invite friends."
+        cost = 15
+        if user.premium_credits < cost:
+            return f"⚠️ <b>Not enough Premium Credits!</b>\n\nNano Banana 2 requires {cost} credits per image. You have {user.premium_credits}. Please purchase more."
 
-        user.premium_credits -= 1
+        user.premium_credits -= cost
         await self._session.commit()
 
         image_bytes = await self._ai.generate_image(prompt)
         if not image_bytes:
             # Refund if failed
-            user.premium_credits += 1
+            user.premium_credits += cost
             await self._session.commit()
-            return "⚠️ <b>Generation Failed.</b>\n\nThe AI couldn't generate an image for this prompt. Your credit has been refunded."
+            return "⚠️ <b>Generation Failed.</b>\n\nThe AI couldn't generate an image for this prompt. Your credits have been refunded."
 
         return image_bytes

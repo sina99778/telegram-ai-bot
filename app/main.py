@@ -149,11 +149,11 @@ async def nowpayments_webhook(request: Request) -> dict[str, str]:
             async with AsyncSessionLocal() as session:
                 repo = ChatRepository(session)
                 
-                # Upgrade user for 30 days and add 500 premium credits
+                # Upgrade user for 30 days and add 100 premium credits (matches $2 pricing)
                 expire_date = datetime.now(timezone.utc) + timedelta(days=30)
                 success = await repo.upgrade_to_vip(
                     telegram_id=telegram_id, 
-                    add_credits=500, 
+                    add_credits=100, 
                     expire_date=expire_date
                 )
                 
@@ -162,7 +162,7 @@ async def nowpayments_webhook(request: Request) -> dict[str, str]:
                     try:
                         await bot.send_message(
                             chat_id=telegram_id,
-                            text="🎉 <b>Payment Successful!</b>\n\nYou are now a VIP member. You received 500 Premium Credits and access to Gemini 3.1 Pro & Nano Banana 2. Enjoy!",
+                            text="🎉 <b>Payment Successful!</b>\n\nYou are now a VIP member. You received <b>100 Premium Credits</b>! Enjoy Gemini 3.1 Pro & Nano Banana 2.",
                             parse_mode="HTML"
                         )
                     except Exception as e:
