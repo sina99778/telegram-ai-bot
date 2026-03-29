@@ -143,6 +143,12 @@ class GeminiClient:
             response = await self._client.aio.models.generate_content(
                 model='gemini-2.5-flash-image',
                 contents=[prompt],
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE"],
+                    image_config=types.ImageConfig(
+                        aspect_ratio="1:1",
+                    ),
+                )
             )
             for part in response.parts:
                 if part.inline_data and part.inline_data.data:
