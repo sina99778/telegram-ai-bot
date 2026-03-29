@@ -138,11 +138,11 @@ class GeminiClient:
             raise AIException("AI request failed. Please try again later.") from None
 
     async def generate_image(self, prompt: str) -> bytes | str:
-        """Generates an image using Nano Banana 2 (Imagen 4) via AI Studio."""
-        from google.genai import types # Local import to ensure it's available
+        """Generates an image using Nano Banana 2 (Imagen 3) via Paid AI Studio Plan."""
+        from google.genai import types
         try:
             result = await self._client.aio.models.generate_images(
-                model='imagen-4.0-generate-001',
+                model='imagen-3.0-generate-001',
                 prompt=prompt,
                 config=types.GenerateImagesConfig(
                     number_of_images=1,
@@ -155,6 +155,8 @@ class GeminiClient:
                     return generated_image.image.image_bytes
             return "Error: No image data returned from Google."
         except Exception as exc:
+            import logging
+            logger = logging.getLogger(__name__)
             logger.error("Image generation failed: %s", exc, exc_info=True)
             return f"API Error: {str(exc)}"
 
