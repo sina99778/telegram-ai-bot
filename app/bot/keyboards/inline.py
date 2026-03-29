@@ -1,16 +1,18 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from app.db.models import User
 
-def get_profile_keyboard(user_is_vip: bool, current_model: str) -> InlineKeyboardMarkup:
+def get_profile_keyboard(user: User) -> InlineKeyboardMarkup:
     """Returns profile/settings keyboard with dynamic model switching buttons."""
-    # Logic to define button text based on current model preference
-    model_btn_text = "🔄 Active Model: Flash (Free)" if current_model == 'flash' else "🔄 Active Model: Pro (Paid)"
+    # Determine the current active model for the button text
+    current_model = str(user.preferred_text_model).upper() if user.preferred_text_model else "PRO"
+    toggle_text = "🔄 Active Model: Flash (Free)" if current_model == "FLASH" else "🔄 Active Model: PRO (Paid)"
     
     buttons = [
         [InlineKeyboardButton(text="💎 Purchase VIP", callback_data="upgrade_vip")],
-        [InlineKeyboardButton(text=model_btn_text, callback_data="switch_text_model")]
+        [InlineKeyboardButton(text=toggle_text, callback_data="toggle_model")]
     ]
     
-    if user_is_vip:
+    if user.is_vip:
         buttons.append([InlineKeyboardButton(text="👨‍💻 Admin Panel", callback_data="admin_stats")])
         
     return InlineKeyboardMarkup(inline_keyboard=buttons)

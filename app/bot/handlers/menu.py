@@ -36,35 +36,19 @@ async def menu_profile(message: Message, chat_service: ChatService) -> None:
     
     text = (
         f"👤 <b>User Profile</b>\n\n"
-        f"Name: {user.first_name}\n\n"
-        f"🏷️ Current Plan: {plan_name}\n"
-        f"💬 Normal Credits: {user.normal_credits} <i>(Free Daily)</i>\n"
-        f"🪙 Premium Credits: {user.premium_credits} <i>(Images / Pro Chat)</i>\n\n"
-        f"⚙️ Preferred Text Model:\n<b>{user.preferred_text_model.upper()}</b>"
+        f"<b>Name:</b> {user.first_name}\n"
+        f"<b>ID:</b> <code>{user.telegram_id}</code>\n\n"
+        f"🏷️ <b>Current Plan:</b> {plan_name}\n"
+        f"💬 <b>Normal Credits:</b> {user.normal_credits} <i>(Free Daily)</i>\n"
+        f"🪙 <b>Premium Credits:</b> {user.premium_credits} <i>(Images / Pro Chat)</i>\n\n"
+        f"⚙️ <b>Preferred Text Model:</b>\n<b>{str(user.preferred_text_model).upper() if user.preferred_text_model else 'PRO'}</b>"
     )
-    
-    # Pass user vip status and preferred model to get dynamic keyboard
-    await message.answer(text, reply_markup=get_profile_keyboard(user.is_vip, user.preferred_text_model), parse_mode="HTML")
 
-# Handle the model switch callback
-@menu_router.callback_query(F.data == "switch_text_model")
-async def callback_switch_model(callback: CallbackQuery, chat_service: ChatService) -> None:
-    """Toggles user's preferred model between Flash and Pro."""
-    user = await chat_service._repo.get_user_by_telegram_id(callback.from_user.id)
-    if not user: return
-
-    # Toggle logic
-    new_model = 'pro' if user.preferred_text_model == 'flash' else 'flash'
-    user.preferred_text_model = new_model
-    await chat_service._session.commit()
+    if not user.is_vip:
+        text += f"\n\n<i>Upgrade to VIP to access unlimited features!</i>"
     
-    text = f"✅ Your preferred text model is now set to <b>{new_model.upper()}</b>."
-    
-    # Answer callback so it doesn't spin
-    await callback.answer(text, show_alert=True)
-    
-    # Optionally, update the message to reflect the change visually
-    await callback.message.edit_reply_markup(reply_markup=get_profile_keyboard(user.is_vip, new_model))
+    # Pass user object to get dynamic keyboard
+    await message.answer(text, reply_markup=get_profile_keyboard(user), parse_mode="HTML")
 
 @menu_router.message(F.text == "👑 VIP Premium")
 async def menu_vip(message: Message) -> None:
