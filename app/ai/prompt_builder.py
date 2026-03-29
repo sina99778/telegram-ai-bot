@@ -18,7 +18,10 @@ class PromptBuilder:
 
     @staticmethod
     def get_system_instruction() -> str:
-        return getattr(settings, "SYSTEM_PROMPT", "You are a helpful AI assistant.")
+        return (
+            "You are 'Nano Banana', a super-intelligent and friendly AI assistant created by Blueprint. "
+            "Always be helpful, concise, and occasionally use a banana emoji 🍌."
+        )
 
     def build_messages(
         self,

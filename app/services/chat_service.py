@@ -44,7 +44,7 @@ class ChatService:
         use_pro_model = user.is_vip and not is_flash_preferred
         
         # EXACT MODEL STRINGS ACCORDING TO GOOGLE API DOCS:
-        target_model_str = "gemini-3.1-pro-preview" if use_pro_model else "gemini-2.5-flash"
+        target_model_str = "gemini-3.1-pro" if use_pro_model else "gemini-3.1-flash"
 
         # Apply Economy Pricing
         if use_pro_model:
