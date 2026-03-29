@@ -48,7 +48,7 @@ class ChatService:
 
         # Apply Economy Pricing
         if use_pro_model:
-            cost = 7
+            cost = 5 # CHANGED: Now 5 credits per Pro chat
             if user.premium_credits < cost:
                 return f"⚠️ <b>Not enough credits!</b>\n\nGemini 3.1 Pro requires {cost} credits per message. You have {user.premium_credits} credits left. Please recharge or switch to the Free Flash model."
             user.premium_credits -= cost
@@ -137,16 +137,26 @@ class ChatService:
         return await self._repo.get_bot_stats()
 
     async def generate_image_for_user(self, telegram_id: int, prompt: str) -> bytes | str:
-        """Handles image generation request, deducting premium credits."""
+        """Handles image generation request, deducting premium credits or special rewards."""
         user = await self._repo.ensure_daily_credits(telegram_id)
         if not user:
             return "User not found."
 
-        cost = 15
-        if user.premium_credits < cost:
-            return f"⚠️ <b>Not enough Premium Credits!</b>\n\nNano Banana 2 requires {cost} credits per image. You have {user.premium_credits}. Please purchase more."
+        cost = 10 # CHANGED: Now 10 premium credits per image
+        used_special_reward = False
 
-        user.premium_credits -= cost
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        
+        # Check Special Reward allowance first
+        if user.special_reward_images_left > 0 and user.special_reward_expire and user.special_reward_expire > now:
+            user.special_reward_images_left -= 1
+            used_special_reward = True
+        elif user.premium_credits >= cost:
+            user.premium_credits -= cost
+        else:
+             return f"⚠️ <b>Not enough Premium Credits!</b>\n\nImagen 3 requires {cost} credits per image. You have {user.premium_credits}. Please purchase more."
+
         await self._session.commit()
 
         image_result = await self._ai.generate_image(prompt)
@@ -154,8 +164,11 @@ class ChatService:
         # If the result is a string, it means an error occurred
         if isinstance(image_result, str):
             # Refund the user
-            user.premium_credits += cost
+            if used_special_reward:
+                user.special_reward_images_left += 1
+            else:
+                user.premium_credits += cost
             await self._session.commit()
-            return f"⚠️ <b>Generation Failed.</b>\n\nReason:\n<code>{image_result}</code>\n\n<i>Your {cost} credits have been refunded.</i>"
+            return f"⚠️ <b>Generation Failed.</b>\n\nReason:\n<code>{image_result}</code>\n\n<i>Your credits have been refunded.</i>"
 
         return image_result

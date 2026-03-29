@@ -29,5 +29,8 @@ class User(Base, TimestampMixin):
     # Referral System
     referral_code: Mapped[str | None] = mapped_column(String(50), unique=True, index=True, nullable=True)
     referred_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    total_invites: Mapped[int] = mapped_column(Integer, default=0)
+    special_reward_images_left: Mapped[int] = mapped_column(Integer, default=0)
+    special_reward_expire: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")

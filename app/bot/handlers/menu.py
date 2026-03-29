@@ -84,13 +84,12 @@ async def menu_profile(message: Message, chat_service: ChatService) -> None:
 async def menu_vip(message: Message) -> None:
     """Handle the VIP button."""
     text = (
-        "👑 <b>VIP Premium Features</b>\n\n"
-        "Unlock the full power of the AI Hub:\n"
-        "✨ <b>Gemini 3.1 Pro:</b> Advanced reasoning and coding.\n"
-        "🎨 <b>Nano Banana 2:</b> State-of-the-art Image Generation.\n"
-        "🎙️ <b>Voice AI:</b> Native audio processing.\n"
-        "⚡ <b>Unlimited Context:</b> Never lose your chat history.\n\n"
-        "<i>Click the button below to upgrade your account!</i>"
+        "💎 <b>Choose your Premium Pack!</b>\n\n"
+        "Unlock advanced features and image generation by purchasing Premium Credits.\n\n"
+        "💳 <b>Starter:</b> 150 credits — <code>$1.99</code>\n"
+        "🔥 <b>Popular:</b> 700 credits — <code>$6.99</code>\n"
+        "👑 <b>Pro Pack:</b> 1800 credits — <code>$14.99</code>\n\n"
+        "Click the buttons below to purchase via crypto."
     )
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     kb = InlineKeyboardMarkup(inline_keyboard=[

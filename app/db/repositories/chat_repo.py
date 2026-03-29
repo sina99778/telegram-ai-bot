@@ -299,18 +299,35 @@ class ChatRepository:
             await self._session.commit()
         return user
 
-    async def process_referral(self, new_user_tg_id: int, referrer_tg_id: int) -> None:
-        """Process referral reward if valid."""
-        if new_user_tg_id == referrer_tg_id:
-            return # Cannot refer oneself
+    async def process_referral(self, invitee_id: int, referrer_id: int) -> bool:
+        """Handle the referral logic: Reward referrer and invitee."""
+        if invitee_id == referrer_id:
+            return False
+
+        invitee = await self.get_user_by_telegram_id(invitee_id)
+        referrer = await self.get_user_by_telegram_id(referrer_id)
+        
+        if invitee and referrer:
+            if invitee.referred_by:
+                return False
+
+            # Reward both
+            invitee.premium_credits += 25
+            invitee.referred_by = referrer.telegram_id
             
-        new_user = await self.get_user_by_telegram_id(new_user_tg_id)
-        if new_user and new_user.referred_by is None:
-            referrer = await self.get_user_by_telegram_id(referrer_tg_id)
-            if referrer:
-                new_user.referred_by = referrer.id
-                referrer.premium_credits += 10 # Reward the referrer
-                await self._session.commit()
+            # --- NEW REFERRAL RULES ---
+            referrer.premium_credits += 10
+            referrer.total_invites += 1
+            
+            # Special 10-invite threshold check
+            if referrer.total_invites == 10:
+                referrer.special_reward_images_left += 5
+                from datetime import datetime, timezone, timedelta
+                referrer.special_reward_expire = datetime.now(timezone.utc) + timedelta(weeks=1)
+
+            await self._session.commit()
+            return True
+        return False
 
     async def get_all_users(self) -> list[User]:
         """Fetch all users from the database for broadcasting."""
