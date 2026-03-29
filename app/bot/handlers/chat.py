@@ -8,8 +8,16 @@ from aiogram.enums import ChatAction
 from aiogram.types import Message
 
 from app.services.chat_service import ChatService
+from app.core.i18n import TEXTS
 
 logger = logging.getLogger(__name__)
+
+# Get a flat set of all button texts in all languages to exclude them
+ALL_BUTTONS = set()
+for lang in TEXTS:
+    for key in TEXTS[lang]:
+        if key.startswith("btn_"):
+            ALL_BUTTONS.add(TEXTS[lang][key])
 
 _TG_MAX_LENGTH: int = 4096
 _SAFE_SLICE: int = 4000
@@ -191,7 +199,7 @@ async def handle_voice_message(message: Message, chat_service: ChatService) -> N
         logger.error("Error processing voice: %s", e, exc_info=True)
         await message.answer("⚠️ Sorry, I couldn't process your voice message right now.", parse_mode=None)
 
-@chat_router.message(F.text)
+@chat_router.message(F.text, ~F.text.in_(ALL_BUTTONS))
 async def handle_text_message(message: Message, chat_service: ChatService) -> None:
     if message.from_user is None or message.text is None:
         return

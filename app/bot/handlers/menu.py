@@ -10,6 +10,16 @@ from app.core.i18n import t, TEXTS
 
 menu_router = Router(name="menu")
 
+PROFILE_BTNS = {TEXTS["en"]["btn_profile"], TEXTS["fa"]["btn_profile"]}
+INVITE_BTNS = {TEXTS["en"]["btn_invite"], TEXTS["fa"]["btn_invite"]}
+VIP_BTNS = {TEXTS["en"]["btn_vip"], TEXTS["fa"]["btn_vip"]}
+SUPPORT_BTNS = {TEXTS["en"]["btn_support"], TEXTS["fa"]["btn_support"]}
+TOOLS_BTNS = {
+    TEXTS["en"]["btn_chat"], TEXTS["fa"]["btn_chat"],
+    TEXTS["en"]["btn_image"], TEXTS["fa"]["btn_image"],
+    TEXTS["en"]["btn_voice"], TEXTS["fa"]["btn_voice"]
+}
+
 @menu_router.message(F.text.in_({TEXTS["en"]["btn_lang"], TEXTS["fa"]["btn_lang"]}))
 async def toggle_lang(message: Message, chat_service: ChatService) -> None:
     if message.from_user is None:
@@ -24,7 +34,7 @@ async def toggle_lang(message: Message, chat_service: ChatService) -> None:
     await chat_service._session.commit()
     await message.answer(t("lang_changed", new_lang), reply_markup=get_main_menu(new_lang))
 
-@menu_router.message(F.text == "🎁 Invite Friends")
+@menu_router.message(F.text.in_(INVITE_BTNS))
 async def menu_invite(message: Message) -> None:
     """Generate and send the user's referral link."""
     if message.from_user is None:
@@ -41,7 +51,7 @@ async def menu_invite(message: Message) -> None:
     )
     await message.answer(text, parse_mode="HTML")
 
-PROFILE_BTNS = {TEXTS["en"]["btn_profile"], TEXTS["fa"]["btn_profile"]}
+
 
 @menu_router.message(F.text.in_(PROFILE_BTNS))
 async def menu_profile(message: Message, chat_service: ChatService) -> None:
@@ -70,7 +80,7 @@ async def menu_profile(message: Message, chat_service: ChatService) -> None:
     # Pass user object to get dynamic keyboard
     await message.answer(text, reply_markup=get_profile_keyboard(user), parse_mode="HTML")
 
-@menu_router.message(F.text == "👑 VIP Premium")
+@menu_router.message(F.text.in_(VIP_BTNS))
 async def menu_vip(message: Message) -> None:
     """Handle the VIP button."""
     text = (
@@ -88,7 +98,7 @@ async def menu_vip(message: Message) -> None:
     ])
     await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
-@menu_router.message(F.text == "📞 Support")
+@menu_router.message(F.text.in_(SUPPORT_BTNS))
 async def menu_support(message: Message) -> None:
     """Handle the Support button."""
     text = (
@@ -99,7 +109,7 @@ async def menu_support(message: Message) -> None:
     )
     await message.answer(text, parse_mode="HTML")
 
-@menu_router.message(F.text.in_({"💬 Chat with AI", "🖼️ Generate Image", "🎙️ Voice Assistant"}))
+@menu_router.message(F.text.in_(TOOLS_BTNS))
 async def menu_tools(message: Message, chat_service: ChatService) -> None:
     """Handle tool selection buttons."""
     if message.from_user is None:
@@ -108,14 +118,14 @@ async def menu_tools(message: Message, chat_service: ChatService) -> None:
     # Fetch user from DB to check credits
     user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
 
-    if message.text == "💬 Chat with AI":
+    if message.text in {TEXTS["en"]["btn_chat"], TEXTS["fa"]["btn_chat"]}:
         await message.answer("Just type any message below and I will reply using Gemini!")
         
-    elif message.text == "🖼️ Generate Image":
+    elif message.text in {TEXTS["en"]["btn_image"], TEXTS["fa"]["btn_image"]}:
         if user and (user.is_vip or user.premium_credits >= 15):
             await message.answer("🎨 <b>Nano Banana 2 is Ready!</b>\n\nTo generate an image, use the command like this:\n<code>/image A futuristic city at night</code>", parse_mode="HTML")
         else:
             await message.answer("🎨 <b>Image Generation</b> requires VIP or at least 15 Premium Credits. Please upgrade your plan.", parse_mode="HTML")
             
-    elif message.text == "🎙️ Voice Assistant":
+    elif message.text in {TEXTS["en"]["btn_voice"], TEXTS["fa"]["btn_voice"]}:
         await message.answer("🎙️ <b>Voice Processing</b> is coming in the next update!", parse_mode="HTML")
