@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     BOT_TOKEN: str
     WEBHOOK_URL: str
     WEBHOOK_SECRET: str
+    
+    # ── Payments ──────────────────────────────
+    NOWPAYMENTS_API_KEY: str = ""
 
     # ── Google Gemini AI ──────────────────────
     GEMINI_API_KEY: str

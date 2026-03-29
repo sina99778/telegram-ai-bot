@@ -22,7 +22,9 @@ from fastapi import FastAPI, Header, HTTPException, Request, status
 
 from app.bot.dispatcher import get_dispatcher
 from app.core.config import settings
-from app.db.session import engine
+from app.db.session import engine, async_session_maker
+from app.db.repositories.chat_repo import ChatRepository
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -127,4 +129,46 @@ async def telegram_webhook(
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     """Simple liveness probe for deployment orchestrators."""
+    return {"status": "ok"}
+
+# ──────────────────────────────────────────────
+#  NowPayments IPN webhook
+# ──────────────────────────────────────────────
+@app.post("/nowpayments-webhook")
+async def nowpayments_webhook(request: Request) -> dict[str, str]:
+    """Receives IPN from NowPayments when a payment is successful."""
+    payload = await request.json()
+    logger.info(f"Received NowPayments Webhook: {payload}")
+
+    payment_status = payload.get("payment_status")
+    order_id = payload.get("order_id") # This is our telegram_id
+
+    if payment_status == "finished" and order_id:
+        try:
+            telegram_id = int(order_id)
+            async with async_session_maker() as session:
+                repo = ChatRepository(session)
+                
+                # Upgrade user for 30 days and add 500 premium credits
+                expire_date = datetime.now(timezone.utc) + timedelta(days=30)
+                success = await repo.upgrade_to_vip(
+                    telegram_id=telegram_id, 
+                    add_credits=500, 
+                    expire_date=expire_date
+                )
+                
+                if success:
+                    # Notify the user via Telegram
+                    try:
+                        await bot.send_message(
+                            chat_id=telegram_id,
+                            text="🎉 <b>Payment Successful!</b>\n\nYou are now a VIP member. You received 500 Premium Credits and access to Gemini 3.1 Pro & Nano Banana 2. Enjoy!",
+                            parse_mode="HTML"
+                        )
+                    except Exception as e:
+                        logger.error(f"Could not send VIP confirmation to {telegram_id}: {e}")
+                        
+        except Exception as e:
+            logger.error(f"Error processing NowPayments IPN: {e}")
+
     return {"status": "ok"}
