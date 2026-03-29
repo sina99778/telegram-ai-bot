@@ -138,11 +138,11 @@ class GeminiClient:
             raise AIException("AI request failed. Please try again later.") from None
 
     async def generate_image(self, prompt: str) -> bytes | str:
-        """Generates an image using Nano Banana 2 (Imagen 3) via AI Studio."""
+        """Generates an image using Nano Banana 2 (Imagen 4) via AI Studio."""
         from google.genai import types # Local import to ensure it's available
         try:
             result = await self._client.aio.models.generate_images(
-                model='imagen-3.0-generate-002',
+                model='imagen-4.0-generate-001',
                 prompt=prompt,
                 config=types.GenerateImagesConfig(
                     number_of_images=1,
