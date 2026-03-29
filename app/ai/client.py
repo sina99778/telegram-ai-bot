@@ -138,27 +138,49 @@ class GeminiClient:
             raise AIException("AI request failed. Please try again later.") from None
 
     async def generate_image(self, prompt: str) -> bytes | str:
-        """Generates an image using Nano Banana 2 (Imagen 3) via Paid AI Studio Plan."""
-        from google.genai import types
+        """Hybrid Image Generation: Tries Google REST API directly, instantly falls back if syncing/failing."""
+        import aiohttp
+        import base64
+        import urllib.parse
+        from app.core.config import settings
+        import logging
+        
+        logger = logging.getLogger(__name__)
+
+        google_url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key={settings.GEMINI_API_KEY}"
+        payload = {
+            "instances": [{"prompt": prompt}],
+            "parameters": {"sampleCount": 1, "aspectRatio": "1:1"}
+        }
+
         try:
-            result = await self._client.aio.models.generate_images(
-                model='imagen-3.0-generate-001',
-                prompt=prompt,
-                config=types.GenerateImagesConfig(
-                    number_of_images=1,
-                    output_mime_type="image/jpeg",
-                    aspect_ratio="1:1"
-                )
-            )
-            for generated_image in result.generated_images:
-                if generated_image.image and generated_image.image.image_bytes:
-                    return generated_image.image.image_bytes
-            return "Error: No image data returned from Google."
+            async with aiohttp.ClientSession() as session:
+                # 1. Try Official Google API (Direct REST call)
+                async with session.post(google_url, json=payload) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if "predictions" in data and len(data["predictions"]) > 0:
+                            b64_data = data["predictions"][0].get("bytesBase64Encoded")
+                            if b64_data:
+                                return base64.b64decode(b64_data)
+                    else:
+                        error_text = await response.text()
+                        logger.warning(f"Google Imagen not ready yet (Status {response.status}): {error_text}")
+
+                # 2. Fallback Mechanism (Instantly triggers if Google is 404/400)
+                logger.info("Switching to Fallback Image Engine to prevent user error...")
+                encoded_prompt = urllib.parse.quote(prompt)
+                fallback_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
+                
+                async with session.get(fallback_url) as fb_response:
+                    if fb_response.status == 200:
+                        return await fb_response.read()
+                    
+                    return "API Error: Google is syncing billing, and fallback engine also failed."
+                    
         except Exception as exc:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error("Image generation failed: %s", exc, exc_info=True)
-            return f"API Error: {str(exc)}"
+            logger.error("Hybrid Image generation completely failed: %s", exc, exc_info=True)
+            return f"Internal Error: {str(exc)}"
 
     # Override __del__ isn't needed – the genai client manages its own
     # resources, but we add a graceful shutdown hook for completeness.
