@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram import Router
 from aiogram.filters import CommandStart, Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import Message, URLInputFile
 
 from app.bot.keyboards.reply import get_main_menu
 from app.services.chat_service import ChatService
@@ -33,18 +33,31 @@ async def cmd_start(message: Message, command: CommandObject, chat_service: Chat
     # 3. Ensure daily credits
     await chat_service._repo.ensure_daily_credits(message.from_user.id)
 
+    # 4. Send Welcome Banner with Caption
     welcome_text = (
-        f"👋 Welcome to the AI Hub, <b>{message.from_user.first_name}</b>!\n\n"
+        f"👋 Welcome to the <b>AI Hub</b>, {message.from_user.first_name}!\n\n"
         "I am your advanced multi-modal assistant. Choose an option from the menu below to get started, "
         "or simply type a message to chat with me.\n\n"
         "💡 <i>Tip: VIP members get access to Gemini 3.1 Pro and Nano Banana 2 Image Generation!</i>"
     )
 
-    await message.answer(
-        welcome_text,
-        reply_markup=get_main_menu(),
-        parse_mode="HTML"
-    )
+    # Using a placeholder AI aesthetic image. You can replace this URL with your own banner later.
+    banner_url = "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?q=80&w=1000&auto=format&fit=crop"
+    
+    try:
+        await message.answer_photo(
+            photo=URLInputFile(banner_url),
+            caption=welcome_text,
+            reply_markup=get_main_menu(),
+            parse_mode="HTML"
+        )
+    except Exception:
+        # Fallback to normal text if the image fails to load
+        await message.answer(
+            welcome_text,
+            reply_markup=get_main_menu(),
+            parse_mode="HTML"
+        )
 
 @base_router.message(Command("new"))
 async def cmd_new(message: Message, chat_service: ChatService) -> None:
