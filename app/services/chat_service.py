@@ -117,11 +117,13 @@ class ChatService:
         user.premium_credits -= cost
         await self._session.commit()
 
-        image_bytes = await self._ai.generate_image(prompt)
-        if not image_bytes:
-            # Refund if failed
+        image_result = await self._ai.generate_image(prompt)
+        
+        # If the result is a string, it means an error occurred
+        if isinstance(image_result, str):
+            # Refund the user
             user.premium_credits += cost
             await self._session.commit()
-            return "⚠️ <b>Generation Failed.</b>\n\nThe AI couldn't generate an image for this prompt. Your credits have been refunded."
+            return f"⚠️ <b>Generation Failed.</b>\n\nReason:\n<code>{image_result}</code>\n\n<i>Your {cost} credits have been refunded.</i>"
 
-        return image_bytes
+        return image_result

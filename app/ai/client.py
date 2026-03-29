@@ -137,26 +137,26 @@ class GeminiClient:
             logger.error("Non-retryable API error: %s", type(exc).__name__, exc_info=True)
             raise AIException("AI request failed. Please try again later.") from None
 
-    async def generate_image(self, prompt: str) -> bytes | None:
-        """Generates an image using Nano Banana (Gemini Flash Image) via AI Studio."""
+    async def generate_image(self, prompt: str) -> bytes | str:
+        """Generates an image using Nano Banana 2 (Imagen 3) via AI Studio."""
+        from google.genai import types # Local import to ensure it's available
         try:
-            response = await self._client.aio.models.generate_content(
-                model='gemini-2.5-flash-image',
-                contents=[prompt],
-                config=types.GenerateContentConfig(
-                    response_modalities=["IMAGE"],
-                    image_config=types.ImageConfig(
-                        aspect_ratio="1:1",
-                    ),
+            result = await self._client.aio.models.generate_images(
+                model='imagen-3.0-generate-002',
+                prompt=prompt,
+                config=types.GenerateImagesConfig(
+                    number_of_images=1,
+                    output_mime_type="image/jpeg",
+                    aspect_ratio="1:1"
                 )
             )
-            for part in response.parts:
-                if part.inline_data and part.inline_data.data:
-                    return part.inline_data.data
-            return None
+            for generated_image in result.generated_images:
+                if generated_image.image and generated_image.image.image_bytes:
+                    return generated_image.image.image_bytes
+            return "Error: No image data returned from Google."
         except Exception as exc:
             logger.error("Image generation failed: %s", exc, exc_info=True)
-            return None
+            return f"API Error: {str(exc)}"
 
     # Override __del__ isn't needed – the genai client manages its own
     # resources, but we add a graceful shutdown hook for completeness.
