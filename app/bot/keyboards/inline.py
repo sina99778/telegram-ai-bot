@@ -15,9 +15,10 @@ def get_profile_keyboard(user) -> InlineKeyboardMarkup:
         
     keyboard = [
         [InlineKeyboardButton(text="💎 Purchase VIP", callback_data="upgrade_vip")],
+        [InlineKeyboardButton(text="🎁 Daily Reward", callback_data="claim_daily_reward")],
         [InlineKeyboardButton(text=toggle_text, callback_data="toggle_model")],
         [InlineKeyboardButton(text=memory_text, callback_data="toggle_memory")],
-        [InlineKeyboardButton(text="🎁 Redeem Code", callback_data="redeem_promo_code")]
+        [InlineKeyboardButton(text="🎟️ Redeem Code", callback_data="redeem_promo_code")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 

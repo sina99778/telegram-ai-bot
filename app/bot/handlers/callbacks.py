@@ -109,6 +109,76 @@ async def cq_toggle_memory(callback: CallbackQuery, chat_service: ChatService):
         f"🧠 <b>Memory:</b> {mem_status}"
     )
     
+@callback_router.callback_query(F.data == "claim_daily_reward")
+async def cq_claim_daily_reward(callback: CallbackQuery, chat_service: ChatService):
+    from datetime import datetime, timezone, timedelta
+    
+    if callback.from_user is None: return
+    
+    user = await chat_service._repo.get_user_by_telegram_id(callback.from_user.id)
+    if not user: return
+    
+    now = datetime.now(timezone.utc)
+    
+    # Check if 24 hours have passed
+    if user.last_daily_reward:
+        last_reward = user.last_daily_reward
+        if last_reward.tzinfo is None:
+            last_reward = last_reward.replace(tzinfo=timezone.utc)
+            
+        time_since_last = now - last_reward
+        if time_since_last < timedelta(hours=24):
+            # Calculate remaining time
+            remaining = timedelta(hours=24) - time_since_last
+            hours = int(remaining.total_seconds() // 3600)
+            minutes = int((remaining.total_seconds() % 3600) // 60)
+            
+            alert_msg = f"⏳ Not ready yet!\n\nPlease come back in {hours} hours and {minutes} minutes to claim your next reward."
+            if user.language == "fa":
+                alert_msg = f"⏳ هنوز آماده نیست!\n\nلطفاً {hours} ساعت و {minutes} دقیقه دیگر برای دریافت جایزه برگردید."
+                
+            return await callback.answer(alert_msg, show_alert=True)
+            
+    # Grant Reward: 2 Premium Credits + 10 Normal Credits
+    user.premium_credits += 2
+    user.normal_credits += 10
+    user.last_daily_reward = now
+    await chat_service._session.commit()
+    
+    success_msg = "🎉 Congratulations! You received 2 Premium Credits and 10 Normal Credits!"
+    if user.language == "fa":
+        success_msg = "🎉 تبریک! ۲ سکه پریمیوم و ۱۰ سکه عادی به حساب شما اضافه شد!"
+        
+    await callback.answer(success_msg, show_alert=True)
+    
+    # Regenerate Profile Text to show new balance
+    plan_name = "👑 VIP Premium" if user.is_vip else "🆓 Free Tier"
+    current_model = str(user.preferred_text_model).upper() if user.preferred_text_model else "PRO"
+    mem_status = "Keep History" if user.keep_chat_history else "Auto-Clear"
+    
+    if user.language == "fa":
+        text = (
+            f"👤 <b>پروفایل کاربری</b>\n\n"
+            f"<b>نام:</b> {user.first_name}\n"
+            f"<b>آیدی:</b> <code>{user.telegram_id}</code>\n\n"
+            f"🏷️ <b>طرح فعلی:</b> {plan_name}\n"
+            f"💬 <b>سکه‌های عادی:</b> {user.normal_credits}\n"
+            f"🪙 <b>سکه‌های پریمیوم:</b> {user.premium_credits}\n\n"
+            f"⚙️ <b>مدل هوش مصنوعی:</b> {current_model}\n"
+            f"🧠 <b>وضعیت حافظه:</b> {mem_status}"
+        )
+    else:
+        text = (
+            f"👤 <b>User Profile</b>\n\n"
+            f"<b>Name:</b> {user.first_name}\n"
+            f"<b>ID:</b> <code>{user.telegram_id}</code>\n\n"
+            f"🏷️ <b>Current Plan:</b> {plan_name}\n"
+            f"💬 <b>Normal Credits:</b> {user.normal_credits}\n"
+            f"🪙 <b>Premium Credits:</b> {user.premium_credits}\n\n"
+            f"⚙️ <b>Model:</b> {current_model}\n"
+            f"🧠 <b>Memory:</b> {mem_status}"
+        )
+    
     from app.bot.keyboards.inline import get_profile_keyboard
     try:
         await callback.message.edit_text(text=text, reply_markup=get_profile_keyboard(user), parse_mode="HTML")

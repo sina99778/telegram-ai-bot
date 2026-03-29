@@ -21,6 +21,7 @@ class User(Base, TimestampMixin):
     normal_credits: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
     premium_credits: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     last_credit_reset: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_daily_reward: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # NEW FIELD: Stores user's preferred model ('flash' or 'pro')
     preferred_text_model: Mapped[str] = mapped_column(String, default='flash')
