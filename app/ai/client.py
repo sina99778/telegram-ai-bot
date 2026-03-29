@@ -105,7 +105,7 @@ class GeminiClient:
     def __init__(self) -> None:
         # Initialise the genai client with the API key from settings.
         self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self._default_model: str = settings.GEMINI_MODEL
+        self._default_model: str = settings.GEMINI_MODEL_NORMAL
         logger.info(
             "GeminiClient initialised  ·  model=%s",
             self._default_model,
