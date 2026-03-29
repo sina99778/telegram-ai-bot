@@ -43,3 +43,16 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="❌ Close Panel", callback_data="cancel_action")]
         ]
     )
+
+def get_admin_user_keyboard(user_id: int, is_vip: bool, is_banned: bool) -> InlineKeyboardMarkup:
+    vip_text = "❌ Remove VIP" if is_vip else "👑 Make VIP"
+    ban_text = "✅ Unban User" if is_banned else "🚫 Ban User"
+    
+    keyboard = [
+        [InlineKeyboardButton(text="➕ Add 50 Premium Credits", callback_data=f"adm_cred_{user_id}")],
+        [
+            InlineKeyboardButton(text=vip_text, callback_data=f"adm_vip_{user_id}"),
+            InlineKeyboardButton(text=ban_text, callback_data=f"adm_ban_{user_id}")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)

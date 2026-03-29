@@ -16,8 +16,7 @@ VIP_BTNS = {TEXTS["en"]["btn_vip"], TEXTS["fa"]["btn_vip"]}
 SUPPORT_BTNS = {TEXTS["en"]["btn_support"], TEXTS["fa"]["btn_support"]}
 TOOLS_BTNS = {
     TEXTS["en"]["btn_chat"], TEXTS["fa"]["btn_chat"],
-    TEXTS["en"]["btn_image"], TEXTS["fa"]["btn_image"],
-    TEXTS["en"]["btn_voice"], TEXTS["fa"]["btn_voice"]
+    TEXTS["en"]["btn_image"], TEXTS["fa"]["btn_image"]
 }
 
 @menu_router.message(F.text.in_({TEXTS["en"]["btn_lang"], TEXTS["fa"]["btn_lang"]}))
@@ -35,20 +34,28 @@ async def toggle_lang(message: Message, chat_service: ChatService) -> None:
     await message.answer(t("lang_changed", new_lang), reply_markup=get_main_menu(new_lang))
 
 @menu_router.message(F.text.in_(INVITE_BTNS))
-async def menu_invite(message: Message) -> None:
-    """Generate and send the user's referral link."""
-    if message.from_user is None:
-        return
-        
-    bot_info = await message.bot.me()
-    ref_link = f"https://t.me/{bot_info.username}?start=ref_{message.from_user.id}"
+async def menu_invite(message: Message, chat_service: ChatService) -> None:
+    user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
+    bot_info = await message.bot.get_me()
+    invite_link = f"https://t.me/{bot_info.username}?start=ref_{user.telegram_id}" if user else ""
+    lang = user.language if user else "fa"
     
-    text = (
-        "🎁 <b>Invite Friends & Earn Credits!</b>\n\n"
-        "Share your unique link with friends. Every time a new user starts the bot using your link, "
-        "you will instantly receive <b>+10 Premium Credits</b> for Gemini 3.1 Pro & Nano Banana 2!\n\n"
-        f"🔗 <b>Your Link:</b>\n<code>{ref_link}</code>"
-    )
+    if lang == "fa":
+        text = (
+            "🎁 <b>دعوت از دوستان و دریافت جایزه!</b>\n\n"
+            f"👥 <b>تعداد دعوت‌های شما:</b> {user.total_invites if user else 0} نفر\n"
+            f"🖼 <b>تصاویر هدیه باقیمانده:</b> {user.special_reward_images_left if user else 0} عکس\n\n"
+            "با هر دعوت <b>۱۰ سکه پریمیوم</b> بگیرید. با رسیدن به ۱۰ دعوت، قابلیت <b>۵ عکس با کیفیت بالا (Imagen 3)</b> به مدت یک هفته برایتان فعال می‌شود!\n\n"
+            f"🔗 <b>لینک اختصاصی شما:</b>\n<code>{invite_link}</code>"
+        )
+    else:
+        text = (
+            "🎁 <b>Invite Friends & Earn!</b>\n\n"
+            f"👥 <b>Total Invites:</b> {user.total_invites if user else 0}\n"
+            f"🖼 <b>Reward Images Left:</b> {user.special_reward_images_left if user else 0}\n\n"
+            "Earn <b>10 Premium Credits</b> per invite. Reach 10 invites to unlock <b>5 High-Res Images (Imagen 3)</b> for 1 week!\n\n"
+            f"🔗 <b>Your Link:</b>\n<code>{invite_link}</code>"
+        )
     await message.answer(text, parse_mode="HTML")
 
 
@@ -82,14 +89,27 @@ async def menu_profile(message: Message, chat_service: ChatService) -> None:
 
 @menu_router.message(F.text.in_(VIP_BTNS))
 async def show_vip_plans(message: Message, chat_service: ChatService) -> None:
-    text = (
-        "💎 <b>Choose your Premium Pack!</b>\n\n"
-        "Unlock advanced features and Imagen 3 generation by purchasing Premium Credits.\n\n"
-        "💳 <b>Starter:</b> 150 credits — <code>$1.99</code>\n"
-        "🔥 <b>Popular:</b> 700 credits — <code>$6.99</code>\n"
-        "👑 <b>Pro Pack:</b> 1800 credits — <code>$14.99</code>\n\n"
-        "👇 <i>Select a plan below to pay with Crypto:</i>"
-    )
+    user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
+    lang = user.language if user else "fa"
+    
+    if lang == "fa":
+        text = (
+            "💎 <b>بسته ویژه خود را انتخاب کنید!</b>\n\n"
+            "با خرید سکه پریمیوم، محدودیت‌ها را بردارید و از تصویرساز Imagen 3 استفاده کنید.\n\n"
+            "💳 <b>شروع:</b> ۱۵۰ سکه — <code>۱.۹۹ دلار</code>\n"
+            "🔥 <b>محبوب:</b> ۷۰۰ سکه — <code>۶.۹۹ دلار</code>\n"
+            "👑 <b>حرفه‌ای:</b> ۱۸۰۰ سکه — <code>۱۴.۹۹ دلار</code>\n\n"
+            "👇 <i>برای پرداخت کریپتویی یک پلن را انتخاب کنید:</i>"
+        )
+    else:
+        text = (
+            "💎 <b>Choose your Premium Pack!</b>\n\n"
+            "Unlock advanced features and Imagen 3 generation by purchasing Premium Credits.\n\n"
+            "💳 <b>Starter:</b> 150 credits — <code>$1.99</code>\n"
+            "🔥 <b>Popular:</b> 700 credits — <code>$6.99</code>\n"
+            "👑 <b>Pro Pack:</b> 1800 credits — <code>$14.99</code>\n\n"
+            "👇 <i>Select a plan below to pay with Crypto:</i>"
+        )
     from app.bot.keyboards.inline import get_vip_plans_keyboard
     await message.answer(text, reply_markup=get_vip_plans_keyboard(), parse_mode="HTML")
 
@@ -117,10 +137,7 @@ async def menu_tools(message: Message, chat_service: ChatService) -> None:
         await message.answer("Just type any message below and I will reply using Gemini!")
         
     elif message.text in {TEXTS["en"]["btn_image"], TEXTS["fa"]["btn_image"]}:
-        if user and (user.is_vip or user.premium_credits >= 15):
-            await message.answer("🎨 <b>Nano Banana 2 is Ready!</b>\n\nTo generate an image, use the command like this:\n<code>/image A futuristic city at night</code>", parse_mode="HTML")
+        if user and (user.is_vip or user.premium_credits >= 10):
+            await message.answer("🎨 <b>Imagen 3 is Ready!</b>\n\nTo generate an image, use the command like this:\n<code>/image A futuristic city at night</code>", parse_mode="HTML")
         else:
             await message.answer("🎨 <b>Image Generation</b> requires VIP or at least 15 Premium Credits. Please upgrade your plan.", parse_mode="HTML")
-            
-    elif message.text in {TEXTS["en"]["btn_voice"], TEXTS["fa"]["btn_voice"]}:
-        await message.answer("🎙️ <b>Voice Processing</b> is coming in the next update!", parse_mode="HTML")

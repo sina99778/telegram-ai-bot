@@ -177,37 +177,88 @@ async def cmd_broadcast(message: Message, command: CommandObject, chat_service: 
     )
 
 @admin_router.message(Command("user"))
-async def cmd_user_info(message: Message, command: CommandObject, chat_service: ChatService) -> None:
-    """Get detailed info about a user. Usage: /user 123456789"""
+async def admin_manage_user(message: Message, command: CommandObject, chat_service: ChatService) -> None:
     if not command.args:
-        await message.answer("⚠️ Usage: /user <telegram_id>")
+        await message.answer("⚠️ Usage: `/user <Telegram_ID>`", parse_mode="Markdown")
         return
-
+        
     try:
         target_id = int(command.args)
-        user = await chat_service._repo.get_user_by_telegram_id(target_id)
-        
-        if not user:
-            await message.answer("⚠️ User not found.")
-            return
-
-        status = "👑 VIP" if user.is_vip else "🆓 Free"
-        banned = "🔴 YES" if user.is_banned else "🟢 NO"
-        
-        text = (
-            f"👤 <b>User Information</b>\n\n"
-            f"<b>ID:</b> <code>{user.telegram_id}</code>\n"
-            f"<b>Name:</b> {user.first_name} (@{user.username or 'N/A'})\n"
-            f"<b>Status:</b> {status}\n"
-            f"<b>Banned:</b> {banned}\n\n"
-            f"💰 <b>Economy:</b>\n"
-            f"Normal Credits: {user.normal_credits}\n"
-            f"Premium Credits: {user.premium_credits}\n\n"
-            f"🔗 <b>Referral System:</b>\n"
-            f"Referred By: <code>{user.referred_by or 'None'}</code>\n"
-            f"Joined: {user.created_at.strftime('%Y-%m-%d %H:%M') if user.created_at else 'N/A'}"
-        )
-        await message.answer(text, parse_mode="HTML")
-        
     except ValueError:
-        await message.answer("⚠️ Invalid Telegram ID. Please provide numbers only.")
+        await message.answer("⚠️ ID must be a number.")
+        return
+        
+    target_user = await chat_service._repo.get_user_by_telegram_id(target_id)
+    if not target_user:
+        await message.answer("❌ User not found in database.")
+        return
+        
+    text = (
+        f"👨💻 <b>Admin User Panel</b>\n\n"
+        f"<b>ID:</b> <code>{target_user.telegram_id}</code>\n"
+        f"<b>Name:</b> {target_user.first_name}\n"
+        f"<b>VIP Status:</b> {'Yes 👑' if target_user.is_vip else 'No'}\n"
+        f"<b>Banned:</b> {'Yes 🚫' if target_user.is_banned else 'No'}\n"
+        f"<b>Normal Credits:</b> {target_user.normal_credits}\n"
+        f"<b>Premium Credits:</b> {target_user.premium_credits}\n"
+        f"<b>Total Invites:</b> {target_user.total_invites}\n"
+    )
+    
+    from app.bot.keyboards.inline import get_admin_user_keyboard
+    await message.answer(
+        text, 
+        reply_markup=get_admin_user_keyboard(target_user.telegram_id, target_user.is_vip, target_user.is_banned),
+        parse_mode="HTML"
+    )
+
+@admin_router.callback_query(F.data.startswith("adm_"))
+async def admin_callbacks(callback: CallbackQuery, chat_service: ChatService) -> None:
+    parts = callback.data.split("_")
+    if len(parts) < 3: return
+    action, target_id_str = parts[1], parts[2]
+    
+    try:
+        target_id = int(target_id_str)
+    except ValueError:
+        return
+    
+    user = await chat_service._repo.get_user_by_telegram_id(target_id)
+    if not user:
+        return await callback.answer("User not found.", show_alert=True)
+        
+    if action == "cred":
+        user.premium_credits += 50
+        msg = f"✅ Added 50 Premium Credits. Total: {user.premium_credits}"
+    elif action == "vip":
+        user.is_vip = not user.is_vip
+        msg = f"✅ VIP Status changed to: {user.is_vip}"
+    elif action == "ban":
+        user.is_banned = not user.is_banned
+        msg = f"✅ Ban Status changed to: {user.is_banned}"
+    else:
+        return
+        
+    await chat_service._session.commit()
+    await callback.answer(msg, show_alert=True)
+    
+    # Keep text but update keyboard explicitly relying on the edited DB user instance
+    from app.bot.keyboards.inline import get_admin_user_keyboard
+    text = (
+        f"👨💻 <b>Admin User Panel</b>\n\n"
+        f"<b>ID:</b> <code>{user.telegram_id}</code>\n"
+        f"<b>Name:</b> {user.first_name}\n"
+        f"<b>VIP Status:</b> {'Yes 👑' if user.is_vip else 'No'}\n"
+        f"<b>Banned:</b> {'Yes 🚫' if user.is_banned else 'No'}\n"
+        f"<b>Normal Credits:</b> {user.normal_credits}\n"
+        f"<b>Premium Credits:</b> {user.premium_credits}\n"
+        f"<b>Total Invites:</b> {user.total_invites}\n"
+    )
+    
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_admin_user_keyboard(user.telegram_id, user.is_vip, user.is_banned),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
