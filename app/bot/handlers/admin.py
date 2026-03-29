@@ -7,7 +7,6 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.user import User
 
 from app.bot.filters.admin import IsAdmin
@@ -34,8 +33,9 @@ async def cmd_stats(message: Message, chat_service: ChatService) -> None:
     await message.answer(text, parse_mode="HTML")
 
 @admin_router.message(Command("ban"))
-async def cmd_ban(message: Message, db_session: AsyncSession) -> None:
+async def cmd_ban(message: Message, chat_service: ChatService) -> None:
     """Ban a user. Usage: /ban 123456789"""
+    db_session = chat_service._session
     try:
         target_id = int(message.text.split(" ")[1])
         user = await db_session.scalar(select(User).where(User.telegram_id == target_id))
@@ -49,8 +49,9 @@ async def cmd_ban(message: Message, db_session: AsyncSession) -> None:
         await message.answer("⚠️ Invalid format. Use: /ban <telegram_id>")
 
 @admin_router.message(Command("unban"))
-async def cmd_unban(message: Message, db_session: AsyncSession) -> None:
+async def cmd_unban(message: Message, chat_service: ChatService) -> None:
     """Unban a user. Usage: /unban 123456789"""
+    db_session = chat_service._session
     try:
         target_id = int(message.text.split(" ")[1])
         user = await db_session.scalar(select(User).where(User.telegram_id == target_id))
@@ -64,8 +65,9 @@ async def cmd_unban(message: Message, db_session: AsyncSession) -> None:
         await message.answer("⚠️ Invalid format. Use: /unban <telegram_id>")
 
 @admin_router.message(Command("give"))
-async def cmd_give_credits(message: Message, command: CommandObject, db_session: AsyncSession) -> None:
+async def cmd_give_credits(message: Message, command: CommandObject, chat_service: ChatService) -> None:
     """Give premium credits to a user. Usage: /give 123456789 100"""
+    db_session = chat_service._session
     try:
         args = command.args.split()
         target_id = int(args[0])
@@ -86,8 +88,9 @@ async def cmd_give_credits(message: Message, command: CommandObject, db_session:
         await message.answer("⚠️ Invalid format. Use: /give <telegram_id> <amount>")
 
 @admin_router.message(Command("setvip"))
-async def cmd_set_vip(message: Message, command: CommandObject, db_session: AsyncSession) -> None:
+async def cmd_set_vip(message: Message, command: CommandObject, chat_service: ChatService) -> None:
     """Manually set VIP status. Usage: /setvip 123456789 30"""
+    db_session = chat_service._session
     try:
         args = command.args.split()
         target_id = int(args[0])
@@ -107,4 +110,3 @@ async def cmd_set_vip(message: Message, command: CommandObject, db_session: Asyn
             await message.answer("⚠️ User not found in DB.")
     except Exception:
         await message.answer("⚠️ Invalid format. Use: /setvip <telegram_id> <days>")
-
