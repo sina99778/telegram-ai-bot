@@ -137,20 +137,16 @@ class GeminiClient:
             logger.error("Non-retryable API error: %s", type(exc).__name__, exc_info=True)
             raise AIException("AI request failed. Please try again later.") from None
 
-    async def generate_image(self, prompt: str) -> str | None:
-        """Generates an image using Nano Banana 2 (Gemini Imagen 3) and returns the bytes."""
+    async def generate_image(self, prompt: str) -> bytes | None:
+        """Generates an image using Nano Banana (Gemini Flash Image) via AI Studio."""
         try:
-            result = await self._client.aio.models.generate_images(
-                model='imagen-3.0-generate-001',
-                prompt=prompt,
-                config=types.GenerateImagesConfig(
-                    number_of_images=1,
-                    output_mime_type="image/jpeg",
-                    aspect_ratio="1:1"
-                )
+            response = await self._client.aio.models.generate_content(
+                model='gemini-2.5-flash-image',
+                contents=[prompt],
             )
-            for generated_image in result.generated_images:
-                return generated_image.image.image_bytes
+            for part in response.parts:
+                if part.inline_data and part.inline_data.data:
+                    return part.inline_data.data
             return None
         except Exception as exc:
             logger.error("Image generation failed: %s", exc, exc_info=True)
