@@ -38,51 +38,24 @@ class ChatService:
             user = await self._repo.get_or_create_user(telegram_id, username, first_name)
         
         # 2. Economy & Model Routing
-        # Cost definitions (can be moved to config later if needed)
-        PRO_COST_PREMIUM = 7
-        FLASH_COST_NORMAL = 1
-        
-        target_model_str: str = ""
-        final_cost: int = 0
-        deduct_from_premium: bool = False
-        
-        # Scenario A: User prefers Pro Model
-        if user.preferred_text_model == 'pro':
-            target_model_str = settings.GEMINI_MODEL_PRO
-            final_cost = PRO_COST_PREMIUM
-            deduct_from_premium = True
-            
-            # Check premium credits
-            if user.premium_credits < PRO_COST_PREMIUM:
-                return (
-                    f"⚠️ <b>Not enough Premium Credits!</b>\n\n"
-                    f"You have selected <b>Gemini 3.1 Pro</b>, which costs {PRO_COST_PREMIUM} Premium Credits per message.\n"
-                    f"You have {user.premium_credits} Premium Credits.\n\n"
-                    f"Please switch back to the 'Flash' model in /profile, purchase credits, or invite friends."
-                )
-        
-        # Scenario B: User prefers Normal Flash Model
-        else: 
-            target_model_str = settings.GEMINI_MODEL_NORMAL
-            final_cost = FLASH_COST_NORMAL
-            
-            # Use Normal credits if available
-            if user.normal_credits >= FLASH_COST_NORMAL:
-                deduct_from_premium = False
-            # Use Premium credits as fallback if user has them
-            elif user.premium_credits >= FLASH_COST_NORMAL:
-                deduct_from_premium = True
-            else:
-                return (
-                    "⚠️ <b>Out of Daily Credits!</b>\n\n"
-                    "Please wait for the daily reset, purchase VIP, or invite friends to earn credits."
-                )
+        use_pro_model = user.is_vip
+        # FIX: Use the actual API strings required by Google's GenAI SDK
+        target_model_str = "gemini-1.5-pro" if use_pro_model else "gemini-1.5-flash"
 
-        # 3. Deduct Credits and Commit
-        if deduct_from_premium:
-            user.premium_credits -= final_cost
+        # Apply Economy Pricing
+        if use_pro_model:
+            cost = 7
+            if user.premium_credits < cost:
+                return f"⚠️ <b>Not enough credits!</b>\n\nPro AI requires {cost} credits per message. You have {user.premium_credits} credits left. Please recharge."
+            user.premium_credits -= cost
         else:
-            user.normal_credits -= final_cost
+            cost = 1
+            if user.normal_credits >= cost:
+                user.normal_credits -= cost
+            elif user.premium_credits >= cost:
+                user.premium_credits -= cost
+            else:
+                return "⚠️ <b>Out of Credits!</b>\n\nYou have used your daily limit. Please invite friends or purchase VIP to continue."
         
         await self._session.commit()
 

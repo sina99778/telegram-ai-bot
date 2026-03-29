@@ -126,6 +126,48 @@ async def handle_document_message(message: Message, chat_service: ChatService) -
         logger.error("Error processing document: %s", e, exc_info=True)
         await message.answer("⚠️ Sorry, an error occurred while processing your file.", parse_mode=None)
 
+@chat_router.message(F.voice)
+async def handle_voice_message(message: Message, chat_service: ChatService) -> None:
+    """Handle Telegram voice notes."""
+    if message.from_user is None or not message.voice:
+        return
+
+    # Check file size (limit to 5MB for quick processing)
+    if message.voice.file_size and message.voice.file_size > 5 * 1024 * 1024:
+        await message.answer("⚠️ Voice message is too long. Please send a shorter audio clip (under 5MB).")
+        return
+
+    try:
+        await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+        
+        # Download the voice file from Telegram
+        buffer = io.BytesIO()
+        await message.bot.download(message.voice, destination=buffer)
+        media_bytes = buffer.getvalue()
+
+        # Telegram voice notes are OGG format
+        mime_type = "audio/ogg"
+        text_prompt = "Please listen to this audio and reply to it naturally."
+
+        # Send to Gemini
+        ai_reply: str = await chat_service.process_user_message(
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            text=text_prompt,
+            media_bytes=media_bytes,
+            mime_type=mime_type,
+        )
+
+        if len(ai_reply) > 4000:
+            ai_reply = ai_reply[:3900] + "\n\n… ✂️ <i>(trimmed)</i>"
+
+        await message.reply(ai_reply, parse_mode="HTML")
+        
+    except Exception as e:
+        logger.error("Error processing voice: %s", e, exc_info=True)
+        await message.answer("⚠️ Sorry, I couldn't process your voice message right now.", parse_mode=None)
+
 @chat_router.message(F.text)
 async def handle_text_message(message: Message, chat_service: ChatService) -> None:
     if message.from_user is None or message.text is None:
