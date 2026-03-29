@@ -142,7 +142,7 @@ async def cmd_set_vip(message: Message, command: CommandObject, chat_service: Ch
 async def cmd_broadcast(message: Message, command: CommandObject, chat_service: ChatService) -> None:
     """Send a message to all registered users. Usage: /broadcast Hello everyone!"""
     if not command.args:
-        await message.answer("⚠️ Please provide a message. Usage: /broadcast <message>")
+        await message.answer("⚠️ Please provide a message. Usage: <code>/broadcast Your Message Here</code>", parse_mode="HTML")
         return
 
     users = await chat_service._repo.get_all_users()
