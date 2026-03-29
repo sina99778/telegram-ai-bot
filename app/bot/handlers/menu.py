@@ -83,11 +83,22 @@ async def menu_support(message: Message) -> None:
     await message.answer(text, parse_mode="HTML")
 
 @menu_router.message(F.text.in_({"💬 Chat with AI", "🖼️ Generate Image", "🎙️ Voice Assistant"}))
-async def menu_tools(message: Message) -> None:
+async def menu_tools(message: Message, chat_service: ChatService) -> None:
     """Handle tool selection buttons."""
+    if message.from_user is None:
+        return
+
+    # Fetch user from DB to check credits
+    user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
+
     if message.text == "💬 Chat with AI":
         await message.answer("Just type any message below and I will reply using Gemini!")
+        
     elif message.text == "🖼️ Generate Image":
-        await message.answer("🎨 <b>Image Generation</b> (Nano Banana 2) is a VIP feature. Please upgrade your plan to generate images.", parse_mode="HTML")
+        if user and (user.is_vip or user.premium_credits >= 15):
+            await message.answer("🎨 <b>Nano Banana 2 is Ready!</b>\n\nTo generate an image, use the command like this:\n<code>/image A futuristic city at night</code>", parse_mode="HTML")
+        else:
+            await message.answer("🎨 <b>Image Generation</b> requires VIP or at least 15 Premium Credits. Please upgrade your plan.", parse_mode="HTML")
+            
     elif message.text == "🎙️ Voice Assistant":
-        await message.answer("🎙️ <b>Voice Processing</b> is a VIP feature. Please upgrade your plan to send voice notes.", parse_mode="HTML")
+        await message.answer("🎙️ <b>Voice Processing</b> is coming in the next update!", parse_mode="HTML")

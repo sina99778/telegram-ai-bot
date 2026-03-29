@@ -16,3 +16,12 @@ def get_cancel_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_action")]
         ]
     )
+
+def get_admin_keyboard() -> InlineKeyboardMarkup:
+    """Returns inline buttons for the Admin Panel."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📊 View Bot Stats", callback_data="admin_stats")],
+            [InlineKeyboardButton(text="❌ Close Panel", callback_data="cancel_action")]
+        ]
+    )

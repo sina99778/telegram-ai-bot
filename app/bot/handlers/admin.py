@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from app.db.models.user import User
 
 from app.bot.filters.admin import IsAdmin
+from app.bot.keyboards.inline import get_admin_keyboard
 from app.services.chat_service import ChatService
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,31 @@ async def cmd_stats(message: Message, chat_service: ChatService) -> None:
     )
     
     await message.answer(text, parse_mode="HTML")
+
+@admin_router.message(Command("admin"))
+async def cmd_admin_panel(message: Message) -> None:
+    """Open the visual Admin Panel."""
+    text = (
+        "👨‍💻 <b>Admin Control Panel</b>\n\n"
+        "Use the buttons below or use stealth commands:\n"
+        "🟢 <code>/give &lt;telegram_id&gt; &lt;amount&gt;</code>\n"
+        "👑 <code>/setvip &lt;telegram_id&gt; &lt;days&gt;</code>\n"
+        "🚫 <code>/ban &lt;telegram_id&gt;</code>\n"
+        "✅ <code>/unban &lt;telegram_id&gt;</code>"
+    )
+    await message.answer(text, reply_markup=get_admin_keyboard(), parse_mode="HTML")
+
+@admin_router.callback_query(F.data == "admin_stats")
+async def cq_admin_stats(callback: CallbackQuery, chat_service: ChatService) -> None:
+    """Handle the stats button from the admin panel."""
+    stats = await chat_service.get_bot_stats()
+    text = (
+        "📊 <b>Live Bot Statistics</b>\n\n"
+        f"👥 Total Users: <b>{stats['users']}</b>\n"
+        f"💬 Conversations: <b>{stats['conversations']}</b>\n"
+        f"✉️ Messages Exchanged: <b>{stats['messages']}</b>"
+    )
+    await callback.message.edit_text(text, parse_mode="HTML")
 
 @admin_router.message(Command("ban"))
 async def cmd_ban(message: Message, chat_service: ChatService) -> None:
