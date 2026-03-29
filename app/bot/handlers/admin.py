@@ -186,3 +186,34 @@ async def cq_admin_actions(callback: CallbackQuery, chat_service: ChatService):
     await callback.message.edit_reply_markup(
         reply_markup=get_admin_user_keyboard(user.telegram_id, user.is_vip, user.is_banned, current_page)
     )
+
+@admin_router.message(Command("makepromo"))
+async def cmd_make_promo(message: Message, command: CommandObject, chat_service: ChatService):
+    """Admin command to create promo code. Usage: /makepromo LAUNCH 5 150 24"""
+    from datetime import datetime, timezone, timedelta
+    from app.db.models.user import PromoCode
+    
+    try:
+        args = command.args.split()
+        code = args[0].upper()
+        vip_days = int(args[1])
+        credits = int(args[2])
+        hours_valid = int(args[3])
+        
+        expires = datetime.now(timezone.utc) + timedelta(hours=hours_valid)
+        
+        db_session = chat_service._session
+        new_promo = PromoCode(code=code, vip_days=vip_days, credits=credits, expires_at=expires)
+        db_session.add(new_promo)
+        await db_session.commit()
+        
+        await message.answer(
+            f"✅ <b>Promo Code Created!</b>\n\n"
+            f"🎟 <b>Code:</b> <code>{code}</code>\n"
+            f"👑 <b>VIP Days:</b> {vip_days}\n"
+            f"💰 <b>Credits:</b> {credits}\n"
+            f"⏱ <b>Expires In:</b> {hours_valid} hours",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        await message.answer("⚠️ Usage: `/makepromo <CODE> <VIP_DAYS> <CREDITS> <HOURS>`\nExample: `/makepromo LAUNCH24 5 150 24`", parse_mode="Markdown")

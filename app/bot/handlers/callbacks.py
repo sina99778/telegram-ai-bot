@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import logging
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+
 from app.services.payment_service import NowPaymentsService
 
 logger = logging.getLogger(__name__)
 callback_router = Router(name="callbacks")
+
+class PromoStates(StatesGroup):
+    waiting_for_code = State()
+
 from app.services.chat_service import ChatService
 
 @callback_router.callback_query(F.data == "toggle_model")
@@ -145,3 +152,68 @@ async def cq_cancel(callback: CallbackQuery) -> None:
     """Handle universal cancel."""
     await callback.message.delete()
     await callback.answer("Action canceled.")
+
+@callback_router.callback_query(F.data == "redeem_promo_code")
+async def cq_redeem_promo_init(callback: CallbackQuery, state: FSMContext):
+    from app.bot.keyboards.inline import get_cancel_promo_keyboard
+    text = "🎁 <b>Redeem Gift Code</b>\n\nPlease type your promo code below:"
+    await callback.message.edit_text(text, reply_markup=get_cancel_promo_keyboard(), parse_mode="HTML")
+    await state.set_state(PromoStates.waiting_for_code)
+
+@callback_router.callback_query(F.data == "cancel_promo_action")
+async def cq_cancel_promo(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("❌ Action cancelled. Open your profile again to see options.")
+
+@callback_router.message(PromoStates.waiting_for_code)
+async def process_promo_code(message: Message, state: FSMContext, chat_service: ChatService):
+    from app.bot.keyboards.inline import get_cancel_promo_keyboard
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import select, and_
+    from app.db.models.user import PromoCode, UserPromo
+    
+    code_input = message.text.strip().upper()
+    user_id = message.from_user.id
+    db_session = chat_service._session
+    
+    # 1. Check if code exists and is valid
+    promo = await db_session.scalar(select(PromoCode).where(PromoCode.code == code_input))
+    
+    if not promo:
+        await message.answer("❌ Invalid promo code.", reply_markup=get_cancel_promo_keyboard())
+        return
+        
+    if promo.expires_at and promo.expires_at < datetime.now(timezone.utc):
+        await message.answer("⚠️ This promo code has expired.", reply_markup=get_cancel_promo_keyboard())
+        await state.clear()
+        return
+        
+    # 2. Check if user already used it
+    used = await db_session.scalar(
+        select(UserPromo).where(and_(UserPromo.user_id == user_id, UserPromo.promo_id == promo.id))
+    )
+    if used:
+        await message.answer("⚠️ You have already redeemed this promo code!")
+        await state.clear()
+        return
+        
+    # 3. Apply rewards
+    user = await chat_service._repo.get_user_by_telegram_id(user_id)
+    user.premium_credits += promo.credits
+    if promo.vip_days > 0:
+        user.is_vip = True
+        # Extend existing VIP or start new
+        current_expire = user.vip_expire_date if user.vip_expire_date and user.vip_expire_date > datetime.now(timezone.utc) else datetime.now(timezone.utc)
+        user.vip_expire_date = current_expire + timedelta(days=promo.vip_days)
+        
+    # Record usage
+    db_session.add(UserPromo(user_id=user_id, promo_id=promo.id))
+    await db_session.commit()
+    
+    await message.answer(
+        f"🎉 <b>Success!</b>\n\n"
+        f"You redeemed code <code>{promo.code}</code>\n"
+        f"🎁 <b>Reward:</b> {promo.credits} Premium Credits & {promo.vip_days} Days VIP!",
+        parse_mode="HTML"
+    )
+    await state.clear()

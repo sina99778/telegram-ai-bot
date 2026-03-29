@@ -10,13 +10,16 @@ def get_profile_keyboard(user: User) -> InlineKeyboardMarkup:
     
     buttons = [
         [InlineKeyboardButton(text="💎 Purchase VIP", callback_data="upgrade_vip")],
-        [InlineKeyboardButton(text=toggle_text, callback_data="toggle_model")]
+        [InlineKeyboardButton(text=toggle_text, callback_data="toggle_model")],
+        [InlineKeyboardButton(text="🎁 Redeem Code", callback_data="redeem_promo_code")]
     ]
-    
-    if user.is_vip:
-        buttons.append([InlineKeyboardButton(text="👨‍💻 Admin Panel", callback_data="admin_stats")])
         
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_cancel_promo_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_promo_action")]
+    ])
 
 def get_cancel_keyboard() -> InlineKeyboardMarkup:
     """Returns a universal cancel inline button."""

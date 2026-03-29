@@ -34,3 +34,16 @@ class User(Base, TimestampMixin):
     special_reward_expire: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
+
+class PromoCode(Base):
+    __tablename__ = "promo_codes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    vip_days: Mapped[int] = mapped_column(Integer, default=0)
+    credits: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+class UserPromo(Base):
+    __tablename__ = "user_promos"
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    promo_id: Mapped[int] = mapped_column(Integer, primary_key=True)
