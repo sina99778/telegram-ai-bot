@@ -4,9 +4,34 @@ from aiogram import F, Router
 from aiogram.types import Message, CallbackQuery
 
 from app.bot.keyboards.inline import get_profile_keyboard
+from app.bot.keyboards.reply import get_main_menu
 from app.services.chat_service import ChatService
+from app.core.i18n import t, TEXTS
 
 menu_router = Router(name="menu")
+
+LANG_BTNS = {TEXTS["en"]["btn_lang"], TEXTS["fa"]["btn_lang"]}
+PROFILE_BTNS = {TEXTS["en"]["btn_profile"], TEXTS["fa"]["btn_profile"]}
+
+@menu_router.message(F.text.in_(LANG_BTNS))
+async def menu_toggle_language(message: Message, chat_service: ChatService) -> None:
+    """Toggles the user language between EN and FA."""
+    if message.from_user is None:
+        return
+        
+    user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        return
+
+    # Toggle logic
+    new_lang = "en" if user.language == "fa" else "fa"
+    user.language = new_lang
+    await chat_service._session.commit()
+
+    await message.answer(
+        text=t("lang_changed", new_lang),
+        reply_markup=get_main_menu(new_lang)
+    )
 
 @menu_router.message(F.text == "🎁 Invite Friends")
 async def menu_invite(message: Message) -> None:
@@ -25,12 +50,14 @@ async def menu_invite(message: Message) -> None:
     )
     await message.answer(text, parse_mode="HTML")
 
-@menu_router.message(F.text == "👤 My Profile")
+@menu_router.message(F.text.in_(PROFILE_BTNS))
 async def menu_profile(message: Message, chat_service: ChatService) -> None:
     if message.from_user is None: return
-        
+    
     user = await chat_service._repo.ensure_daily_credits(message.from_user.id)
     if not user: return # Should not happen
+    
+    lang = user.language if user else "fa"
 
     plan_name = "👑 VIP Premium" if user.is_vip else "🆓 Free Tier"
     
