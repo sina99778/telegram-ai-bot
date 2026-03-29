@@ -38,7 +38,10 @@ class ChatService:
             user = await self._repo.get_or_create_user(telegram_id, username, first_name)
         
         # 2. Economy & Model Routing
-        use_pro_model = user.is_vip
+        # FIX: Check if the user is VIP AND hasn't explicitly downgraded to FLASH
+        is_flash_preferred = str(user.preferred_text_model).upper() == "FLASH"
+        use_pro_model = user.is_vip and not is_flash_preferred
+        
         # EXACT MODEL STRINGS ACCORDING TO GOOGLE API DOCS:
         target_model_str = "gemini-3.1-pro-preview" if use_pro_model else "gemini-2.5-flash"
 
@@ -46,7 +49,7 @@ class ChatService:
         if use_pro_model:
             cost = 7
             if user.premium_credits < cost:
-                return f"⚠️ <b>Not enough credits!</b>\n\nGemini 3.1 Pro requires {cost} credits per message. You have {user.premium_credits} credits left. Please recharge."
+                return f"⚠️ <b>Not enough credits!</b>\n\nGemini 3.1 Pro requires {cost} credits per message. You have {user.premium_credits} credits left. Please recharge or switch to the Free Flash model."
             user.premium_credits -= cost
         else:
             cost = 1
