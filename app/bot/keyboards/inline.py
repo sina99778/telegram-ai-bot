@@ -2,19 +2,24 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from app.db.models import User
 
-def get_profile_keyboard(user: User) -> InlineKeyboardMarkup:
-    """Returns profile/settings keyboard with dynamic model switching buttons."""
-    # Determine the current active model for the button text
+def get_profile_keyboard(user) -> InlineKeyboardMarkup:
+    """Returns the inline keyboard for the user profile."""
     current_model = str(user.preferred_text_model).upper() if user.preferred_text_model else "PRO"
-    toggle_text = "🔄 Active Model: Flash (Free)" if current_model == "FLASH" else "🔄 Active Model: PRO (Paid)"
+    toggle_text = "🔄 Active Model: Flash" if current_model == "FLASH" else "🔄 Active Model: PRO"
     
-    buttons = [
+    # Dynamic memory text based on VIP status
+    if user.keep_chat_history:
+        memory_text = "🧠 Memory: ON (Unlimited)" if user.is_vip else "🧠 Memory: ON (Max 2 Chats)"
+    else:
+        memory_text = "🧹 Memory: Auto-Clear (2h)"
+        
+    keyboard = [
         [InlineKeyboardButton(text="💎 Purchase VIP", callback_data="upgrade_vip")],
         [InlineKeyboardButton(text=toggle_text, callback_data="toggle_model")],
+        [InlineKeyboardButton(text=memory_text, callback_data="toggle_memory")],
         [InlineKeyboardButton(text="🎁 Redeem Code", callback_data="redeem_promo_code")]
     ]
-        
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_cancel_promo_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[

@@ -72,6 +72,49 @@ async def cq_toggle_model(callback: CallbackQuery, chat_service: ChatService) ->
     # Show a small toast notification at the top of the user's screen
     await callback.answer(f"✅ Model switched to {new_model}!")
 
+@callback_router.callback_query(F.data == "toggle_memory")
+async def cq_toggle_memory(callback: CallbackQuery, chat_service: ChatService):
+    if callback.from_user is None: return
+    
+    user = await chat_service._repo.get_user_by_telegram_id(callback.from_user.id)
+    if not user: return
+    
+    user.keep_chat_history = not user.keep_chat_history
+    await chat_service._session.commit()
+    
+    # Custom alert message
+    if user.keep_chat_history:
+        if user.is_vip:
+            alert_msg = "✅ Memory ON! I will remember our entire conversation."
+        else:
+            alert_msg = "✅ Memory ON! (Free limit: I will only remember our last 2 chats. Upgrade to VIP for unlimited memory!)"
+    else:
+        alert_msg = "🧹 Memory OFF! Chats will auto-clear after 2 hours."
+        
+    await callback.answer(alert_msg, show_alert=True)
+    
+    # Regenerate Profile Text 
+    plan_name = "👑 VIP Premium" if user.is_vip else "🆓 Free Tier"
+    current_model = str(user.preferred_text_model).upper() if user.preferred_text_model else "PRO"
+    mem_status = "Keep History" if user.keep_chat_history else "Auto-Clear"
+    
+    text = (
+        f"👤 <b>User Profile</b>\n\n"
+        f"<b>Name:</b> {user.first_name}\n"
+        f"<b>ID:</b> <code>{user.telegram_id}</code>\n\n"
+        f"🏷️ <b>Current Plan:</b> {plan_name}\n"
+        f"💬 <b>Normal Credits:</b> {user.normal_credits}\n"
+        f"🪙 <b>Premium Credits:</b> {user.premium_credits}\n\n"
+        f"⚙️ <b>Model:</b> {current_model}\n"
+        f"🧠 <b>Memory:</b> {mem_status}"
+    )
+    
+    from app.bot.keyboards.inline import get_profile_keyboard
+    try:
+        await callback.message.edit_text(text=text, reply_markup=get_profile_keyboard(user), parse_mode="HTML")
+    except Exception:
+        pass
+
 @callback_router.callback_query(F.data == "upgrade_vip")
 async def cq_show_vip_plans_from_profile(callback: CallbackQuery) -> None:
     """Handle the upgrade_vip callback from user profile inline keyboard."""

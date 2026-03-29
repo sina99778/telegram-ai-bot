@@ -70,15 +70,18 @@ async def menu_profile(message: Message, chat_service: ChatService) -> None:
     lang = user.language if user else "fa"
 
     plan_name = "👑 VIP Premium" if user.is_vip else "🆓 Free Tier"
+    current_model = str(user.preferred_text_model).upper() if user.preferred_text_model else "PRO"
+    mem_status = "Keep History" if user.keep_chat_history else "Auto-Clear"
     
     text = (
         f"👤 <b>User Profile</b>\n\n"
         f"<b>Name:</b> {user.first_name}\n"
         f"<b>ID:</b> <code>{user.telegram_id}</code>\n\n"
         f"🏷️ <b>Current Plan:</b> {plan_name}\n"
-        f"💬 <b>Normal Credits:</b> {user.normal_credits} <i>(Free Daily)</i>\n"
-        f"🪙 <b>Premium Credits:</b> {user.premium_credits} <i>(Images / Pro Chat)</i>\n\n"
-        f"⚙️ <b>Preferred Text Model:</b>\n<b>{str(user.preferred_text_model).upper() if user.preferred_text_model else 'PRO'}</b>"
+        f"💬 <b>Normal Credits:</b> {user.normal_credits}\n"
+        f"🪙 <b>Premium Credits:</b> {user.premium_credits}\n\n"
+        f"⚙️ <b>Model:</b> {current_model}\n"
+        f"🧠 <b>Memory:</b> {mem_status}"
     )
 
     if not user.is_vip:

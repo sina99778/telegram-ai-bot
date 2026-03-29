@@ -67,23 +67,34 @@ class ChatService:
         conversation = await self._repo.get_or_create_active_conversation(user_id=user.id)
         history = await self._repo.get_conversation_history(conversation_id=conversation.id)
 
-        # --- NEW: Token Optimization & Auto-Reset ---
+        # --- Token Optimization & Auto-Reset ---
         was_auto_reset = False
         if history and hasattr(history[-1], 'created_at') and history[-1].created_at:
             last_time = history[-1].created_at
             if last_time.tzinfo is None:
                 last_time = last_time.replace(tzinfo=timezone.utc)
                 
-            if (datetime.now(timezone.utc) - last_time).total_seconds() > 7200: # 2 hours timeout
-                await self.reset_conversation(telegram_id)
-                conversation = await self._repo.get_or_create_active_conversation(user_id=user.id)
-                history = []
-                was_auto_reset = True
+            # Auto-clear only if memory is OFF
+            if not user.keep_chat_history:
+                if (datetime.now(timezone.utc) - last_time).total_seconds() > 7200: # 2 hours timeout
+                    await self.reset_conversation(telegram_id)
+                    conversation = await self._repo.get_or_create_active_conversation(user_id=user.id)
+                    history = []
+                    was_auto_reset = True
 
-        # Smart Truncation: Keep only the last 10 messages (5 pairs) in context to save API tokens
-        if len(history) > 10:
-            history = history[-10:]
-        # --------------------------------------------
+        # --- SMART TRUNCATION (VIP vs FREE) ---
+        # 1 interaction = 2 messages (user + bot)
+        max_messages = 10 # Default for memory OFF (5 interactions context during the 2 hours)
+        
+        if user.keep_chat_history:
+            if user.is_vip:
+                max_messages = 40 # 20 interactions (prevents Google API context length crash)
+            else:
+                max_messages = 4 # 2 interactions ONLY for Free users
+                
+        if len(history) > max_messages:
+            history = history[-max_messages:]
+        # --------------------------------------
 
         db_content = f"[Attached Media: {mime_type}]\n{text}" if media_bytes else text
         await self._repo.add_message(conversation_id=conversation.id, role="user", content=db_content)

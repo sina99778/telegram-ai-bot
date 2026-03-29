@@ -25,6 +25,7 @@ class User(Base, TimestampMixin):
     # NEW FIELD: Stores user's preferred model ('flash' or 'pro')
     preferred_text_model: Mapped[str] = mapped_column(String, default='flash')
     language: Mapped[str] = mapped_column(String(2), default="fa")
+    keep_chat_history: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Referral System
     referral_code: Mapped[str | None] = mapped_column(String(50), unique=True, index=True, nullable=True)
