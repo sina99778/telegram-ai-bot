@@ -8,13 +8,30 @@ from app.services.chat_service import ChatService
 
 menu_router = Router(name="menu")
 
-@menu_router.message(F.text == "👤 My Profile")
-async def menu_profile(message: Message, chat_service: ChatService) -> None:
-    """Handle the Profile button and show real DB stats."""
+@menu_router.message(F.text == "🎁 Invite Friends")
+async def menu_invite(message: Message) -> None:
+    """Generate and send the user's referral link."""
     if message.from_user is None:
         return
         
-    user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
+    bot_info = await message.bot.me()
+    ref_link = f"https://t.me/{bot_info.username}?start=ref_{message.from_user.id}"
+    
+    text = (
+        "🎁 <b>Invite Friends & Earn Credits!</b>\n\n"
+        "Share your unique link with friends. Every time a new user starts the bot using your link, "
+        "you will instantly receive <b>+10 Premium Credits</b> for Gemini 3.1 Pro & Nano Banana 2!\n\n"
+        f"🔗 <b>Your Link:</b>\n<code>{ref_link}</code>"
+    )
+    await message.answer(text, parse_mode="HTML")
+
+@menu_router.message(F.text == "👤 My Profile")
+async def menu_profile(message: Message, chat_service: ChatService) -> None:
+    if message.from_user is None:
+        return
+        
+    # Ensure credits are updated before showing profile
+    user = await chat_service._repo.ensure_daily_credits(message.from_user.id)
     if not user:
         await message.answer("User profile not found. Please type /start first.")
         return
@@ -27,11 +44,12 @@ async def menu_profile(message: Message, chat_service: ChatService) -> None:
         f"<b>Name:</b> {user.first_name}\n"
         f"<b>ID:</b> <code>{user.telegram_id}</code>\n\n"
         f"🏷️ <b>Current Plan:</b> {plan_name}{expire_text}\n"
-        f"🪙 <b>Image Credits:</b> {user.image_credits}\n\n"
+        f"💬 <b>Normal Credits:</b> {user.normal_credits} <i>(Resets Daily)</i>\n"
+        f"🪙 <b>Premium Credits:</b> {user.premium_credits} <i>(Images & Pro AI)</i>\n\n"
     )
     
     if not user.is_vip:
-        text += f"<i>Upgrade to VIP to access Gemini 3.1 Pro and Nano Banana 2!</i>"
+        text += f"<i>Upgrade to VIP to access unlimited features!</i>"
 
     await message.answer(text, reply_markup=get_profile_keyboard(), parse_mode="HTML")
 

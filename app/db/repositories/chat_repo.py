@@ -265,8 +265,8 @@ class ChatRepository:
     async def deduct_image_credit(self, telegram_id: int) -> bool:
         """Deduct one image credit if the user has enough. Returns True if successful."""
         user = await self.get_user_by_telegram_id(telegram_id)
-        if user and user.image_credits > 0:
-            user.image_credits -= 1
+        if user and user.premium_credits > 0:
+            user.premium_credits -= 1
             await self._session.commit()
             return True
         return False
@@ -276,9 +276,38 @@ class ChatRepository:
         user = await self.get_user_by_telegram_id(telegram_id)
         if user:
             user.is_vip = True
-            user.image_credits += add_credits
+            user.premium_credits += add_credits
             if expire_date:
                 user.vip_expire_date = expire_date
             await self._session.commit()
             return True
         return False
+
+    async def ensure_daily_credits(self, telegram_id: int) -> User | None:
+        """Lazy evaluation to reset daily credits if a new day has started."""
+        user = await self.get_user_by_telegram_id(telegram_id)
+        if not user:
+            return None
+        
+        now = datetime.now(timezone.utc)
+        # If last_credit_reset is None, or if the date has changed
+        if not user.last_credit_reset or user.last_credit_reset.date() < now.date():
+            user.normal_credits = 50
+            # Top up premium credits to at least 10, keeping any extra referral bonuses
+            user.premium_credits = max(10, user.premium_credits)
+            user.last_credit_reset = now
+            await self._session.commit()
+        return user
+
+    async def process_referral(self, new_user_tg_id: int, referrer_tg_id: int) -> None:
+        """Process referral reward if valid."""
+        if new_user_tg_id == referrer_tg_id:
+            return # Cannot refer oneself
+            
+        new_user = await self.get_user_by_telegram_id(new_user_tg_id)
+        if new_user and new_user.referred_by is None:
+            referrer = await self.get_user_by_telegram_id(referrer_tg_id)
+            if referrer:
+                new_user.referred_by = referrer.id
+                referrer.premium_credits += 10 # Reward the referrer
+                await self._session.commit()
