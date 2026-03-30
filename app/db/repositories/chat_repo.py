@@ -144,6 +144,40 @@ class ChatRepository:
         )
         return conversation
 
+    async def get_user_conversations(self, user_id: int, limit: int = 5) -> list[Conversation]:
+        """Fetches the latest conversations for a user."""
+        stmt = (
+            select(Conversation)
+            .where(Conversation.user_id == user_id)
+            .order_by(Conversation.created_at.desc())
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def set_active_conversation(self, telegram_id: int, conversation_id: int) -> bool:
+        """Marks a specific conversation as the active one for the user."""
+        from sqlalchemy import update
+        user = await self.get_user_by_telegram_id(telegram_id)
+        if not user:
+            return False
+            
+        # First, deactivate all user's conversations
+        await self._session.execute(
+            update(Conversation)
+            .where(Conversation.user_id == user.id)
+            .values(is_active=False)
+        )
+        # Then, activate the selected one
+        await self._session.execute(
+            update(Conversation)
+            .where(Conversation.id == conversation_id)
+            .where(Conversation.user_id == user.id)
+            .values(is_active=True)
+        )
+        # Commit will be handled by caller
+        return True
+
     # ──────────────────────────────────────────
     #  Message Management
     # ──────────────────────────────────────────

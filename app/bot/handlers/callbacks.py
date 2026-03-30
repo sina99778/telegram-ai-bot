@@ -330,3 +330,45 @@ async def process_promo_code(message: Message, state: FSMContext, chat_service: 
         parse_mode="HTML"
     )
     await state.clear()
+
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+@callback_router.callback_query(F.data == "view_chat_history")
+async def view_chat_history(callback: CallbackQuery, chat_service: ChatService):
+    user = await chat_service._repo.get_user_by_telegram_id(callback.from_user.id)
+    if not user: return
+    
+    # Check if they have memory enabled
+    if not user.keep_chat_history:
+        return await callback.answer("⚠️ Memory is OFF. Turn it ON in your profile to save chats.", show_alert=True)
+
+    conversations = await chat_service._repo.get_user_conversations(user.id, limit=5)
+    if not conversations:
+        return await callback.answer("No saved chats found yet.", show_alert=True)
+
+    builder = InlineKeyboardBuilder()
+    for conv in conversations:
+        # Create a button for each conversation (using its creation date as title)
+        title = f"💬 Chat: {conv.created_at.strftime('%Y-%m-%d %H:%M')}"
+        builder.row(InlineKeyboardButton(text=title, callback_data=f"resume_chat_{conv.id}"))
+
+    # Add back button to profile
+    builder.row(InlineKeyboardButton(text="🔙 Back to Profile", callback_data="cancel_action"))
+
+    await callback.message.edit_text(
+        "📂 <b>Your Saved Conversations:</b>\n\nSelect a chat below to resume it:", 
+        reply_markup=builder.as_markup(), 
+        parse_mode="HTML"
+    )
+
+@callback_router.callback_query(F.data.startswith("resume_chat_"))
+async def resume_chat(callback: CallbackQuery, chat_service: ChatService):
+    conv_id = int(callback.data.split("_")[2])
+    
+    # Tell the DB to make this conversation the active one
+    await chat_service._repo.set_active_conversation(callback.from_user.id, conv_id)
+    await chat_service._session.commit()
+    
+    await callback.answer("✅ Conversation resumed! Send a message to continue.", show_alert=True)
+    # Optionally delete the inline menu to clean up the chat
+    await callback.message.delete()

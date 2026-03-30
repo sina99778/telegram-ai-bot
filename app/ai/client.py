@@ -129,6 +129,9 @@ class GeminiClient:
             response = await self._client.aio.models.generate_content(
                 model=model,
                 contents=messages,
+                config=types.GenerateContentConfig(
+                    tools=[{"google_search": {}}]
+                )
             )
             return response.text or ""
         except Exception as exc:
