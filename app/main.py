@@ -23,6 +23,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, status
 from app.bot.dispatcher import get_dispatcher
 from app.core.config import settings
 from app.db.session import engine, AsyncSessionLocal
+from app.db.models import Base
 from app.db.repositories.chat_repo import ChatRepository
 from datetime import datetime, timedelta, timezone
 
@@ -56,6 +57,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         token=settings.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+
+    # Ensure all tables exist (safe on subsequent runs — it's a no-op if they already exist)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables verified / created")
 
     # Tell Telegram to POST updates to our /webhook endpoint.
     await bot.set_webhook(
