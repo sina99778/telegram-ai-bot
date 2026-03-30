@@ -39,7 +39,7 @@ async def test_orchestrator_queue_trigger(db_session, session_factory, setup_bas
     queue_service = AsyncMock()
     queue_service.enqueue_summarization.return_value = JobResult(success=True, job_id="test_job_123")
     
-    orchestrator = ChatOrchestrator(session_factory, billing, mock_router, memory, queue_service)
+    orchestrator = ChatOrchestrator(db_session, billing, mock_router, memory, queue_service)
     user_id = setup_base_data["user_id"]
     
     # 6. Do not rely on massive prompt string. Pre-set Conversation Token State cleanly.
@@ -63,12 +63,12 @@ async def test_orchestrator_queue_trigger(db_session, session_factory, setup_bas
 
 # 7. Add extreme edge condition handlers ensuring refund scopes work natively
 @pytest.mark.asyncio
-async def test_orchestrator_insufficient_balance(session_factory, setup_base_data, mock_router):
+async def test_orchestrator_insufficient_balance(db_session, setup_base_data, mock_router):
     billing = AsyncMock()
     memory = AsyncMock()
     queue = AsyncMock()
     
-    orchestrator = ChatOrchestrator(session_factory, billing, mock_router, memory, queue)
+    orchestrator = ChatOrchestrator(db_session, billing, mock_router, memory, queue)
     
     # Emulate User having zero balance mapping natively
     from app.core.exceptions import InsufficientCreditsError
@@ -79,7 +79,7 @@ async def test_orchestrator_insufficient_balance(session_factory, setup_base_dat
     assert "Insufficient balance" in res.text
 
 @pytest.mark.asyncio
-async def test_orchestrator_ai_failure_refunds_credits(session_factory, setup_base_data, mock_router):
+async def test_orchestrator_ai_failure_refunds_credits(db_session, setup_base_data, mock_router):
     billing = AsyncMock()
     memory = AsyncMock(spec=MemoryManager)
     memory.get_conversation_history.return_value = []
@@ -88,7 +88,7 @@ async def test_orchestrator_ai_failure_refunds_credits(session_factory, setup_ba
     # Force Mock AI to throw exception explicitly during generation step
     mock_router.route_text_request_with_config.side_effect = Exception("Vertex Timeout")
     
-    orchestrator = ChatOrchestrator(session_factory, billing, mock_router, memory, queue)
+    orchestrator = ChatOrchestrator(db_session, billing, mock_router, memory, queue)
     
     res = await orchestrator.process_message(setup_base_data["user_id"], "crash please", FeatureName.FLASH_TEXT)
     

@@ -35,9 +35,8 @@ class ServicesMiddleware(BaseMiddleware):
             model_router = ModelRouter(session, self.providers)
             memory_manager = MemoryManager(session)
             queue_service = QueueService()
-            
             chat_orchestrator = ChatOrchestrator(
-                session_factory=self.session_factory, 
+                session=session, 
                 billing=billing_service, 
                 router=model_router, 
                 memory=memory_manager,
