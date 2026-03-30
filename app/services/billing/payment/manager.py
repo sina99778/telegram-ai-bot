@@ -45,19 +45,20 @@ class PaymentManager:
             currency=currency,
             credits_granted=credits_to_grant,
             status=TransactionStatus.PENDING,
-            idempotency_key=idempotency_key
+            idempotency_key=idempotency_key,
+            raw_payload={"invoice_creation": invoice_data, "description": description}
         )
         self.session.add(tx)
-        await self.session.flush() # Flush to get tx.id and ensure constraints
+        # Flush/Commit is omitted; delegated to caller orchestration.
         
         return invoice_data["invoice_url"]
 
-    async def process_webhook(self, provider_name: str, payload: Dict[str, Any], headers: Dict[str, str]):
+    async def process_webhook(self, provider_name: str, payload: Dict[str, Any], headers: Dict[str, str], raw_body: bytes):
         """Handles incoming webhooks idempotently, transitions state, and grants credits if successful."""
         provider = self._get_provider(provider_name)
         
         # 1. Verify Signature
-        if not await provider.verify_webhook(payload, headers):
+        if not await provider.verify_webhook(payload, headers, raw_body):
             logger.warning(f"Invalid webhook signature for provider {provider_name}")
             raise PermissionError("Invalid webhook signature")
             
@@ -75,14 +76,29 @@ class PaymentManager:
             logger.error(f"Webhook received for unknown transaction: {provider_payment_id}")
             return # Acknowledge webhook anyway to stop provider from retrying
 
-        # Update raw payload for audit
-        tx.raw_payload = payload
+        # Update raw payload for audit with robust metadata
+        tx.raw_payload = {
+            "invoice_creation": tx.raw_payload.get("invoice_creation", {}) if tx.raw_payload else {},
+            "latest_webhook": payload,
+            "webhook_headers": dict(headers)
+        }
 
-        # 4. Idempotency Check: If already in a terminal state, do nothing
+        # 4. State Machine Definition & Validations
+        valid_transitions = {
+            TransactionStatus.PENDING: [TransactionStatus.COMPLETED, TransactionStatus.FAILED, TransactionStatus.CANCELED, TransactionStatus.REFUNDED],
+            # Terminal states do not generally rebound.
+        }
+        
+        # Idempotency Check
         if tx.status in [TransactionStatus.COMPLETED, TransactionStatus.FAILED, TransactionStatus.CANCELED, TransactionStatus.REFUNDED]:
             logger.info(f"Transaction {tx.id} already processed (Status: {tx.status}). Ignoring webhook.")
             return
-
+            
+        # State Transition Enforcement
+        if new_status not in valid_transitions.get(tx.status, []):
+            logger.warning(f"Invalid state transition attempted for tx {tx.id}: {tx.status} -> {new_status}")
+            return
+        
         # 5. State Transition Logic
         if new_status == TransactionStatus.COMPLETED:
             # Grant credits atomically
@@ -105,4 +121,4 @@ class PaymentManager:
             # Update status for FAILED/CANCELED/PENDING
             tx.status = new_status
             
-        await self.session.flush()
+        # Flush/Commit omitted; transaction logic is to be managed explicitly by caller boundary.

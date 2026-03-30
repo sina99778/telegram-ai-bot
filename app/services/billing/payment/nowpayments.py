@@ -36,24 +36,27 @@ class NowPaymentsProvider(BasePaymentProvider):
             async with session.post(url, json=payload, headers=headers) as resp:
                 if resp.status == 200:
                     data = await resp.json()
+                    invoice_url = data.get("invoice_url")
+                    provider_payment_id = data.get("id")
+                    if not invoice_url or not provider_payment_id:
+                        raise RuntimeError(f"Missing required fields in NowPayments response: {data}")
                     return {
-                        "invoice_url": data.get("invoice_url"),
-                        "provider_payment_id": str(data.get("id"))
+                        "invoice_url": invoice_url,
+                        "provider_payment_id": str(provider_payment_id)
                     }
                 else:
                     err = await resp.text()
                     logger.error(f"NowPayments Invoice Error: {err}")
                     raise RuntimeError("Failed to create invoice with payment provider.")
 
-    async def verify_webhook(self, payload: Dict[str, Any], headers: Dict[str, str]) -> bool:
+    async def verify_webhook(self, payload: Dict[str, Any], headers: Dict[str, str], raw_body: bytes) -> bool:
         # NowPayments sends signature in x-nowpayments-sig header
         signature = headers.get("x-nowpayments-sig")
         if not signature:
             return False
             
-        # Sort payload keys and generate HMAC
-        sorted_payload = json.dumps(payload, separators=(',', ':'), sort_keys=True)
-        hmac_obj = hmac.new(self.ipn_secret.encode(), sorted_payload.encode(), hashlib.sha512)
+        # Use exact raw request body for HMAC to avoid JSON serialization jitter
+        hmac_obj = hmac.new(self.ipn_secret.encode(), raw_body, hashlib.sha512)
         expected_sig = hmac_obj.hexdigest()
         
         return hmac.compare_digest(signature, expected_sig)
@@ -63,6 +66,10 @@ class NowPaymentsProvider(BasePaymentProvider):
         payment_status = payload.get("payment_status", "").lower()
         
         status_mapping = {
+            "waiting": TransactionStatus.PENDING,
+            "confirming": TransactionStatus.PENDING,
+            "confirmed": TransactionStatus.PENDING,
+            "sending": TransactionStatus.PENDING,
             "finished": TransactionStatus.COMPLETED,
             "failed": TransactionStatus.FAILED,
             "expired": TransactionStatus.CANCELED,

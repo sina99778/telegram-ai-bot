@@ -19,7 +19,7 @@ class BasePaymentProvider(ABC):
         pass
 
     @abstractmethod
-    async def verify_webhook(self, payload: Dict[str, Any], headers: Dict[str, str]) -> bool:
+    async def verify_webhook(self, payload: Dict[str, Any], headers: Dict[str, str], raw_body: bytes) -> bool:
         """Verifies the authenticity of the webhook payload using provider signatures."""
         pass
 
