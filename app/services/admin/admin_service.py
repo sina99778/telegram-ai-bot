@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.db.models import User, CreditLedger, PaymentTransaction
 from app.services.billing.billing_service import BillingService
+from app.core.enums import FeatureName
 from app.core.exceptions import AppError
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,31 @@ class AdminService:
     def __init__(self, session: AsyncSession, billing: BillingService):
         self.session = session
         self.billing = billing
+
+    async def add_credits_to_user(self, admin_telegram_id: int, target_telegram_id: int, amount: int) -> int:
+        from app.core.exceptions import AppError
+        import uuid
+        user = await self.get_user_details(target_telegram_id)
+        
+        # We explicitly trigger the billing bounds mapping rather than SQL hacking
+        new_balance = await self.billing.add_credits(
+            user_id=user.id,
+            amount=amount,
+            reference_type="admin_grant",
+            reference_id=f"admin_{admin_telegram_id}_grant_{uuid.uuid4().hex[:6]}",
+            description=f"Admin {admin_telegram_id} explicitly granted {amount} credits."
+        )
+        return new_balance
+
+    async def update_feature_price(self, feature_name: FeatureName, new_cost: int) -> bool:
+        from app.db.models import FeatureConfig
+        from sqlalchemy import select
+        feature = await self.session.scalar(select(FeatureConfig).where(FeatureConfig.name == feature_name))
+        if not feature:
+            raise ValueError("Feature not natively located.")
+        
+        feature.credit_cost = new_cost
+        return True
 
     async def get_system_stats(self) -> Dict[str, Any]:
         """Aggregate broad operational metrics securely reading the DB."""

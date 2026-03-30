@@ -25,13 +25,13 @@ async def db_engine():
 
 @pytest_asyncio.fixture(scope="function")
 async def db_session(db_engine):
-    async_session = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
-    async with async_session() as session:
+    session_factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async with session_factory() as session:
         yield session
 
 # 9. Factory-style Fixtures Architecture
-@pytest_asyncio.fixture
-def user_factory(db_session):
+@pytest_asyncio.fixture(scope="function")
+async def user_factory(db_session: AsyncSession):
     async def _create_user(telegram_id: int, balance: int = 100, is_premium: bool = False):
         user = User(telegram_id=telegram_id, credit_balance=balance, is_premium=is_premium)
         db_session.add(user)
@@ -39,8 +39,8 @@ def user_factory(db_session):
         return user
     return _create_user
 
-@pytest_asyncio.fixture
-def payment_factory(db_session):
+@pytest_asyncio.fixture(scope="function")
+async def payment_factory(db_session: AsyncSession):
     async def _create_payment(user_id: int, provider: str, amount: float, credits: int, status: str = "COMPLETED"):
         tx = PaymentTransaction(
             user_id=user_id,
@@ -57,7 +57,7 @@ def payment_factory(db_session):
     return _create_payment
 
 @pytest_asyncio.fixture(scope="function")
-async def setup_base_data(db_session, user_factory, payment_factory):
+async def setup_base_data(db_session: AsyncSession, user_factory, payment_factory):
     """Injects core testing scaffolding mapping Base Configs and factory yields."""
     user = await user_factory(telegram_id=123456789, balance=100)
     
