@@ -7,7 +7,7 @@ from app.db.models import User
 
 image_router = Router()
 
-@image_router.message(Command("image") & (F.chat.type == "private"))
+@image_router.message(Command("image"))
 async def handle_image_command(message: Message, command: CommandObject, db_user: User, image_orchestrator: ImageOrchestrator):
     """Handles /image <prompt> commands explicitly isolated within Private Chats."""
     

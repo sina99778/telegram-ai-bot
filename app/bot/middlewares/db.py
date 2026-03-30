@@ -29,6 +29,7 @@ from app.services.ai.router import ModelRouter
 from app.services.chat.memory import MemoryManager
 from app.services.queue.queue_service import QueueService
 from app.services.chat.orchestrator import ChatOrchestrator
+from app.services.chat.image_orchestrator import ImageOrchestrator
 
 class DbSessionMiddleware(BaseMiddleware):
     """Opens an ``AsyncSession`` before the handler runs and guarantees
@@ -87,6 +88,13 @@ class DbSessionMiddleware(BaseMiddleware):
                 queue_service=queue
             )
             data["chat_orchestrator"] = chat_orchestrator
+
+            image_orchestrator = ImageOrchestrator(
+                session=session,
+                billing=billing,
+                router=router
+            )
+            data["image_orchestrator"] = image_orchestrator
 
             logger.debug("DB session opened for update")
 
