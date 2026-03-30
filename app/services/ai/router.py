@@ -33,9 +33,11 @@ class ModelRouter:
 
     async def route_text_request(self, feature_name: FeatureName, prompt: str, history: List[AIMessage], persona: str, language: str) -> AIResponse:
         """Handles text requests enforcing FeatureConfig constraints and fallback policies."""
-        # 1. Fetch live DB Configuration Policies
         config = await self._get_feature_config(feature_name)
-        
+        return await self.route_text_request_with_config(config, prompt, history, persona, language)
+
+    async def route_text_request_with_config(self, config: FeatureConfig, prompt: str, history: List[AIMessage], persona: str, language: str) -> AIResponse:
+        """Processes requests utilizing an explicit pre-resolved Configuration object."""
         # 2. Select Provider dynamically
         provider = self.providers.get(config.provider)
         if not provider:

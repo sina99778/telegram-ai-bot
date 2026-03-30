@@ -1,0 +1,147 @@
+import uuid
+import logging
+from dataclasses import dataclass
+from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.db.models import Conversation, Message, FeatureConfig
+from app.core.enums import FeatureName, MessageRole
+from app.core.exceptions import InsufficientCreditsError
+from app.services.billing.billing_service import BillingService
+from app.services.ai.router import ModelRouter
+from app.services.chat.memory import MemoryManager
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class ChatResult:
+    text: str
+    success: bool
+    model_name: Optional[str] = None
+    tokens_used: int = 0
+    error_message: Optional[str] = None
+
+class ChatOrchestrator:
+    def __init__(self, session: AsyncSession, billing: BillingService, router: ModelRouter, memory: MemoryManager):
+        self.session = session
+        self.billing = billing
+        self.router = router
+        self.memory = memory
+
+    async def _get_or_create_active_conversation(self, user_id: int, mode_str: str) -> Conversation:
+        stmt = select(Conversation).where(
+            Conversation.user_id == user_id, 
+            Conversation.is_active == True,
+            Conversation.conversation_mode == mode_str
+        ).order_by(Conversation.created_at.desc()).limit(1)
+        
+        conv = await self.session.scalar(stmt)
+        if not conv:
+            conv = Conversation(user_id=user_id, conversation_mode=mode_str)
+            self.session.add(conv)
+            await self.session.flush()
+        return conv
+
+    async def process_message(self, user_id: int, prompt: str, feature_name: FeatureName) -> ChatResult:
+        """
+        Executes the full pipeline cleanly handling transactions: 
+        Deduct -> Route to AI -> Save DB -> (Refund on fail).
+        """
+        # 1. Fetch Shared Config mapping via Router
+        try:
+            config = await self.router._get_feature_config(feature_name)
+        except Exception as e:
+            return ChatResult(text="⚠️ This feature is currently disabled.", success=False, error_message=str(e))
+            
+        cost = config.credit_cost
+        reference_id = f"msg_{uuid.uuid4().hex}"
+        mode_str = feature_name.value
+
+        # 2. Pre-deduct credits with explicit commit boundary
+        try:
+            await self.billing.deduct_credits(
+                user_id=user_id,
+                amount=cost,
+                reference_type="chat_message",
+                reference_id=reference_id,
+                description=f"AI Chat ({mode_str.upper()})"
+            )
+            await self.session.commit()
+        except InsufficientCreditsError:
+            await self.session.rollback()
+            return ChatResult(text=f"❌ Insufficient balance. You need {cost} credits.", success=False, error_message="insufficient_funds")
+        except Exception as e:
+            logger.error(f"Billing deduction error: {e}")
+            await self.session.rollback()
+            return ChatResult(text="⚠️ System error checking balance.", success=False, error_message="billing_error")
+
+        # --- A Clean Transaction Context begins for Generation ---
+
+        # 3. Fetch Context & AI Generation
+        try:
+            conv = await self._get_or_create_active_conversation(user_id, mode_str)
+            history = await self.memory.get_conversation_history(conv.id)
+            
+            # Use Config explicitly mapping
+            response = await self.router.route_text_request_with_config(
+                config=config,
+                prompt=prompt,
+                history=history,
+                persona=conv.persona,
+                language=conv.language_preference
+            )
+        except Exception as e:
+            logger.error(f"AI Generation failed: {e}")
+            # Ensure dirty database entities derived during context building roll back explicitly.
+            await self.session.rollback() 
+            
+            # Saga Refund Execution
+            try:
+                await self.billing.refund_credits(
+                    user_id=user_id,
+                    original_reference_id=reference_id,
+                    amount=cost,
+                    description="Refund: AI Generation Failed"
+                )
+                await self.session.commit()
+            except Exception as refund_err:
+                logger.error(f"CRITICAL: Refund failed for {reference_id}: {refund_err}")
+                await self.session.rollback()
+
+            return ChatResult(text="⚠️ My AI brain encountered an error. Your credits have been safely refunded.", success=False, error_message=str(e))
+
+        # 4. Save messages metadata persistently
+        try:
+            tokens_used = response.tokens_used
+            
+            user_msg = Message(
+                conversation_id=conv.id, 
+                role=MessageRole.USER, 
+                content=prompt,
+                tokens_used=self.memory.tokenizer.estimate_tokens(prompt) if tokens_used == 0 else 0
+            ) # We record tokens against models predominantly, user estimation as fallback
+            
+            bot_msg = Message(
+                conversation_id=conv.id, 
+                role=MessageRole.MODEL, 
+                content=response.text,
+                tokens_used=tokens_used
+            )
+            self.session.add_all([user_msg, bot_msg])
+            
+            conv.total_tokens_used += tokens_used
+            conv.last_model_used = response.model_name
+            
+            await self.session.commit()
+        except Exception as e:
+            logger.error(f"Failed to persist chat messages for tx {reference_id}: {e}")
+            await self.session.rollback()
+            # In cases where the AI actually spent the token computing the response successfully,
+            # we prioritize returning the successful answer instead of punishing the user explicitly.
+            
+        return ChatResult(
+            text=response.text, 
+            success=True, 
+            model_name=response.model_name,
+            tokens_used=response.tokens_used
+        )
