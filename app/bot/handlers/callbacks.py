@@ -324,7 +324,9 @@ async def process_promo_code(message: Message, state: FSMContext, chat_service: 
     from app.bot.keyboards.inline import get_cancel_promo_keyboard
     from datetime import datetime, timezone, timedelta
     from sqlalchemy import select, and_
-    from app.db.models.user import PromoCode, UserPromo
+    from app.db.models import PromoCode, UserPromo
+    from app.services.billing.billing_service import BillingService
+    from app.core.enums import LedgerEntryType
     
     code_input = message.text.strip().upper()
     user_id = message.from_user.id
@@ -353,7 +355,22 @@ async def process_promo_code(message: Message, state: FSMContext, chat_service: 
         
     # 3. Apply rewards
     user = await chat_service._repo.get_user_by_telegram_id(user_id)
+    
+    if promo.credits > 0:
+        # Use new BillingService to safely add credits and keep ledger
+        billing = BillingService(db_session)
+        await billing.add_credits(
+            user_id=user.id,
+            amount=promo.credits,
+            entry_type=LedgerEntryType.BONUS, # Or appropriate enum
+            reference_type="promo_code",
+            reference_id=f"promo_{promo.id}_user_{user.id}",
+            description=f"Redeemed promo code: {promo.code}"
+        )
+        
+    # Also add to legacy premium_credits if system relies on both currently
     user.premium_credits += promo.credits
+        
     if promo.vip_days > 0:
         user.is_vip = True
         # Extend existing VIP or start new
@@ -361,13 +378,14 @@ async def process_promo_code(message: Message, state: FSMContext, chat_service: 
         user.vip_expire_date = current_expire + timedelta(days=promo.vip_days)
         
     # Record usage
-    db_session.add(UserPromo(user_id=user_id, promo_id=promo.id))
+    db_session.add(UserPromo(user_id=user.id, promo_id=promo.id))
+    
     await db_session.commit()
     
     await message.answer(
         f"🎉 <b>Success!</b>\n\n"
         f"You redeemed code <code>{promo.code}</code>\n"
-        f"🎁 <b>Reward:</b> {promo.credits} Premium Credits & {promo.vip_days} Days VIP!",
+        f"🎁 <b>Reward:</b> {promo.credits} Credits & {promo.vip_days} Days VIP!",
         parse_mode="HTML"
     )
     await state.clear()

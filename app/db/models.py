@@ -164,3 +164,24 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+
+class PromoCode(Base):
+    __tablename__ = "promo_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    credits: Mapped[int] = mapped_column(default=0)
+    vip_days: Mapped[int] = mapped_column(default=0)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class UserPromo(Base):
+    __tablename__ = "user_promos"
+    __table_args__ = (
+        UniqueConstraint('user_id', 'promo_id', name='uq_user_promo'),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    promo_id: Mapped[int] = mapped_column(ForeignKey("promo_codes.id"), index=True)
+    redeemed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
