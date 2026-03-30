@@ -9,6 +9,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Install curl for Docker healthcheck probes
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
+
 # ── Install dependencies first (cached layer) ──
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \

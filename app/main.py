@@ -29,9 +29,28 @@ from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
+# Configure root logger so startup messages are visible in docker logs
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
 # ── Shared references (populated during lifespan) ──
 bot: Bot | None = None
 dp = get_dispatcher()
+
+# ── Startup validation ───────────────────────
+_CRITICAL_SETTINGS = ("BOT_TOKEN", "WEBHOOK_URL", "WEBHOOK_SECRET", "GEMINI_API_KEY",
+                       "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_HOST")
+
+def _validate_settings() -> list[str]:
+    """Return names of required settings that are empty or placeholder."""
+    missing = []
+    for name in _CRITICAL_SETTINGS:
+        val = getattr(settings, name, "")
+        if not val or val in ("your-gemini-api-key-here", "change-me-to-a-random-string"):
+            missing.append(name)
+    return missing
 
 
 # ──────────────────────────────────────────────
@@ -42,8 +61,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage resources that live for the entire application lifecycle.
 
     **Startup**
+      • Validate critical environment variables.
       • Create the ``Bot`` instance with the configured token.
-      • Register the Telegram webhook so updates are pushed to us.
+      • Register the Telegram webhook (non-fatal on failure).
 
     **Shutdown**
       • Remove the webhook from Telegram.
@@ -52,33 +72,63 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     global bot
 
+    # ── Validate env vars ─────────────────────
+    missing = _validate_settings()
+    if missing:
+        logger.error("STARTUP BLOCKED — missing/placeholder env vars: %s", ", ".join(missing))
+        logger.error("Copy .env.example → .env and fill in real values before starting.")
+        raise SystemExit(1)
+
     # ── Startup ───────────────────────────────
+    logger.info("Initializing bot with token ending in ...%s", settings.BOT_TOKEN[-6:])
     bot = Bot(
         token=settings.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 
     # Ensure all tables exist (safe on subsequent runs — it's a no-op if they already exist)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables verified / created")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables verified / created")
+    except Exception as db_err:
+        logger.critical("DATABASE CONNECTION FAILED: %s", db_err, exc_info=True)
+        raise
 
     # Tell Telegram to POST updates to our /webhook endpoint.
-    await bot.set_webhook(
-        url=settings.WEBHOOK_URL,
-        secret_token=settings.WEBHOOK_SECRET,
-        drop_pending_updates=True,
-    )
-    logger.info("Webhook registered  ·  url=%s", settings.WEBHOOK_URL)
+    # Non-fatal: if webhook setup fails the /health endpoint still works,
+    # making it easier to diagnose from outside the container.
+    try:
+        await bot.set_webhook(
+            url=settings.WEBHOOK_URL,
+            secret_token=settings.WEBHOOK_SECRET,
+            drop_pending_updates=True,
+        )
+        logger.info("Webhook registered  ·  url=%s", settings.WEBHOOK_URL)
+    except Exception as wh_err:
+        logger.error(
+            "WEBHOOK SETUP FAILED — the bot will NOT receive updates until this is fixed. "
+            "URL=%s  Error: %s",
+            settings.WEBHOOK_URL, wh_err,
+            exc_info=True,
+        )
+        # Continue startup so /health is reachable for diagnostics.
 
     yield  # ← application is running
 
     # ── Shutdown ──────────────────────────────
-    await bot.delete_webhook(drop_pending_updates=True)
-    logger.info("Webhook removed")
+    if bot:
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("Webhook removed")
+        except Exception:
+            logger.warning("Could not remove webhook during shutdown", exc_info=True)
 
-    await bot.session.close()
-    logger.info("Bot session closed")
+        try:
+            await bot.session.close()
+            logger.info("Bot session closed")
+        except Exception:
+            logger.warning("Could not close bot session", exc_info=True)
 
     await engine.dispose()
     logger.info("DB engine disposed")
