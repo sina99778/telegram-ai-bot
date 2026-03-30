@@ -1,16 +1,23 @@
-import os
 from aiogram.filters import Filter
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
+from app.core.config import settings
+
 
 class IsAdminFilter(Filter):
     """
-    MVP Env-Based Admin Filter to swiftly limit specific route access.
-    Prepared architecturally to migrate to a DB resolver if user schemas adopt roles.
+    Checks whether the event sender is in settings.ADMIN_IDS.
+    Works for both Message and CallbackQuery events so
+    the admin_router can protect commands AND inline button presses.
     """
-    async def __call__(self, message: Message) -> bool:
-        admin_ids_str = os.environ.get("ADMIN_TELEGRAM_IDS", "")
-        if not admin_ids_str:
+
+    async def __call__(self, event: Message | CallbackQuery) -> bool:
+        admin_ids = settings.admin_ids_list
+        if not admin_ids:
             return False
-            
-        admin_ids = [int(x.strip()) for x in admin_ids_str.split(",") if x.strip().isdigit()]
-        return message.from_user.id in admin_ids
+
+        if isinstance(event, CallbackQuery):
+            user_id = event.from_user.id
+        else:
+            user_id = event.from_user.id
+
+        return user_id in admin_ids
