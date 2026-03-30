@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.models import Conversation, Message, User
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,8 @@ class ChatRepository:
             telegram_id=telegram_id,
             username=username,
             first_name=first_name,
+            normal_credits=settings.DEFAULT_DAILY_NORMAL_CREDITS,
+            credit_balance=settings.DEFAULT_DAILY_NORMAL_CREDITS,
         )
         self._session.add(user)
         await self._session.commit()
@@ -308,11 +311,12 @@ class ChatRepository:
         now = datetime.now(timezone.utc)
         # If last_credit_reset is None, or if the date has changed
         if not user.last_credit_reset or user.last_credit_reset.date() < now.date():
-            # In the new system, we prevent destructive override. We grant them up to 50 credits to play with if they are empty.
-            if user.credit_balance < 50:
-                deficit = 50 - user.credit_balance
+            # Free users receive a daily baseline in the normal wallet.
+            if user.normal_credits < settings.DEFAULT_DAILY_NORMAL_CREDITS:
+                deficit = settings.DEFAULT_DAILY_NORMAL_CREDITS - user.normal_credits
                 from app.services.billing.billing_service import BillingService
                 from app.core.enums import LedgerEntryType
+                from app.core.enums import WalletType
                 import time
                 billing = BillingService(self._session)
                 await billing.add_credits(
@@ -321,10 +325,12 @@ class ChatRepository:
                     entry_type=LedgerEntryType.BONUS,
                     reference_type="daily_reset",
                     reference_id=f"daily_reset_{user.id}_{int(time.time())}",
-                    description="Daily Login Baseline Top-up"
+                    description="Daily login baseline top-up",
+                    wallet_type=WalletType.NORMAL,
                 )
             
             user.last_credit_reset = now
+            user.sync_credit_balance()
             await self._session.commit()
         return user
 

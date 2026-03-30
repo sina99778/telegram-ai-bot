@@ -31,10 +31,14 @@ class Settings(BaseSettings):
 
     # ── Google Gemini AI ──────────────────────
     GEMINI_API_KEY: str = ""
-    # Default/Free model
-    GEMINI_MODEL_NORMAL: str = "gemini-2.5-flash" 
-    # Latest/Paid model for VIP/switching
-    GEMINI_MODEL_PRO: str = "gemini-3.1-pro"
+    # Final text models
+    GEMINI_MODEL_NORMAL: str = "gemini-3.1-flash-lite-preview"
+    GEMINI_MODEL_PRO: str = "gemini-3.1-pro-preview"
+    NORMAL_MESSAGE_COST: int = 1
+    VIP_MESSAGE_COST: int = 1
+    VIP_DEPLETION_BEHAVIOR: str = "fallback_to_normal"
+    DEFAULT_DAILY_NORMAL_CREDITS: int = 50
+    VIP_DEFAULT_PLAN_NAME: str = "vip"
     SYSTEM_PROMPT: str = "You are a helpful AI assistant."
 
     # ── PostgreSQL ────────────────────────────

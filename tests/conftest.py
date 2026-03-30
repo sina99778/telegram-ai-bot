@@ -24,7 +24,13 @@ async def db_session(db_engine):
 @pytest_asyncio.fixture(scope="function")
 async def user_factory(db_session):
     async def _create_user(telegram_id: int, balance: int = 100, is_premium: bool = False):
-        user = User(telegram_id=telegram_id, credit_balance=balance, is_premium=is_premium)
+        user = User(
+            telegram_id=telegram_id,
+            credit_balance=balance,
+            normal_credits=balance,
+            vip_credits=0,
+            is_premium=is_premium,
+        )
         db_session.add(user)
         await db_session.flush()
         return user

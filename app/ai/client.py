@@ -106,6 +106,10 @@ class GeminiClient:
         # Initialise the genai client with the API key from settings.
         self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
         self._default_model: str = settings.GEMINI_MODEL_NORMAL
+        self._allowed_text_models = {
+            settings.GEMINI_MODEL_NORMAL,
+            settings.GEMINI_MODEL_PRO,
+        }
         logger.info(
             "GeminiClient initialised  ·  model=%s",
             self._default_model,
@@ -115,6 +119,8 @@ class GeminiClient:
 
     async def generate_response(self, messages: list[types.Content], override_model: str | None = None) -> str:
         model_to_use = override_model or self._default_model
+        if model_to_use not in self._allowed_text_models:
+            raise AIException(f"Unsupported text model requested: {model_to_use}")
         return await self._call_with_retries(messages, model_to_use)
 
     @retry(

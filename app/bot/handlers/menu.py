@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message
 
-from app.bot.keyboards.inline import get_profile_keyboard
+from app.bot.keyboards.inline import get_profile_keyboard, get_vip_plans_keyboard
 from app.bot.keyboards.reply import get_main_menu
+from app.core.enums import FeatureName
+from app.core.i18n import TEXTS, t
+from app.db.models import User
+from app.services.chat.orchestrator import ChatOrchestrator
 from app.services.chat_service import ChatService
-from app.core.i18n import t, TEXTS
 
 menu_router = Router(name="menu")
 
@@ -16,185 +19,117 @@ INVITE_BTNS = {TEXTS["en"]["btn_invite"], TEXTS["fa"]["btn_invite"]}
 VIP_BTNS = {TEXTS["en"]["btn_vip"], TEXTS["fa"]["btn_vip"]}
 SUPPORT_BTNS = {TEXTS["en"]["btn_support"], TEXTS["fa"]["btn_support"]}
 TOOLS_BTNS = {
-    TEXTS["en"]["btn_chat"], TEXTS["fa"]["btn_chat"],
-    TEXTS["en"]["btn_image"], TEXTS["fa"]["btn_image"]
+    TEXTS["en"]["btn_chat"],
+    TEXTS["fa"]["btn_chat"],
+    TEXTS["en"]["btn_image"],
+    TEXTS["fa"]["btn_image"],
 }
+
+
+def _profile_text(user: User) -> str:
+    vip_status = f"ACTIVE until {user.vip_expire_date:%Y-%m-%d}" if user.has_active_vip and user.vip_expire_date else (
+        "ACTIVE" if user.has_active_vip else "INACTIVE"
+    )
+    current_model = str(user.preferred_text_model).upper() if user.preferred_text_model else "FLASH"
+    memory = "Keep History" if user.keep_chat_history else "Auto-Clear"
+    return (
+        "<b>User Profile</b>\n\n"
+        f"Name: {user.first_name or user.username or 'unknown'}\n"
+        f"ID: <code>{user.telegram_id}</code>\n"
+        f"Normal credits: <code>{user.normal_credits}</code>\n"
+        f"VIP credits: <code>{user.vip_credits}</code>\n"
+        f"VIP access: <b>{vip_status}</b>\n"
+        f"Preferred model: <b>{current_model}</b>\n"
+        f"Memory: <b>{memory}</b>"
+    )
+
 
 @menu_router.message(F.text.in_({TEXTS["en"]["btn_lang"], TEXTS["fa"]["btn_lang"]}))
 async def toggle_lang(message: Message, chat_service: ChatService) -> None:
-    if message.from_user is None:
-        return
-        
     user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
     if not user:
         return
-        
-    new_lang = "en" if user.language == "fa" else "fa"
-    user.language = new_lang
+    user.language = "en" if user.language == "fa" else "fa"
     await chat_service._session.commit()
-    await message.answer(t("lang_changed", new_lang), reply_markup=get_main_menu(new_lang))
+    await message.answer(t("lang_changed", user.language), reply_markup=get_main_menu(user.language))
+
 
 @menu_router.message(F.text.in_(INVITE_BTNS))
 async def menu_invite(message: Message, chat_service: ChatService) -> None:
     user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
     bot_info = await message.bot.get_me()
     invite_link = f"https://t.me/{bot_info.username}?start=ref_{user.telegram_id}" if user else ""
-    lang = user.language if user else "fa"
-    
-    if lang == "fa":
-        text = (
-            "🎁 <b>دعوت از دوستان و دریافت جایزه!</b>\n\n"
-            f"👥 <b>تعداد دعوت‌های شما:</b> {user.total_invites if user else 0} نفر\n"
-            f"🖼 <b>تصاویر هدیه باقیمانده:</b> {user.special_reward_images_left if user else 0} عکس\n\n"
-            "با هر دعوت <b>۱۰ سکه پریمیوم</b> بگیرید. با رسیدن به ۱۰ دعوت، قابلیت <b>۵ عکس با کیفیت بالا (Imagen 3)</b> به مدت یک هفته برایتان فعال می‌شود!\n\n"
-            f"🔗 <b>لینک اختصاصی شما:</b>\n<code>{invite_link}</code>"
-        )
-    else:
-        text = (
-            "🎁 <b>Invite Friends & Earn!</b>\n\n"
-            f"👥 <b>Total Invites:</b> {user.total_invites if user else 0}\n"
-            f"🖼 <b>Reward Images Left:</b> {user.special_reward_images_left if user else 0}\n\n"
-            "Earn <b>10 Premium Credits</b> per invite. Reach 10 invites to unlock <b>5 High-Res Images (Imagen 3)</b> for 1 week!\n\n"
-            f"🔗 <b>Your Link:</b>\n<code>{invite_link}</code>"
-        )
-    await message.answer(text, parse_mode="HTML")
-
+    await message.answer(
+        "<b>Invite Friends</b>\n\n"
+        f"Total invites: <code>{user.total_invites if user else 0}</code>\n"
+        f"Special reward images left: <code>{user.special_reward_images_left if user else 0}</code>\n\n"
+        f"Your link:\n<code>{invite_link}</code>",
+        parse_mode="HTML",
+    )
 
 
 @menu_router.message(F.text.in_(PROFILE_BTNS))
 async def menu_profile(message: Message, chat_service: ChatService) -> None:
-    if message.from_user is None: return
-    
     user = await chat_service._repo.ensure_daily_credits(message.from_user.id)
-    if not user: return # Should not happen
-    
-    lang = user.language if user else "fa"
+    if not user:
+        return
+    await message.answer(_profile_text(user), reply_markup=get_profile_keyboard(user), parse_mode="HTML")
 
-    plan_name = "👑 VIP Premium" if user.is_vip else "🆓 Free Tier"
-    current_model = str(user.preferred_text_model).upper() if user.preferred_text_model else "PRO"
-    mem_status = "Keep History" if user.keep_chat_history else "Auto-Clear"
-    
-    text = (
-        f"👤 <b>User Profile</b>\n\n"
-        f"<b>Name:</b> {user.first_name}\n"
-        f"<b>ID:</b> <code>{user.telegram_id}</code>\n\n"
-        f"🏷️ <b>Current Plan:</b> {plan_name}\n"
-        f"💬 <b>Normal Credits:</b> {user.normal_credits}\n"
-        f"🪙 <b>Premium Credits:</b> {user.premium_credits}\n\n"
-        f"⚙️ <b>Model:</b> {current_model}\n"
-        f"🧠 <b>Memory:</b> {mem_status}"
-    )
-
-    if not user.is_vip:
-        text += f"\n\n<i>Upgrade to VIP to access unlimited features!</i>"
-    
-    # Pass user object to get dynamic keyboard
-    await message.answer(text, reply_markup=get_profile_keyboard(user), parse_mode="HTML")
 
 @menu_router.message(F.text.in_(VIP_BTNS))
-async def show_vip_plans(message: Message, chat_service: ChatService) -> None:
-    user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
-    lang = user.language if user else "fa"
-    
-    if lang == "fa":
-        text = (
-            "💎 <b>بسته ویژه خود را انتخاب کنید!</b>\n\n"
-            "با خرید سکه پریمیوم، محدودیت‌ها را بردارید و از تصویرساز Imagen 3 استفاده کنید.\n\n"
-            "💳 <b>شروع:</b> ۱۵۰ سکه — <code>۱.۹۹ دلار</code>\n"
-            "🔥 <b>محبوب:</b> ۷۰۰ سکه — <code>۶.۹۹ دلار</code>\n"
-            "👑 <b>حرفه‌ای:</b> ۱۸۰۰ سکه — <code>۱۴.۹۹ دلار</code>\n\n"
-            "👇 <i>برای پرداخت کریپتویی یک پلن را انتخاب کنید:</i>"
-        )
-    else:
-        text = (
-            "💎 <b>Choose your Premium Pack!</b>\n\n"
-            "Unlock advanced features and Imagen 3 generation by purchasing Premium Credits.\n\n"
-            "💳 <b>Starter:</b> 150 credits — <code>$1.99</code>\n"
-            "🔥 <b>Popular:</b> 700 credits — <code>$6.99</code>\n"
-            "👑 <b>Pro Pack:</b> 1800 credits — <code>$14.99</code>\n\n"
-            "👇 <i>Select a plan below to pay with Crypto:</i>"
-        )
-    from app.bot.keyboards.inline import get_vip_plans_keyboard
+async def show_vip_plans(message: Message) -> None:
+    text = (
+        "<b>Choose your VIP Pack</b>\n\n"
+        "VIP access unlocks Pro, but each Pro message still consumes VIP credits.\n\n"
+        "Starter: 150 VIP credits - <code>$1.99</code>\n"
+        "Popular: 700 VIP credits - <code>$6.99</code>\n"
+        "Pro Pack: 1800 VIP credits - <code>$14.99</code>"
+    )
     await message.answer(text, reply_markup=get_vip_plans_keyboard(), parse_mode="HTML")
+
 
 @menu_router.message(F.text.in_(SUPPORT_BTNS))
 async def menu_support(message: Message) -> None:
-    """Handle the Support button."""
-    text = (
-        "📞 <b>Support Team</b>\n\n"
-        "If you have any questions, face any issues, or want to purchase a VIP subscription via direct transfer, "
-        "please contact our admin:\n\n"
-        "👉 <b>@ThereIsStillSina</b>"
+    await message.answer(
+        "<b>Support</b>\n\nContact the admin for payment questions or account issues.\n\n@ThereIsStillSina",
+        parse_mode="HTML",
     )
-    await message.answer(text, parse_mode="HTML")
+
 
 @menu_router.message(F.text.in_(TOOLS_BTNS))
 async def menu_tools(message: Message, chat_service: ChatService) -> None:
-    """Handle tool selection buttons."""
-    if message.from_user is None:
+    user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
+    if message.text in {TEXTS["en"]["btn_chat"], TEXTS["fa"]["btn_chat"]}:
+        await message.answer("Send any message and I will reply.")
         return
 
-    # Fetch user from DB to check credits
-    user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
+    if user and (user.has_active_vip or user.vip_credits >= 10):
+        await message.answer(
+            "<b>Image Generation</b>\n\nUse /image followed by your prompt.",
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer(
+            "<b>Image Generation</b> requires VIP access or enough VIP credits.",
+            parse_mode="HTML",
+        )
 
-    if message.text in {TEXTS["en"]["btn_chat"], TEXTS["fa"]["btn_chat"]}:
-        await message.answer("Just type any message below and I will reply using Gemini!")
-        
-    elif message.text in {TEXTS["en"]["btn_image"], TEXTS["fa"]["btn_image"]}:
-        if user and (user.is_vip or user.premium_credits >= 10):
-            await message.answer("🎨 <b>Imagen 3 is Ready!</b>\n\nTo generate an image, use the command like this:\n<code>/image A futuristic city at night</code>", parse_mode="HTML")
-        else:
-            await message.answer("🎨 <b>Image Generation</b> requires VIP or at least 15 Premium Credits. Please upgrade your plan.", parse_mode="HTML")
-
-# --- GROUP CHAT HANDLER ---
 
 @menu_router.message(Command("ai"), F.chat.type.in_({"group", "supergroup"}))
-async def handle_group_ai_command(message: Message, command: CommandObject, chat_service: ChatService):
-    """Handles the /ai command strictly inside groups/supergroups."""
-    
-    # 1. Check if user provided a prompt
+async def handle_group_ai_command(message: Message, command: CommandObject, db_user: User, chat_orchestrator: ChatOrchestrator):
     if not command.args:
-        help_text = (
-            "🤖 <b>AI Group Assistant</b>\n\n"
-            "To ask me a question in this group, type the command followed by your question.\n"
-            "<i>Example:</i> <code>/ai What is the capital of Japan?</code>"
+        return await message.reply(
+            "<b>Usage</b>\n\n<code>/ai your question</code>",
+            parse_mode="HTML",
         )
-        if message.from_user.language_code == 'fa':
-            help_text = "🤖 <b>راهنما:</b> برای استفاده از هوش مصنوعی در گروه، سوال خود را جلوی دستور بنویسید.\nمثال: <code>/ai پایتخت ژاپن کجاست؟</code>"
-        return await message.reply(help_text, parse_mode="HTML")
-        
-    user_id = message.from_user.id
-    user = await chat_service._repo.get_user_by_telegram_id(user_id)
-    
-    # 2. Force user to start the bot in private first (Growth Hack)
-    if not user:
-        bot_info = await message.bot.get_me()
-        err_msg = f"⚠️ You need to register first! Please start me in private: @{bot_info.username}"
-        if message.from_user.language_code == 'fa':
-            err_msg = f"⚠️ شما هنوز عضو ربات نیستید! لطفا ابتدا در پیوی ربات استارت بزنید: @{bot_info.username}"
-        return await message.reply(err_msg)
-        
-    # 3. Check Free Tier Credits
-    if user.normal_credits <= 0:
-        err_msg = "❌ You don't have enough Normal Credits! Claim your daily reward in my private chat."
-        if user.language == "fa":
-            err_msg = "❌ سکههای عادی شما تمام شده است! برای دریافت سکه رایگان روزانه به پیوی ربات مراجعه کنید."
-        return await message.reply(err_msg)
-        
-    processing_msg = await message.reply("💭 <i>Thinking...</i>", parse_mode="HTML")
-    
-    # 4. Deduct credit
-    user.normal_credits -= 1
-    await chat_service._session.commit()
-    
-    # 5. Force Free Model (Flash) and Stateless History (None)
-    prompt = command.args
-    try:
-        response = await chat_service._ai_service.generate_text(
-            prompt=prompt, 
-            use_pro=False, # STRICTLY FALSE FOR GROUPS
-            history=None   # NO HISTORY IN GROUPS TO SAVE TOKENS
-        )
-        await processing_msg.edit_text(response, parse_mode="Markdown")
-    except Exception as e:
-        await processing_msg.edit_text("⚠️ An error occurred while generating the response. Please try again later.")
+
+    processing_msg = await message.reply("<i>Thinking...</i>", parse_mode="HTML")
+    result = await chat_orchestrator.process_message(
+        user_id=db_user.id,
+        prompt=command.args,
+        feature_name=FeatureName.FLASH_TEXT,
+    )
+    if result.success:
+        await processing_msg.edit_text(result.text, parse_mode="HTML")
+    else:
+        await processing_msg.edit_text(result.text or "An error occurred.", parse_mode="HTML")

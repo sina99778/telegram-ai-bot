@@ -1,179 +1,107 @@
-# Telegram AI Bot 🤖
+# Telegram AI Bot
 
-A production-grade Telegram AI assistant powered by **Google Gemini**, built with **FastAPI**, **aiogram 3.x**, **credit-based billing**, and **background job processing**.
+Production-minded Telegram bot built with FastAPI, aiogram, SQLAlchemy, Redis/ARQ, and Google Gemini.
 
-## Features
+## Final product rules
 
-- 🧠 **Google Gemini AI** — Multi-model routing (Flash / Pro / Image) via a pluggable provider interface
-- 💰 **Credit-Based Billing** — Atomic ledger-audited economy with idempotent deductions, refunds, and admin adjustments
-- 💬 **Persistent Conversations** — Full chat history stored in PostgreSQL with automatic background summarization
-- 🎨 **AI Image Generation** — `/image` command with Saga-pattern billing (debit → generate → refund on failure)
-- 🔄 **Background Workers** — ARQ + Redis for conversation summarization and future async tasks
-- 🛡️ **Admin Dashboard** — `/stats`, `/user_info`, `/ledger`, `/grant`, `/setprice` commands
-- 🎟️ **Promo & Referral System** — Promo codes, referral rewards, and daily login bonuses
-- 💳 **Crypto Payments** — NowPayments IPN webhook for VIP credit purchases
-- 🐳 **Dockerised** — One-command deployment with Docker Compose (web + worker + Postgres + Redis)
-- 🔐 **Secure Webhooks** — Secret token verification on every Telegram update
+- Free users use only `gemini-3.1-flash-lite-preview`
+- VIP users unlock `gemini-3.1-pro-preview`
+- VIP access only unlocks Pro
+- Actual Pro usage still consumes `vip_credits`
+- Free usage consumes `normal_credits`
+- Default message cost is `1 normal_credit` for Flash-Lite and `1 vip_credit` for Pro
+- If VIP access exists but VIP credits are empty, the bot falls back to Flash-Lite when `VIP_DEPLETION_BEHAVIOR=fallback_to_normal`
 
-## Architecture
+## Architecture notes
 
-```
-app/
-├── bot/                           # Telegram layer
-│   ├── dispatcher.py              # Router & middleware registration
-│   ├── handlers/
-│   │   ├── admin.py               # Admin-only commands (/stats, /grant, etc.)
-│   │   ├── base.py                # /start, /help, /new
-│   │   ├── callbacks.py           # Inline keyboard callbacks
-│   │   ├── chat.py                # Catch-all text → ChatOrchestrator
-│   │   ├── image.py               # /image → ImageOrchestrator
-│   │   └── menu.py                # Menu button handlers
-│   ├── filters/                   # Custom aiogram filters (e.g. IsAdmin)
-│   ├── keyboards/                 # Inline & reply keyboard builders
-│   └── middlewares/
-│       ├── db.py                  # Session + service injection
-│       └── forced_join.py         # Channel membership check
-├── core/
-│   ├── config.py                  # Pydantic settings (env-driven)
-│   ├── enums.py                   # FeatureName, LedgerEntryType, etc.
-│   └── exceptions.py             # InsufficientCreditsError, etc.
-├── db/
-│   ├── models.py                  # SQLAlchemy ORM (User, CreditLedger, etc.)
-│   ├── repositories/
-│   │   └── chat_repo.py           # Data access layer
-│   └── session.py                 # Async engine & session factory
-├── services/
-│   ├── admin/
-│   │   └── admin_service.py       # Admin operations & reporting
-│   ├── ai/
-│   │   ├── antigravity.py         # Gemini SDK provider implementation
-│   │   ├── prompt_mgr.py          # System prompt builder (personas, rules)
-│   │   ├── provider.py            # Abstract BaseAIProvider interface
-│   │   └── router.py              # Feature → model routing with fallback
-│   ├── billing/
-│   │   └── billing_service.py     # Atomic credit ops + ledger auditing
-│   ├── chat/
-│   │   ├── image_orchestrator.py  # Image generation Saga
-│   │   ├── memory.py              # Token-bounded context window
-│   │   └── orchestrator.py        # Chat Saga (debit → AI → persist)
-│   ├── queue/
-│   │   ├── job_enqueuer.py        # ARQ connection pool
-│   │   └── queue_service.py       # Enqueue facade (decoupled from ARQ)
-│   └── payment_service.py         # NowPayments invoice creation
-├── workers/
-│   ├── main.py                    # ARQ WorkerSettings + startup/shutdown
-│   └── tasks_ai.py               # Background summarization task
-└── main.py                        # FastAPI entrypoint + webhooks
-```
+- `BillingService` is the source of truth for wallet mutations, ledger entries, and VIP access granting
+- `ChatOrchestrator` is the source of truth for text routing and wallet consumption
+- `AdminService` centralizes user management, VIP granting, promo code creation, listing, disabling, and redemption
+- `FeatureConfig` still maps features to provider/model configuration
+- `credit_balance` remains as a backward-compatible aggregate, but new logic uses `normal_credits` and `vip_credits`
 
-## Core Components
+## Data model changes
 
-### BillingService
-Atomic credit operations with row-level locking (`SELECT ... FOR UPDATE`) and idempotency enforcement via a composite unique index on `(user_id, reference_type, reference_id)`. Every balance mutation produces a `CreditLedger` entry for full audit trail.
+### User
 
-### ChatOrchestrator
-Implements a Saga pattern for chat: **Phase 1** debits credits (committed before AI call), **Phase 2** calls the AI provider, **Phase 3** persists messages. On AI failure, a compensating `refund_credits` transaction rolls back the debit.
+- `normal_credits`: free wallet
+- `vip_credits`: VIP wallet
+- `is_vip` + `vip_expire_date`: VIP access state
+- `subscription_plan` + `subscription_expires_at`: kept aligned with VIP access
 
-### ImageOrchestrator
-Same Saga pattern for image generation with a 60-second async timeout. Uses `FeatureName.IMAGE_GEN` for routing and pricing.
+### CreditLedger
 
-### QueueService
-Facade over ARQ that returns structured `JobResult` objects with statuses (`enqueued`, `duplicate`, `failed`). Orchestrators never import ARQ directly.
+- wallet-aware via `wallet_type`
 
-### AdminService
-Read-only reporting (`/stats`) and write operations (`/grant`, `/setprice`) with bounded query limits.
+### PromoCode
 
-## Quick Start
+- `kind`
+- `normal_credits`
+- `vip_credits`
+- `vip_days`
+- `discount_percent`
+- `max_uses`
+- `used_count`
+- `max_uses_per_user`
+- `is_active`
+- `created_by_admin_id`
+- `expires_at`
 
-### 1. Clone & Configure
+### UserPromo
 
-```bash
-git clone https://github.com/sina99778/telegram-ai-bot.git
-cd telegram-ai-bot
-cp .env.example .env
-# Edit .env with your real values
-```
+- tracks per-user usage count per code
 
-### 2. Run with Docker Compose
+## Admin panel
+
+The admin dashboard now supports:
+
+- statistics
+- paginated user list
+- user search by Telegram ID or username
+- per-user actions
+- add normal credits
+- add VIP credits
+- give or extend VIP access
+- ban / unban
+- create gift / discount codes
+- list codes
+- disable code
+- inspect code usage
+- broadcast
+- pricing/config inspection
+
+## Environment
+
+Copy `.env.example` to `.env` and fill in the real values.
+
+Important settings:
+
+- `GEMINI_MODEL_NORMAL=gemini-3.1-flash-lite-preview`
+- `GEMINI_MODEL_PRO=gemini-3.1-pro-preview`
+- `NORMAL_MESSAGE_COST=1`
+- `VIP_MESSAGE_COST=1`
+- `VIP_DEPLETION_BEHAVIOR=fallback_to_normal`
+- `DEFAULT_DAILY_NORMAL_CREDITS=50`
+
+## Migrations
+
+Run Alembic after pulling the changes:
 
 ```bash
-docker compose up -d --build
+alembic upgrade head
 ```
 
-This starts four services: PostgreSQL, Redis, the web server (FastAPI + webhook), and the ARQ background worker.
+The migration upgrades the schema to:
 
-### 3. Webhook
+- rename `premium_credits` to `vip_credits`
+- make ledger entries wallet-aware
+- expand promo code metadata
+- expand redemption tracking
 
-The bot automatically registers its Telegram webhook on startup using the `WEBHOOK_URL` from your `.env` file.
-
-## Environment Variables
-
-| Variable | Description | Default |
-|---|---|---|
-| `BOT_TOKEN` | Telegram bot token from @BotFather | — |
-| `WEBHOOK_URL` | Public HTTPS URL for webhook | — |
-| `WEBHOOK_SECRET` | Random string for webhook verification | — |
-| `GEMINI_API_KEY` | Google AI API key | — |
-| `GEMINI_MODEL_NORMAL` | Default (free-tier) model | `gemini-2.5-flash` |
-| `GEMINI_MODEL_PRO` | Premium model for VIP users | `gemini-3.1-pro` |
-| `POSTGRES_USER` | Database user | `postgres` |
-| `POSTGRES_PASSWORD` | Database password | — |
-| `POSTGRES_DB` | Database name | `gemini_bot_db` |
-| `POSTGRES_HOST` | Database host | `db` |
-| `REDIS_URL` | Redis connection URL | `redis://redis:6379/0` |
-| `ADMIN_IDS` | Comma-separated admin Telegram user IDs | — |
-| `NOWPAYMENTS_API_KEY` | NowPayments API key for crypto payments | — |
-
-## Bot Commands
-
-| Command | Description |
-|---|---|
-| `/start` | Welcome message & instructions |
-| `/help` | Same as /start |
-| `/new` | Clear conversation context |
-| `/image <prompt>` | Generate an AI image |
-| `/menu` | Interactive menu with model switching |
-| `/stats` | *(Admin)* System analytics |
-| `/grant <user_id> <amount>` | *(Admin)* Add credits to a user |
-| `/setprice <feature> <cost>` | *(Admin)* Update feature pricing |
-| `/user_info <user_id>` | *(Admin)* User details |
-| `/ledger <user_id>` | *(Admin)* Credit ledger history |
-
-## Testing
-
-### SQLite Integration Tests (`tests/services/`)
-
-Fast logic-validation tests using an in-memory SQLite database. These test BillingService idempotency, orchestrator Saga flows, admin operations, and refund mechanics without needing PostgreSQL.
+## Running tests
 
 ```bash
-pip install -r requirements-test.txt
-pytest tests/services/ -v
+python -m pytest -q
 ```
 
-### PostgreSQL Concurrency Tests (`tests/stress/`)
-
-Stress tests that validate `SELECT ... FOR UPDATE` row locking, concurrent credit deduction races, and duplicate webhook idempotency under real PostgreSQL. Requires a running PostgreSQL instance.
-
-```bash
-PG_TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/test_db \
-  pytest tests/stress/ -v
-```
-
-These tests are automatically skipped if PostgreSQL is unavailable.
-
-## Tech Stack
-
-- **Python 3.12**
-- **FastAPI** — Async web framework
-- **aiogram 3.x** — Telegram Bot framework
-- **google-genai** — Google Gemini SDK
-- **SQLAlchemy 2.0** — Async ORM with row-level locking
-- **PostgreSQL 15** — Primary database
-- **Redis 7** — Background job queue (ARQ)
-- **ARQ** — Async task queue
-- **Docker & Docker Compose** — Containerisation
-- **pydantic-settings** — Configuration management
-
-## License
-
-MIT
+PostgreSQL stress tests are skipped automatically if PostgreSQL is unreachable.

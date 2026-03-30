@@ -1,9 +1,9 @@
-import os
 import logging
 from typing import List, Dict, Optional, Any
 from app.services.ai.provider import BaseAIProvider, AIMessage, AIResponse
 from google import genai
 from google.genai import types
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +11,7 @@ class AntigravityProvider(BaseAIProvider):
     provider_name = "antigravity"
 
     def __init__(self):
-        self.api_key = os.environ.get("GEMINI_API_KEY")
+        self.api_key = settings.GEMINI_API_KEY
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
 
     async def generate_text(
@@ -58,7 +58,7 @@ class AntigravityProvider(BaseAIProvider):
             raise RuntimeError("GEMINI_API_KEY is missing")
         try:
             result = await self.client.aio.models.generate_content(
-                model='gemini-3-pro-image-preview',
+                model=model_name,
                 contents=prompt,
             )
             for candidate in result.candidates:

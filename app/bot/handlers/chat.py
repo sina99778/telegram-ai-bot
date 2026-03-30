@@ -45,7 +45,7 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
     # 4. Safe Delivery & Chunking
     try:
         if not result.success:
-            await processing_msg.edit_text(result.error_message or "Error", parse_mode="HTML")
+            await processing_msg.edit_text(result.text or result.error_message or "Error", parse_mode="HTML")
             return
 
         # Replace processing message if short enough

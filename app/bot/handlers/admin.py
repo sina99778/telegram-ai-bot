@@ -1,299 +1,535 @@
-"""
-Admin handler module.
+from __future__ import annotations
 
-All routes are gated by checking user.is_admin = True from the database.
-Uses the existing DbSessionMiddleware's `session` and `chat_service` injection.
-FSM is used for the multi-step "Add Credits" and "Broadcast" flows.
-"""
+import secrets
+from datetime import datetime, timedelta, timezone
 
-import logging
-import asyncio
-from datetime import datetime, timezone
-
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from sqlalchemy import select, func
+from aiogram.types import CallbackQuery, Message
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import User
-from app.bot.keyboards.admin_kb import get_admin_main_kb, get_back_to_admin_kb, get_user_manage_kb
+from app.bot.keyboards.admin_kb import (
+    get_admin_main_kb,
+    get_admin_users_kb,
+    get_back_to_admin_kb,
+    get_code_detail_kb,
+    get_code_generation_kb,
+    get_code_kind_kb,
+    get_code_menu_kb,
+    get_codes_list_kb,
+    get_user_manage_kb,
+)
+from app.core.enums import PromoCodeKind, WalletType
+from app.db.models import FeatureConfig, User
+from app.services.admin.admin_service import AdminService
 from app.services.billing.billing_service import BillingService
-from app.core.enums import LedgerEntryType
-import uuid
-
-logger = logging.getLogger(__name__)
 
 admin_router = Router(name="admin")
 
+
 class AdminStates(StatesGroup):
     waiting_for_broadcast = State()
-    waiting_for_user_id = State()
-    waiting_for_amount = State()
+    waiting_for_user_search = State()
+    waiting_for_credit_amount = State()
+    waiting_for_vip_days = State()
+    waiting_for_code_amount = State()
+    waiting_for_code_expiry_days = State()
+    waiting_for_code_max_uses = State()
+    waiting_for_code_max_uses_per_user = State()
+    waiting_for_manual_code = State()
+
 
 async def _is_admin(user_id: int, session: AsyncSession) -> bool:
-    """Strictly allowed only for users where user.is_admin is True."""
     user = await session.scalar(select(User).where(User.telegram_id == user_id))
     return bool(user and user.is_admin)
+
+
+def _admin_service(session: AsyncSession) -> AdminService:
+    return AdminService(session, BillingService(session))
+
+
+def _format_user_detail(user: User) -> str:
+    display_name = user.username or user.first_name or "unknown"
+    vip_status = f"ACTIVE until {user.vip_expire_date:%Y-%m-%d}" if user.has_active_vip and user.vip_expire_date else (
+        "ACTIVE" if user.has_active_vip else "INACTIVE"
+    )
+    ban_status = "BANNED" if user.is_banned else "ACTIVE"
+    return (
+        "<b>User Management</b>\n\n"
+        f"ID: <code>{user.telegram_id}</code>\n"
+        f"Name: {display_name}\n"
+        f"Normal credits: <code>{user.normal_credits}</code>\n"
+        f"VIP credits: <code>{user.vip_credits}</code>\n"
+        f"VIP status: <b>{vip_status}</b>\n"
+        f"Ban status: <b>{ban_status}</b>"
+    )
+
+
+def _format_stats(stats: dict) -> str:
+    return (
+        "<b>System Statistics</b>\n\n"
+        f"Users: <code>{stats['total_users']}</code>\n"
+        f"Active users: <code>{stats['total_active_users']}</code>\n"
+        f"VIP users: <code>{stats['total_vip_users']}</code>\n"
+        f"Banned users: <code>{stats['total_banned_users']}</code>\n"
+        f"Normal credits in circulation: <code>{stats['total_normal_credits']}</code>\n"
+        f"VIP credits in circulation: <code>{stats['total_vip_credits']}</code>\n"
+        f"Completed payments: <code>{stats['total_payments_completed']}</code>\n"
+        f"Failed payments: <code>{stats['total_payments_failed']}</code>"
+    )
+
+
+async def _render_user_page(message: Message | CallbackQuery, service: AdminService, page: int, search: str | None = None) -> None:
+    result = await service.list_users(page=page, search=search)
+    text = (
+        "<b>Users</b>\n\n"
+        "Each row shows: telegram_id | username/name | normal credits | vip credits | VIP status | ban status\n"
+    )
+    markup = get_admin_users_kb(result.users, result.page, result.total_pages, search)
+    target = message.message if isinstance(message, CallbackQuery) else message
+    await target.edit_text(text, parse_mode="HTML", reply_markup=markup) if isinstance(message, CallbackQuery) else await target.answer(text, parse_mode="HTML", reply_markup=markup)
+
 
 @admin_router.message(Command("admin"))
 async def cmd_admin(message: Message, session: AsyncSession, state: FSMContext):
     if not await _is_admin(message.from_user.id, session):
         return
-
     await state.clear()
-    await message.answer(
-        "🛡️ <b>پنل مدیریت</b>\n\n"
-        "به پنل کنترل خوش آمدید. یکی از گزینه‌ها را انتخاب کنید:",
-        parse_mode="HTML",
-        reply_markup=get_admin_main_kb(),
-    )
+    await message.answer("<b>Admin Panel</b>", parse_mode="HTML", reply_markup=get_admin_main_kb())
 
 
-@admin_router.callback_query(F.data == "admin_main")
+@admin_router.callback_query(F.data == "admin:main")
 async def cb_admin_main(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     if not await _is_admin(callback.from_user.id, session):
-        return await callback.answer("⛔️ دسترسی ندارید", show_alert=True)
-
+        return await callback.answer("Access denied", show_alert=True)
     await state.clear()
-    await callback.message.edit_text(
-        "🛡️ <b>پنل مدیریت</b>\n\n"
-        "یکی از گزینه‌ها را انتخاب کنید:",
-        parse_mode="HTML",
-        reply_markup=get_admin_main_kb(),
-    )
+    await callback.message.edit_text("<b>Admin Panel</b>", parse_mode="HTML", reply_markup=get_admin_main_kb())
     await callback.answer()
 
-@admin_router.callback_query(F.data == "admin_stats")
+
+@admin_router.callback_query(F.data == "admin:stats")
 async def cb_admin_stats(callback: CallbackQuery, session: AsyncSession):
     if not await _is_admin(callback.from_user.id, session):
-        return await callback.answer("⛔️ دسترسی ندارید", show_alert=True)
-
-    try:
-        total_users = await session.scalar(select(func.count(User.id))) or 0
-        total_credits = await session.scalar(select(func.sum(User.credit_balance))) or 0
-
-        # Users registered today
-        today_start = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        today_users = await session.scalar(
-            select(func.count(User.id)).where(User.created_at >= today_start)
-        ) or 0
-
-        text = (
-            "📊 <b>آمار کل سیستم</b>\n"
-            "━━━━━━━━━━━━━━━━━━━\n\n"
-            f"👥  <b>کل کاربران:</b>  {total_users}\n"
-            f"🆕  <b>ثبت‌نام امروز:</b>  {today_users}\n"
-            f"💰  <b>مجموع اعتبار سیستم:</b>  <code>{total_credits:,}</code>\n"
-        )
-        await callback.message.edit_text(
-            text,
-            parse_mode="HTML",
-            reply_markup=get_back_to_admin_kb(),
-        )
-    except Exception as e:
-        logger.error(f"Admin stats error: {e}", exc_info=True)
-        await callback.message.edit_text(
-            "⚠️ خطا در دریافت آمار.",
-            reply_markup=get_back_to_admin_kb(),
-        )
+        return await callback.answer("Access denied", show_alert=True)
+    stats = await _admin_service(session).get_system_stats()
+    await callback.message.edit_text(_format_stats(stats), parse_mode="HTML", reply_markup=get_back_to_admin_kb())
     await callback.answer()
 
-@admin_router.callback_query(F.data == "admin_broadcast")
-async def cb_admin_broadcast(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+
+@admin_router.callback_query(F.data.startswith("admin:users:page:"))
+async def cb_admin_users(callback: CallbackQuery, session: AsyncSession):
     if not await _is_admin(callback.from_user.id, session):
-        return await callback.answer("⛔️ دسترسی ندارید", show_alert=True)
-    
-    await state.set_state(AdminStates.waiting_for_broadcast)
+        return await callback.answer("Access denied", show_alert=True)
+
+    parts = callback.data.split(":")
+    page = int(parts[3])
+    search = parts[5] if len(parts) > 5 and parts[4] == "search" and parts[5] != "-" else None
+    await _render_user_page(callback, _admin_service(session), page, search)
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin:users:search")
+async def cb_admin_users_search(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+    await state.set_state(AdminStates.waiting_for_user_search)
     await callback.message.edit_text(
-        "📣 <b>ارسال پیام همگانی</b>\n\n"
-        "لطفاً پیام خود را ارسال کنید (متن، عکس، ویدیو و ...).\n"
-        "برای لغو روی دکمه بازگشت کلیک کنید.",
+        "<b>User Search</b>\n\nSend Telegram ID or username to search.",
         parse_mode="HTML",
-        reply_markup=get_back_to_admin_kb()
+        reply_markup=get_back_to_admin_kb(),
     )
     await callback.answer()
+
+
+@admin_router.message(AdminStates.waiting_for_user_search)
+async def process_user_search(message: Message, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(message.from_user.id, session):
+        return
+    await state.clear()
+    await _render_user_page(message, _admin_service(session), page=1, search=(message.text or "").strip())
+
+
+@admin_router.callback_query(F.data.startswith("admin:user:") & F.data.contains(":page:"))
+async def cb_admin_user_detail(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+    parts = callback.data.split(":")
+    telegram_id = int(parts[2])
+    page = int(parts[4])
+    search = parts[6] if len(parts) > 6 and parts[5] == "search" and parts[6] != "-" else None
+    user = await _admin_service(session).get_user_details(telegram_id)
+    await callback.message.edit_text(
+        _format_user_detail(user),
+        parse_mode="HTML",
+        reply_markup=get_user_manage_kb(user, page=page, search=search),
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin:user:add_normal:") | F.data.startswith("admin:user:add_vip:"))
+async def cb_admin_add_credits_start(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+
+    wallet_type = WalletType.NORMAL if ":add_normal:" in callback.data else WalletType.VIP
+    telegram_id = int(callback.data.split(":")[-1])
+    await state.update_data(target_tg_id=telegram_id, wallet_type=wallet_type.value)
+    await state.set_state(AdminStates.waiting_for_credit_amount)
+    await callback.message.edit_text(
+        f"<b>Add {wallet_type.value.title()} Credits</b>\n\nSend the amount for <code>{telegram_id}</code>.",
+        parse_mode="HTML",
+        reply_markup=get_back_to_admin_kb(),
+    )
+    await callback.answer()
+
+
+@admin_router.message(AdminStates.waiting_for_credit_amount)
+async def process_add_credit_amount(message: Message, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(message.from_user.id, session):
+        return
+    if not message.text or not message.text.isdigit():
+        return await message.answer("Please send a positive integer amount.")
+
+    data = await state.get_data()
+    wallet_type = WalletType(data["wallet_type"])
+    target_tg_id = int(data["target_tg_id"])
+    service = _admin_service(session)
+    await service.add_credits_to_user(
+        admin_telegram_id=message.from_user.id,
+        target_telegram_id=target_tg_id,
+        amount=int(message.text),
+        wallet_type=wallet_type,
+    )
+    user = await service.get_user_details(target_tg_id)
+    await state.clear()
+    await message.answer(_format_user_detail(user), parse_mode="HTML", reply_markup=get_user_manage_kb(user))
+
+
+@admin_router.callback_query(F.data.startswith("admin:user:vip:"))
+async def cb_admin_give_vip_start(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+    telegram_id = int(callback.data.split(":")[-1])
+    await state.update_data(target_tg_id=telegram_id)
+    await state.set_state(AdminStates.waiting_for_vip_days)
+    await callback.message.edit_text(
+        f"<b>Give / Extend VIP</b>\n\nSend the number of VIP days for <code>{telegram_id}</code>.",
+        parse_mode="HTML",
+        reply_markup=get_back_to_admin_kb(),
+    )
+    await callback.answer()
+
+
+@admin_router.message(AdminStates.waiting_for_vip_days)
+async def process_vip_days(message: Message, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(message.from_user.id, session):
+        return
+    if not message.text or not message.text.isdigit():
+        return await message.answer("Please send a positive integer number of days.")
+
+    data = await state.get_data()
+    target_tg_id = int(data["target_tg_id"])
+    service = _admin_service(session)
+    await service.grant_vip_to_user(message.from_user.id, target_tg_id, int(message.text))
+    user = await service.get_user_details(target_tg_id)
+    await state.clear()
+    await message.answer(_format_user_detail(user), parse_mode="HTML", reply_markup=get_user_manage_kb(user))
+
+
+@admin_router.callback_query(F.data.startswith("admin:user:ban:"))
+async def cb_admin_ban_toggle(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+    telegram_id = int(callback.data.split(":")[-1])
+    service = _admin_service(session)
+    user = await service.get_user_details(telegram_id)
+    updated_user = await service.set_user_ban_status(telegram_id, not user.is_banned)
+    await callback.message.edit_text(
+        _format_user_detail(updated_user),
+        parse_mode="HTML",
+        reply_markup=get_user_manage_kb(updated_user),
+    )
+    await callback.answer("Updated")
+
+
+@admin_router.callback_query(F.data == "admin:codes")
+async def cb_admin_codes(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+    await callback.message.edit_text("<b>Gift / Discount Codes</b>", parse_mode="HTML", reply_markup=get_code_menu_kb())
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin:codes:create")
+async def cb_admin_codes_create(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+    await callback.message.edit_text(
+        "<b>Create Code</b>\n\nChoose the code type.",
+        parse_mode="HTML",
+        reply_markup=get_code_kind_kb(),
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin:codes:kind:"))
+async def cb_admin_codes_kind(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+    kind = callback.data.split(":")[-1]
+    await state.update_data(code_kind=kind)
+    await state.set_state(AdminStates.waiting_for_code_amount)
+    await callback.message.edit_text(
+        "<b>Create Code</b>\n\nSend the value:\n"
+        "- normal credits\n- vip credits\n- vip days\n- or discount percent",
+        parse_mode="HTML",
+        reply_markup=get_back_to_admin_kb(),
+    )
+    await callback.answer()
+
+
+@admin_router.message(AdminStates.waiting_for_code_amount)
+async def process_code_amount(message: Message, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(message.from_user.id, session):
+        return
+    if not message.text or not message.text.isdigit():
+        return await message.answer("Please send a positive integer value.")
+    await state.update_data(code_amount=int(message.text))
+    await state.set_state(AdminStates.waiting_for_code_expiry_days)
+    await message.answer("How many days should this code stay valid? Send 0 for no expiry.")
+
+
+@admin_router.message(AdminStates.waiting_for_code_expiry_days)
+async def process_code_expiry(message: Message, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(message.from_user.id, session):
+        return
+    if not message.text or not message.text.isdigit():
+        return await message.answer("Please send a non-negative integer.")
+    await state.update_data(expiry_days=int(message.text))
+    await state.set_state(AdminStates.waiting_for_code_max_uses)
+    await message.answer("Maximum total uses?")
+
+
+@admin_router.message(AdminStates.waiting_for_code_max_uses)
+async def process_code_max_uses(message: Message, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(message.from_user.id, session):
+        return
+    if not message.text or not message.text.isdigit():
+        return await message.answer("Please send a positive integer.")
+    await state.update_data(max_uses=int(message.text))
+    await state.set_state(AdminStates.waiting_for_code_max_uses_per_user)
+    await message.answer("Maximum uses per user?")
+
+
+@admin_router.message(AdminStates.waiting_for_code_max_uses_per_user)
+async def process_code_max_uses_per_user(message: Message, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(message.from_user.id, session):
+        return
+    if not message.text or not message.text.isdigit():
+        return await message.answer("Please send a positive integer.")
+    await state.update_data(max_uses_per_user=int(message.text))
+    await message.answer("Choose how to create the code value.", reply_markup=get_code_generation_kb())
+
+
+@admin_router.callback_query(F.data.startswith("admin:codes:generate:"))
+async def cb_admin_codes_generate(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+    mode = callback.data.split(":")[-1]
+    if mode == "auto":
+        await _finalize_code_creation(callback.message, session, state, manual_code=None, admin_telegram_id=callback.from_user.id)
+        await callback.answer("Code created")
+        return
+
+    await state.set_state(AdminStates.waiting_for_manual_code)
+    await callback.message.edit_text(
+        "<b>Create Code</b>\n\nSend the manual code text.",
+        parse_mode="HTML",
+        reply_markup=get_back_to_admin_kb(),
+    )
+    await callback.answer()
+
+
+@admin_router.message(AdminStates.waiting_for_manual_code)
+async def process_manual_code(message: Message, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(message.from_user.id, session):
+        return
+    await _finalize_code_creation(message, session, state, manual_code=(message.text or "").strip(), admin_telegram_id=message.from_user.id)
+
+
+async def _finalize_code_creation(
+    target: Message,
+    session: AsyncSession,
+    state: FSMContext,
+    *,
+    manual_code: str | None,
+    admin_telegram_id: int,
+) -> None:
+    data = await state.get_data()
+    service = _admin_service(session)
+    kind = PromoCodeKind(data["code_kind"])
+    amount = int(data["code_amount"])
+    expiry_days = int(data["expiry_days"])
+    expires_at = datetime.now(timezone.utc) + timedelta(days=expiry_days) if expiry_days > 0 else None
+    code = (manual_code or secrets.token_hex(4)).upper()
+
+    kwargs = {
+        "normal_credits": 0,
+        "vip_credits": 0,
+        "vip_days": 0,
+        "discount_percent": 0,
+    }
+    if kind == PromoCodeKind.GIFT_NORMAL_CREDITS:
+        kwargs["normal_credits"] = amount
+    elif kind == PromoCodeKind.GIFT_VIP_CREDITS:
+        kwargs["vip_credits"] = amount
+    elif kind == PromoCodeKind.GIFT_VIP_DAYS:
+        kwargs["vip_days"] = amount
+    else:
+        kwargs["discount_percent"] = amount
+
+    promo = await service.create_promo_code(
+        admin_telegram_id=admin_telegram_id,
+        kind=kind,
+        code=code,
+        max_uses=int(data["max_uses"]),
+        max_uses_per_user=int(data["max_uses_per_user"]),
+        expires_at=expires_at,
+        **kwargs,
+    )
+    await state.clear()
+    await target.answer(
+        "<b>Code Created</b>\n\n"
+        f"Code: <code>{promo.code}</code>\n"
+        f"Kind: <code>{promo.kind.value}</code>\n"
+        f"Max uses: <code>{promo.max_uses}</code>\n"
+        f"Max uses per user: <code>{promo.max_uses_per_user}</code>",
+        parse_mode="HTML",
+        reply_markup=get_code_detail_kb(promo.id),
+    )
+
+
+@admin_router.callback_query(F.data == "admin:codes:list")
+async def cb_admin_codes_list(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+    codes = await _admin_service(session).list_promo_codes(active_only=False)
+    await callback.message.edit_text(
+        "<b>Codes</b>\n\nSelect a code to inspect or disable it.",
+        parse_mode="HTML",
+        reply_markup=get_codes_list_kb(codes),
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin:codes:view:"))
+async def cb_admin_codes_view(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+    code_id = int(callback.data.split(":")[-1])
+    usage = await _admin_service(session).get_promo_usage(code_id)
+    promo = usage["promo"]
+    await callback.message.edit_text(
+        "<b>Code Details</b>\n\n"
+        f"Code: <code>{promo.code}</code>\n"
+        f"Kind: <code>{promo.kind.value}</code>\n"
+        f"Normal credits: <code>{promo.normal_credits}</code>\n"
+        f"VIP credits: <code>{promo.vip_credits}</code>\n"
+        f"VIP days: <code>{promo.vip_days}</code>\n"
+        f"Discount: <code>{promo.discount_percent}%</code>\n"
+        f"Uses: <code>{promo.used_count}/{promo.max_uses}</code>\n"
+        f"Active: <code>{promo.is_active}</code>",
+        parse_mode="HTML",
+        reply_markup=get_code_detail_kb(code_id),
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin:codes:disable:"))
+async def cb_admin_codes_disable(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+    code_id = int(callback.data.split(":")[-1])
+    promo = await _admin_service(session).disable_promo_code(code_id)
+    await callback.message.edit_text(
+        f"<b>Code Disabled</b>\n\n<code>{promo.code}</code> is now inactive.",
+        parse_mode="HTML",
+        reply_markup=get_code_menu_kb(),
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin:codes:usage:"))
+async def cb_admin_codes_usage(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+    code_id = int(callback.data.split(":")[-1])
+    usage = await _admin_service(session).get_promo_usage(code_id)
+    lines = [
+        "<b>Code Usage</b>",
+        "",
+        f"Used count: <code>{usage['used_count']}</code>",
+    ]
+    for redemption in usage["redemptions"][:10]:
+        lines.append(f"user_id=<code>{redemption.user_id}</code> used=<code>{redemption.used_count}</code>")
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=get_back_to_admin_kb())
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin:broadcast")
+async def cb_admin_broadcast(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer("Access denied", show_alert=True)
+    await state.set_state(AdminStates.waiting_for_broadcast)
+    await callback.message.edit_text(
+        "<b>Broadcast</b>\n\nSend the message you want to broadcast.",
+        parse_mode="HTML",
+        reply_markup=get_back_to_admin_kb(),
+    )
+    await callback.answer()
+
 
 @admin_router.message(AdminStates.waiting_for_broadcast)
 async def process_broadcast_message(message: Message, session: AsyncSession, state: FSMContext):
     if not await _is_admin(message.from_user.id, session):
         return
-    
-    await state.clear()
-    
-    # Get all users
     stmt = select(User.telegram_id).where(User.telegram_id.is_not(None))
-    result = await session.execute(stmt)
-    user_ids = result.scalars().all()
-    
-    if not user_ids:
-        return await message.answer("کاربری برای ارسال پیام یافت نشد.")
-
-    status_msg = await message.answer(f"⏳ در حال ارسال پیام به {len(user_ids)} کاربر...\nلطفاً صبور باشید.")
-    
+    user_ids = (await session.execute(stmt)).scalars().all()
     success_count = 0
     fail_count = 0
-
     for uid in user_ids:
         try:
             await message.send_copy(chat_id=uid)
             success_count += 1
         except Exception:
             fail_count += 1
-        
-        await asyncio.sleep(0.05) # 0.05s delay as requested
-
-    await status_msg.edit_text(
-        f"✅ <b>گزارش ارسال پیام همگانی:</b>\n\n"
-        f"🎯 ارسال موفق: {success_count}\n"
-        f"❌ ارسال ناموفق: {fail_count}\n"
-        f"👥 کل کاربران: {len(user_ids)}",
+    await state.clear()
+    await message.answer(
+        "<b>Broadcast Finished</b>\n\n"
+        f"Success: <code>{success_count}</code>\n"
+        f"Failed: <code>{fail_count}</code>",
         parse_mode="HTML",
-        reply_markup=get_back_to_admin_kb()
+        reply_markup=get_back_to_admin_kb(),
     )
 
-# ── User Management Flow ────────────────────────
 
-@admin_router.callback_query(F.data == "admin_users_list")
-async def cb_user_management(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+@admin_router.callback_query(F.data == "admin:pricing")
+async def cb_admin_pricing(callback: CallbackQuery, session: AsyncSession):
     if not await _is_admin(callback.from_user.id, session):
-        return await callback.answer("⛔️ دسترسی ندارید", show_alert=True)
-    
-    await state.set_state(AdminStates.waiting_for_user_id)
-    await callback.message.edit_text(
-        "👥 <b>مدیریت کاربران</b>\n\n"
-        "لطفاً شناسه تلگرام کاربر (Telegram ID) را وارد کنید:",
-        parse_mode="HTML",
-        reply_markup=get_back_to_admin_kb()
-    )
+        return await callback.answer("Access denied", show_alert=True)
+    features = (await session.scalars(select(FeatureConfig).order_by(FeatureConfig.name.asc()))).all()
+    lines = ["<b>Pricing / Config</b>", ""]
+    for feature in features:
+        lines.append(
+            f"{feature.name.value}: cost=<code>{feature.credit_cost}</code> model=<code>{feature.model_name}</code>"
+        )
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=get_back_to_admin_kb())
     await callback.answer()
 
-@admin_router.message(AdminStates.waiting_for_user_id)
-async def process_user_id(message: Message, session: AsyncSession, state: FSMContext):
-    if not await _is_admin(message.from_user.id, session):
-        return
 
-    if not message.text or not message.text.lstrip('-').isdigit():
-        return await message.answer("❌ لطفاً یک عدد معتبر (شناسه تلگرام) وارد کنید.")
-        
-    target_id = int(message.text.strip())
-
-    user = await session.scalar(select(User).where(User.telegram_id == target_id))
-    if not user:
-        return await message.answer(
-            f"❌ کاربری با شناسه <code>{target_id}</code> در دیتابیس یافت نشد.",
-            parse_mode="HTML",
-            reply_markup=get_back_to_admin_kb()
-        )
-    
-    # Show info and actions
-    name = user.first_name or user.username or "ناشناس"
-    status = "بن‌شده ⛔️" if user.is_banned else "فعال ✅"
-    text = (
-        f"👤 <b>اطلاعات کاربر</b>\n"
-        f"━━━━━━━━━━━\n"
-        f"نام: {name}\n"
-        f"آیدی: <code>{user.telegram_id}</code>\n"
-        f"وضعیت: {status}\n"
-        f"موجودی اعتبار: <code>{user.credit_balance:,}</code>\n\n"
-        f"یک عملیات انتخاب کنید:"
-    )
-
-    # Clear state and show manage kb
-    await state.clear()
-    await message.answer(text, parse_mode="HTML", reply_markup=get_user_manage_kb(user.telegram_id))
-
-@admin_router.callback_query(F.data.startswith("admin_user_add_credit:"))
-async def cb_add_credit_start(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
-    if not await _is_admin(callback.from_user.id, session):
-        return await callback.answer("⛔️ دسترسی ندارید", show_alert=True)
-    
-    user_id = int(callback.data.split(":")[1])
-    
-    await state.update_data(target_tg_id=user_id)
-    await state.set_state(AdminStates.waiting_for_amount)
-    
-    await callback.message.edit_text(
-        f"💰 <b>افزایش اعتبار</b>\n\n"
-        f"لطفاً مقدار اعتباری که می‌خواهید به کاربر <code>{user_id}</code> اضافه کنید را وارد نمایید (به عدد):",
-        parse_mode="HTML",
-        reply_markup=get_back_to_admin_kb()
-    )
-    await callback.answer()
-
-@admin_router.message(AdminStates.waiting_for_amount)
-async def process_add_credit_amount(message: Message, session: AsyncSession, state: FSMContext):
-    if not await _is_admin(message.from_user.id, session):
-        return
-        
-    if not message.text or not message.text.lstrip('-').isdigit():
-        return await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.")
-        
-    amount = int(message.text.strip())
-    
-    data = await state.get_data()
-    target_tg_id = data.get("target_tg_id")
-    
-    user = await session.scalar(select(User).where(User.telegram_id == target_tg_id))
-    if not user:
-        await state.clear()
-        return await message.answer("❌ کاربر یافت نشد.", reply_markup=get_back_to_admin_kb())
-
-    billing = BillingService(session)
-    ref_id = f"admin_gift_{message.from_user.id}_{uuid.uuid4().hex[:6]}"
-    
-    try:
-        await billing.add_credits(
-            user_id=user.id,
-            amount=amount,
-            entry_type=LedgerEntryType.ADMIN_ADJUSTMENT,
-            reference_type="admin_gift",
-            reference_id=ref_id,
-            description=f"Admin {message.from_user.id} gifted {amount} credits"
-        )
-        await session.commit()
-        
-        # refresh user for latest balance
-        user = await session.scalar(select(User).where(User.telegram_id == target_tg_id))
-        
-        await message.answer(
-            f"✅ با موفقیت {amount} اعتبار به کاربر <code>{target_tg_id}</code> اضافه شد.\n"
-            f"موجودی جدید: <code>{user.credit_balance:,}</code>",
-            parse_mode="HTML",
-            reply_markup=get_user_manage_kb(target_tg_id)
-        )
-    except Exception as e:
-        await session.rollback()
-        logger.error(f"Gift amount error: {e}")
-        await message.answer("⚠️ خطا در افزودن موجودی.", reply_markup=get_back_to_admin_kb())
-
-    await state.clear()
-
-@admin_router.callback_query(F.data.startswith("admin_user_toggle_ban:"))
-async def cb_toggle_ban(callback: CallbackQuery, session: AsyncSession):
-    if not await _is_admin(callback.from_user.id, session):
-        return await callback.answer("⛔️ دسترسی ندارید", show_alert=True)
-        
-    user_id = int(callback.data.split(":")[1])
-    
-    user = await session.scalar(select(User).where(User.telegram_id == user_id))
-    if not user:
-        return await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
-
-    user.is_banned = not user.is_banned
-    await session.commit()
-
-    status_text = "🚫 بن شد" if user.is_banned else "✅ آنبن شد"
-    
-    await callback.message.edit_text(
-        f"{status_text}\n\n"
-        f"کاربر: <b>{user.first_name or 'ناشناس'}</b> (<code>{user_id}</code>)\n"
-        f"وضعیت فعلی: <b>{'بن‌شده ⛔️' if user.is_banned else 'فعال ✅'}</b>",
-        parse_mode="HTML",
-        reply_markup=get_user_manage_kb(user_id)
-    )
+@admin_router.callback_query(F.data == "admin:noop")
+async def cb_admin_noop(callback: CallbackQuery):
     await callback.answer()

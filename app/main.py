@@ -215,7 +215,7 @@ async def nowpayments_webhook(request: Request) -> dict[str, str]:
                 
                 if user:
                     from app.services.billing.billing_service import BillingService
-                    from app.core.enums import LedgerEntryType
+                    from app.core.enums import LedgerEntryType, WalletType
                     
                     price_amount = float(payload.get("price_amount", 0))
                     
@@ -229,11 +229,6 @@ async def nowpayments_webhook(request: Request) -> dict[str, str]:
                         added_credits = 700
                         days = 60
                         
-                    user.is_vip = True
-                    # Extend or start VIP
-                    current_expire = user.vip_expire_date if user.vip_expire_date and user.vip_expire_date > datetime.now(timezone.utc) else datetime.now(timezone.utc)
-                    user.vip_expire_date = current_expire + timedelta(days=days)
-                    
                     billing = BillingService(session)
                     payment_id_str = str(payload.get("payment_id", order_id))
                     
@@ -243,7 +238,15 @@ async def nowpayments_webhook(request: Request) -> dict[str, str]:
                         entry_type=LedgerEntryType.PURCHASE,
                         reference_type="nowpayments_ipn",
                         reference_id=f"np_{payment_id_str}",
-                        description=f"Crypto Payment: ${price_amount}"
+                        description=f"Crypto Payment: ${price_amount}",
+                        wallet_type=WalletType.VIP
+                    )
+                    await billing.grant_vip_access(
+                        user_id=user.id,
+                        days=days,
+                        reference_type="nowpayments_vip_access",
+                        reference_id=f"np_vip_{payment_id_str}",
+                        description=f"VIP access granted from crypto payment ${price_amount}"
                     )
                     
                     # session.commit() is natively handled gracefully inside billing.add_credits

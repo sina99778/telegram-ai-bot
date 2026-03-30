@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.models import FeatureConfig, Message, Conversation
-from app.core.enums import FeatureName, MessageRole
+from app.core.enums import FeatureName, MessageRole, WalletType
 from app.core.exceptions import InsufficientCreditsError
 from app.services.billing.billing_service import BillingService
 from app.services.ai.router import ModelRouter
@@ -50,7 +50,8 @@ class ImageOrchestrator:
                 amount=cost,
                 reference_type="image_generation",
                 reference_id=reference_id,
-                description="AI Image Generation"
+                description="AI Image Generation",
+                wallet_type=WalletType.VIP,
             )
             await self.session.commit()
         except InsufficientCreditsError:
@@ -87,7 +88,8 @@ class ImageOrchestrator:
                     user_id=user_id,
                     original_reference_id=reference_id,
                     amount=cost,
-                    description="Refund: Image Timeout/Failure"
+                    description="Refund: Image Timeout/Failure",
+                    wallet_type=WalletType.VIP,
                 )
                 await self.session.commit()
             except Exception as refund_err:

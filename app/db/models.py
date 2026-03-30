@@ -5,30 +5,39 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 from sqlalchemy.dialects.postgresql import JSONB
 
-from app.core.enums import TransactionStatus, LedgerEntryType, FeatureName, MessageRole
+from app.core.enums import (
+    TransactionStatus,
+    LedgerEntryType,
+    FeatureName,
+    MessageRole,
+    WalletType,
+    PromoCodeKind,
+)
 
 class Base(DeclarativeBase):
     pass
 
 class User(Base):
-    """Telegram bot user with unified credit-based billing.
+    """Telegram bot user with dual-wallet billing and VIP access control.
 
     Accounting Model
     ----------------
+    ``normal_credits`` / ``vip_credits``
+        The authoritative spendable wallets.
+
     ``credit_balance``
-        The **single source of truth** for the user's spendable balance.
-        Mutations MUST go through :class:`BillingService` which enforces
-        row-level locking, idempotency, and ledger auditing.
+        Backward-compatible aggregate of both wallets for reporting and
+        legacy read paths. New write paths should not mutate it directly.
 
     ``lifetime_credits_purchased`` / ``lifetime_credits_used``
         Monotonically increasing counters for analytics.  They are
-        updated atomically alongside ``credit_balance`` inside
+        updated atomically alongside the wallet fields inside
         ``BillingService.deduct_credits`` / ``add_credits``.
 
     Ledger Invariant
-        Every mutation of ``credit_balance`` produces a corresponding
+        Every wallet mutation produces a corresponding
         :class:`CreditLedger` row.  The sum of all ledger ``amount``
-        values for a user should equal their current ``credit_balance``.
+        values for a wallet should equal that wallet's mutations.
     """
 
     __tablename__ = "users"
@@ -51,8 +60,8 @@ class User(Base):
     # These columns are retained only for schema compatibility.
     # Do NOT read or write them in new code — use credit_balance
     # via BillingService instead.
-    normal_credits: Mapped[int] = mapped_column(default=50)   # DEPRECATED
-    premium_credits: Mapped[int] = mapped_column(default=0)    # DEPRECATED
+    normal_credits: Mapped[int] = mapped_column(default=50)
+    vip_credits: Mapped[int] = mapped_column(default=0)
     last_credit_reset: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     
     # ── Subscription / VIP ────────────────────
@@ -87,6 +96,26 @@ class User(Base):
     payments: Mapped[List["PaymentTransaction"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     conversations: Mapped[List["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
+    @property
+    def premium_credits(self) -> int:
+        """Backward-compatible alias for legacy code paths."""
+        return self.vip_credits
+
+    @premium_credits.setter
+    def premium_credits(self, value: int) -> None:
+        self.vip_credits = value
+
+    @property
+    def has_active_vip(self) -> bool:
+        if not self.is_vip:
+            return False
+        if self.vip_expire_date is None:
+            return True
+        return self.vip_expire_date > datetime.now(timezone.utc)
+
+    def sync_credit_balance(self) -> None:
+        self.credit_balance = max(0, self.normal_credits) + max(0, self.vip_credits)
+
 class CreditLedger(Base):
     __tablename__ = "credit_ledger"
     __table_args__ = (
@@ -102,6 +131,7 @@ class CreditLedger(Base):
     amount: Mapped[int] = mapped_column() 
     balance_before: Mapped[int] = mapped_column()
     balance_after: Mapped[int] = mapped_column()
+    wallet_type: Mapped[WalletType] = mapped_column(SQLEnum(WalletType), default=WalletType.NORMAL)
     
     reference_type: Mapped[Optional[str]] = mapped_column(String(50)) 
     reference_id: Mapped[Optional[str]] = mapped_column(String(255), index=True)
@@ -194,10 +224,23 @@ class PromoCode(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
-    credits: Mapped[int] = mapped_column(default=0)
+    kind: Mapped[PromoCodeKind] = mapped_column(SQLEnum(PromoCodeKind), default=PromoCodeKind.GIFT_NORMAL_CREDITS)
+    normal_credits: Mapped[int] = mapped_column(default=0)
+    vip_credits: Mapped[int] = mapped_column(default=0)
     vip_days: Mapped[int] = mapped_column(default=0)
+    discount_percent: Mapped[int] = mapped_column(default=0)
+    max_uses: Mapped[int] = mapped_column(default=1)
+    used_count: Mapped[int] = mapped_column(default=0)
+    max_uses_per_user: Mapped[int] = mapped_column(default=1)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_by_admin_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    @property
+    def credits(self) -> int:
+        """Backward-compatible alias used by older redemption code."""
+        return self.normal_credits
 
 class UserPromo(Base):
     __tablename__ = "user_promos"
@@ -208,4 +251,5 @@ class UserPromo(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     promo_id: Mapped[int] = mapped_column(ForeignKey("promo_codes.id"), index=True)
+    used_count: Mapped[int] = mapped_column(default=0)
     redeemed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
