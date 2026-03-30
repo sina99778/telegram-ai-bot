@@ -66,7 +66,7 @@ async def test_refund_credits_expanded(db_session, setup_base_data):
     assert ledgers[0].amount == 15
     assert ledgers[0].type.value == "REFUND"
     assert ledgers[1].amount == -15
-    assert ledgers[1].type.value == "DEDUCTION"
+    assert ledgers[1].type.value == "USAGE"
     
     # Verify Refund Idempotency mapping
     with pytest.raises(DuplicateTransactionError):

@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.db.models import User, CreditLedger, PaymentTransaction
 from app.services.billing.billing_service import BillingService
-from app.core.enums import FeatureName
+from app.core.enums import FeatureName, LedgerEntryType
 from app.core.exceptions import AppError
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,7 @@ class AdminService:
         new_balance = await self.billing.add_credits(
             user_id=user.id,
             amount=amount,
+            entry_type=LedgerEntryType.ADMIN_ADJUSTMENT,
             reference_type="admin_grant",
             reference_id=f"admin_{admin_telegram_id}_grant_{uuid.uuid4().hex[:6]}",
             description=f"Admin {admin_telegram_id} explicitly granted {amount} credits."

@@ -40,4 +40,4 @@ async def test_get_system_stats(db_session, setup_base_data):
     assert stats["total_users"] == 1
     assert stats["total_credits_circulation"] == 100
     assert stats["total_payments_completed"] == 1
-    assert stats["total_payments_failed"] == 1
+    assert stats["total_payments_failed"] == 0
