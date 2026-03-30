@@ -14,6 +14,10 @@ from app.services.queue.queue_service import QueueService
 
 logger = logging.getLogger(__name__)
 
+# After this many cumulative tokens in a conversation, the orchestrator
+# triggers a background summarization job via the QueueService.
+SUMMARIZATION_TOKEN_THRESHOLD = 3000
+
 @dataclass
 class ChatResult:
     text: str
@@ -68,7 +72,7 @@ class ChatOrchestrator:
                 reference_id=reference_id,
                 description=f"AI Chat ({mode_str.upper()})"
             )
-            await self.session.commit()
+            # billing.deduct_credits commits internally (Saga Phase-1).
         except InsufficientCreditsError:
             await self.session.rollback()
             return ChatResult(text=f"❌ Insufficient balance. You need {cost} credits.", success=False, error_message="insufficient_funds")
@@ -94,8 +98,10 @@ class ChatOrchestrator:
             )
         except Exception as e:
             logger.error(f"AI Generation failed: {e}")
-            # Ensure dirty database entities derived during context building roll back explicitly.
-            await self.session.rollback() 
+            # Rollback any dirty ORM state (e.g. the new Conversation row).
+            # The billing debit is already committed in its own transaction,
+            # so the refund below starts a clean compensating transaction.
+            await self.session.rollback()
             
             # Saga Refund Execution
             try:
@@ -120,7 +126,7 @@ class ChatOrchestrator:
                 conversation_id=conv.id, 
                 role=MessageRole.USER, 
                 content=prompt,
-                tokens_used=self.memory.tokenizer.estimate_tokens(prompt) if tokens_used == 0 else 0
+                tokens_used=tokens_used  # TODO: Use real token count from AIResponse once Gemini SDK exposes usage_metadata
             ) # We record tokens against models predominantly, user estimation as fallback
             
             bot_msg = Message(
@@ -143,7 +149,7 @@ class ChatOrchestrator:
             
             
         # 8. SAFE BACKGROUND TRIGGER
-        if conv.total_tokens_used > 3000 and not conv.summarization_pending:
+        if conv.total_tokens_used > SUMMARIZATION_TOKEN_THRESHOLD and not conv.summarization_pending:
             from datetime import datetime, timezone
             conv.summarization_pending = True
             conv.summarization_requested_at = datetime.now(timezone.utc)

@@ -7,8 +7,20 @@ from app.services.ai.provider import AIMessage
 logger = logging.getLogger(__name__)
 
 async def summarize_chat(ctx: dict, conversation_id: int):
-    """
-    Background job to summarize old messages securely across transactions.
+    """Background job: compress old messages into a running summary.
+
+    Retention Policy
+    ----------------
+    The last 10 messages are always retained verbatim.  All older
+    messages are deleted after their content is folded into
+    ``Conversation.summary_text``.  The summary is versioned via
+    ``summary_version`` for idempotency tracking.
+
+    Flag Safety
+    -----------
+    ``summarization_pending`` is unconditionally released in a
+    ``finally`` block using a fresh ``session.begin()`` scope so
+    the flag is cleared even if the AI call or DB write fails.
     """
     session_maker: async_sessionmaker[AsyncSession] = ctx['session_maker']
     ai_provider = ctx['providers'].get('antigravity')
@@ -64,7 +76,8 @@ async def summarize_chat(ctx: dict, conversation_id: int):
                 conv.summary_text = response.text
                 conv.summary_version += 1
                 
-                # Archival Logic: Drop everything safely outside retained horizon
+                # Archival: delete everything except the last 10 messages.
+                # Their content is now compressed into summary_text.
                 msgs_to_delete = messages[:-10]
                 for m in msgs_to_delete:
                     await session.delete(m)
@@ -75,6 +88,8 @@ async def summarize_chat(ctx: dict, conversation_id: int):
             logger.error(f"Failed completely summarizing conversation {conversation_id}: {e}", exc_info=True)
             # Safe rollback automatically handles inside `Session.begin()` context bounding
         finally:
+            # Unconditionally release the summarization lock in a clean
+            # transaction scope so it is cleared regardless of success/failure.
             async with session.begin():
                 clean_conv = await session.get(Conversation, conversation_id)
                 if clean_conv:

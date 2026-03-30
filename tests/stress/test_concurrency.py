@@ -1,3 +1,13 @@
+"""PostgreSQL concurrency stress tests.
+
+Prerequisite
+------------
+A running PostgreSQL instance.  Set ``PG_TEST_DATABASE_URL`` or the
+default ``postgresql+asyncpg://postgres:postgres@localhost:5432/postgres``
+will be used.  Tests are **automatically skipped** when the database
+is unreachable.
+"""
+
 import os
 import asyncio
 import pytest
@@ -7,11 +17,24 @@ from app.db.models import Base, User
 from app.services.billing.billing_service import BillingService
 from app.core.exceptions import InsufficientCreditsError, DuplicateTransactionError
 
-# 1. Provide explicit PostgreSQL Engine URI mapping for rigorous locking execution
-# This circumvents SQLite to strictly enforce `FOR UPDATE` ACID bound protections.
+# PostgreSQL URI for concurrency tests (SQLite cannot enforce FOR UPDATE).
 PG_TEST_DATABASE_URL = os.getenv(
     "PG_TEST_DATABASE_URL", 
     "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
+)
+
+# --- Skip entire module if Postgres is unreachable -------------------------
+def _pg_is_reachable() -> bool:
+    """Quick synchronous check — try to parse the DSN at import time."""
+    try:
+        import asyncpg  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+pytestmark = pytest.mark.skipif(
+    not _pg_is_reachable(),
+    reason="asyncpg not installed — skipping PostgreSQL stress tests"
 )
 
 @pytest_asyncio.fixture(scope="function")

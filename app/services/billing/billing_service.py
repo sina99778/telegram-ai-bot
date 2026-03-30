@@ -9,6 +9,26 @@ from app.core.exceptions import InsufficientCreditsError, DuplicateTransactionEr
 logger = logging.getLogger(__name__)
 
 class BillingService:
+    """Atomic credit operations with ledger auditing.
+
+    Contract
+    --------
+    * **Idempotency**: Every mutation requires a ``(user_id, reference_type,
+      reference_id)`` tuple enforced by a composite unique index on
+      ``CreditLedger``.  Duplicate calls raise ``DuplicateTransactionError``.
+
+    * **Locking**: ``deduct_credits`` and ``add_credits`` acquire a
+      ``SELECT … FOR UPDATE`` row lock on the ``User`` row.  Under PostgreSQL
+      this serialises concurrent mutations; under SQLite the lock is a no-op
+      but logic tests still pass.
+
+    * **Saga integration**: Each method performs its own ``flush()`` +
+      ``commit()`` to create a hard durability boundary.  In the Saga
+      pattern used by orchestrators, Phase-1 (debit) commits *before* the
+      expensive AI call, and a compensating ``refund_credits`` runs on
+      failure.
+    """
+
     def __init__(self, session: AsyncSession):
         self.session = session
 
@@ -62,7 +82,6 @@ class BillingService:
 
         balance_before = user.credit_balance
         user.credit_balance -= amount
-        user.premium_credits = user.credit_balance
         user.lifetime_credits_used += amount
 
         await self._create_ledger_entry(
@@ -108,7 +127,6 @@ class BillingService:
 
         balance_before = user.credit_balance
         user.credit_balance += amount
-        user.premium_credits = user.credit_balance
         
         if entry_type == LedgerEntryType.PURCHASE:
             user.lifetime_credits_purchased += amount

@@ -11,6 +11,26 @@ class Base(DeclarativeBase):
     pass
 
 class User(Base):
+    """Telegram bot user with unified credit-based billing.
+
+    Accounting Model
+    ----------------
+    ``credit_balance``
+        The **single source of truth** for the user's spendable balance.
+        Mutations MUST go through :class:`BillingService` which enforces
+        row-level locking, idempotency, and ledger auditing.
+
+    ``lifetime_credits_purchased`` / ``lifetime_credits_used``
+        Monotonically increasing counters for analytics.  They are
+        updated atomically alongside ``credit_balance`` inside
+        ``BillingService.deduct_credits`` / ``add_credits``.
+
+    Ledger Invariant
+        Every mutation of ``credit_balance`` produces a corresponding
+        :class:`CreditLedger` row.  The sum of all ledger ``amount``
+        values for a user should equal their current ``credit_balance``.
+    """
+
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint('credit_balance >= 0', name='check_credit_balance_positive'),
@@ -22,14 +42,17 @@ class User(Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(255))
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
     
-    # ── Billing (new system) ──────────────────
+    # ── Billing (authoritative) ───────────────
     credit_balance: Mapped[int] = mapped_column(default=0)
     lifetime_credits_purchased: Mapped[int] = mapped_column(default=0)
     lifetime_credits_used: Mapped[int] = mapped_column(default=0)
     
-    # ── Legacy credit system (used by chat_repo) ──
-    normal_credits: Mapped[int] = mapped_column(default=50)
-    premium_credits: Mapped[int] = mapped_column(default=0)
+    # ── DEPRECATED legacy credit fields ───────
+    # These columns are retained only for schema compatibility.
+    # Do NOT read or write them in new code — use credit_balance
+    # via BillingService instead.
+    normal_credits: Mapped[int] = mapped_column(default=50)   # DEPRECATED
+    premium_credits: Mapped[int] = mapped_column(default=0)    # DEPRECATED
     last_credit_reset: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     
     # ── Subscription / VIP ────────────────────

@@ -7,7 +7,7 @@ from app.services.chat.memory import MemoryManager
 from app.services.billing.billing_service import BillingService
 from app.db.models import Conversation, User
 from app.core.enums import FeatureName
-from app.services.queue.queue_service import JobResult
+from app.services.queue.queue_service import JobResult, JobStatus
 
 @pytest.fixture
 def session_factory(db_engine):
@@ -37,7 +37,7 @@ async def test_orchestrator_queue_trigger(db_session, session_factory, setup_bas
     memory.get_conversation_history.return_value = []
     
     queue_service = AsyncMock()
-    queue_service.enqueue_summarization.return_value = JobResult(success=True, job_id="test_job_123")
+    queue_service.enqueue_summarization.return_value = JobResult(success=True, status=JobStatus.ENQUEUED, job_id="test_job_123")
     
     orchestrator = ChatOrchestrator(db_session, billing, mock_router, memory, queue_service)
     user_id = setup_base_data["user_id"]
