@@ -62,6 +62,7 @@ class BillingService:
 
         balance_before = user.credit_balance
         user.credit_balance -= amount
+        user.premium_credits = user.credit_balance
         user.lifetime_credits_used += amount
 
         await self._create_ledger_entry(
@@ -107,6 +108,7 @@ class BillingService:
 
         balance_before = user.credit_balance
         user.credit_balance += amount
+        user.premium_credits = user.credit_balance
         
         if entry_type == LedgerEntryType.PURCHASE:
             user.lifetime_credits_purchased += amount
