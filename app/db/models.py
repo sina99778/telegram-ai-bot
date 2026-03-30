@@ -78,6 +78,7 @@ class User(Base):
     is_banned: Mapped[bool] = mapped_column(default=False)
     
     # ── Timestamps ────────────────────────────
+    last_daily_reward: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
