@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # ── Payments ──────────────────────────────
     NOWPAYMENTS_API_KEY: str = ""
 
+    # ── Redis (Background ARQ) ────────────────
+    REDIS_URL: str = "redis://redis:6379/0"
+
     # ── Google Gemini AI ──────────────────────
     GEMINI_API_KEY: str
     # Default/Free model
