@@ -45,6 +45,11 @@ class User(Base):
     special_reward_images_left: Mapped[int] = mapped_column(default=0)
     special_reward_expire: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     
+    # ── User preferences ───────────────────────
+    language: Mapped[str] = mapped_column(String(10), default="fa")
+    preferred_text_model: Mapped[Optional[str]] = mapped_column(String(50))
+    keep_chat_history: Mapped[bool] = mapped_column(default=True)
+    
     # ── Admin / moderation ────────────────────
     is_admin: Mapped[bool] = mapped_column(default=False)
     is_banned: Mapped[bool] = mapped_column(default=False)
