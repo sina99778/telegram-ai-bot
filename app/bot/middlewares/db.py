@@ -75,7 +75,8 @@ class DbSessionMiddleware(BaseMiddleware):
 
             # 2. Inject chat_orchestrator locally
             billing = BillingService(session)
-            router = ModelRouter(session, {})
+            from app.services.ai.antigravity import AntigravityProvider
+            router = ModelRouter(session, {"antigravity": AntigravityProvider()})
             memory = MemoryManager(session)
             queue = QueueService()
             chat_orchestrator = ChatOrchestrator(
