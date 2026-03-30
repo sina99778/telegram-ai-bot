@@ -27,7 +27,7 @@ class ImageOrchestrator:
         self.router = router
 
     async def _get_feature_config(self) -> FeatureConfig:
-        stmt = select(FeatureConfig).where(FeatureConfig.name == FeatureName.IMAGE_GENERATION)
+        stmt = select(FeatureConfig).where(FeatureConfig.name == FeatureName.IMAGE_GEN)
         config = await self.session.scalar(stmt)
         if not config or not config.is_active:
             raise ValueError("Image generation feature is disabled globally.")
@@ -68,7 +68,7 @@ class ImageOrchestrator:
             # Explicit timeout limit to prevent permanently hanging workers (e.g. 60 seconds)
             image_bytes = await asyncio.wait_for(
                 self.router.route_image_request(
-                    feature_name=FeatureName.IMAGE_GENERATION,
+                    feature_name=FeatureName.IMAGE_GEN,
                     prompt=prompt
                 ),
                 timeout=60.0
