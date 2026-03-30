@@ -17,9 +17,9 @@ def get_dispatcher() -> Dispatcher:
     dp.message.outer_middleware(CheckUserStatusMiddleware())
 
     # Order matters! Specific routers first, general catch-all (chat_router) last.
+    dp.include_router(admin_router)
     dp.include_router(base_router)
 
-    dp.include_router(admin_router)
     dp.include_router(menu_router)      # Intercepts menu button texts
     dp.include_router(callback_router)  # Handles inline button clicks
     dp.include_router(chat_router)      # Sends whatever is left to Gemini
