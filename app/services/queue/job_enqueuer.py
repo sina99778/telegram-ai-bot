@@ -2,7 +2,6 @@ import logging
 from typing import Optional
 from arq import create_pool
 from arq.connections import RedisSettings
-from arq.interfaces import RedisSettings as ARQRedisSettings
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
