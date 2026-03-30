@@ -58,7 +58,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: arq app.workers.main.WorkerSettings
+    command: python -m arq app.workers.main.WorkerSettings
     restart: always
     env_file:
       - .env
