@@ -41,8 +41,12 @@ class BillingService:
         if amount <= 0:
             raise ValueError("Deduction amount must be positive.")
 
-        # Idempotency Check (Lock-free first for performance)
-        stmt_check = select(CreditLedger.id).where(CreditLedger.reference_id == reference_id)
+        # Composite Idempotency Check (Lock-free first for performance)
+        stmt_check = select(CreditLedger.id).where(
+            CreditLedger.user_id == user_id,
+            CreditLedger.reference_type == reference_type,
+            CreditLedger.reference_id == reference_id
+        )
         if await self.session.scalar(stmt_check):
             raise DuplicateTransactionError(f"Transaction {reference_id} already processed.")
 
@@ -72,10 +76,9 @@ class BillingService:
         )
 
         try:
-            await self.session.flush() # Ensure DB constraints pass
+            await self.session.flush() # Ensure DB constraints pass without committing
         except IntegrityError as e:
-            # Catching rare race conditions on unique reference_id index
-            await self.session.rollback()
+            # Catching rare race conditions on unique composite index
             raise DuplicateTransactionError(f"Transaction {reference_id} already processed concurrently.") from e
 
         return user.credit_balance
@@ -85,7 +88,11 @@ class BillingService:
         if amount <= 0:
             raise ValueError("Addition amount must be positive.")
 
-        stmt_check = select(CreditLedger.id).where(CreditLedger.reference_id == reference_id)
+        stmt_check = select(CreditLedger.id).where(
+            CreditLedger.user_id == user_id,
+            CreditLedger.reference_type == reference_type,
+            CreditLedger.reference_id == reference_id
+        )
         if await self.session.scalar(stmt_check):
             raise DuplicateTransactionError(f"Transaction {reference_id} already processed.")
 
@@ -115,13 +122,23 @@ class BillingService:
         try:
             await self.session.flush()
         except IntegrityError as e:
-            await self.session.rollback()
             raise DuplicateTransactionError(f"Transaction {reference_id} already processed concurrently.") from e
 
         return user.credit_balance
 
     async def refund_credits(self, user_id: int, original_reference_id: str, amount: int, description: str) -> int:
         """Atomic refund for failed AI generations or canceled operations."""
+        # 1. Validate original transaction exists, belongs to user, and is a usage
+        stmt_orig = select(CreditLedger).where(
+            CreditLedger.user_id == user_id,
+            CreditLedger.reference_id == original_reference_id
+        )
+        orig_ledger = await self.session.scalar(stmt_orig)
+        if not orig_ledger:
+            raise ValueError(f"Original transaction {original_reference_id} not found.")
+        if orig_ledger.amount >= 0:
+            raise ValueError(f"Original transaction {original_reference_id} is not a valid usage transaction to refund.")
+
         refund_ref_id = f"refund_{original_reference_id}"
         
         return await self.add_credits(
