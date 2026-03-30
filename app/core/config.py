@@ -19,9 +19,9 @@ class Settings(BaseSettings):
     """
 
     # ── Telegram Bot ──────────────────────────
-    BOT_TOKEN: str
-    WEBHOOK_URL: str
-    WEBHOOK_SECRET: str
+    BOT_TOKEN: str = ""
+    WEBHOOK_URL: str = ""
+    WEBHOOK_SECRET: str = ""
     
     # ── Payments ──────────────────────────────
     NOWPAYMENTS_API_KEY: str = ""
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
 
     # ── Google Gemini AI ──────────────────────
-    GEMINI_API_KEY: str
+    GEMINI_API_KEY: str = ""
     # Default/Free model
     GEMINI_MODEL_NORMAL: str = "gemini-2.5-flash" 
     # Latest/Paid model for VIP/switching
@@ -38,10 +38,10 @@ class Settings(BaseSettings):
     SYSTEM_PROMPT: str = "You are a helpful AI assistant."
 
     # ── PostgreSQL ────────────────────────────
-    POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
-    POSTGRES_DB: str
-    POSTGRES_HOST: str
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_DB: str = "postgres"
+    POSTGRES_HOST: str = "localhost"
 
     # ── Admin ─────────────────────────────────
     ADMIN_IDS: str = ""  # Comma-separated Telegram user IDs, e.g. "123456,789012"

@@ -13,6 +13,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.exc import OperationalError
 from app.db.models import Base, User
 from app.services.billing.billing_service import BillingService
 from app.core.exceptions import InsufficientCreditsError, DuplicateTransactionError
@@ -43,9 +44,13 @@ async def pg_engine():
     engine = create_async_engine(PG_TEST_DATABASE_URL, echo=False, pool_size=20, max_overflow=20)
     
     # Truncate and rebuild strictly isolating states natively
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+    except (ConnectionError, OSError, OperationalError) as exc:
+        await engine.dispose()
+        pytest.skip(f"PostgreSQL stress tests skipped because the database is unreachable: {exc}")
         
     yield engine
     

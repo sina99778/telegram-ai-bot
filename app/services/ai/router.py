@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Dict, List, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -9,12 +10,17 @@ from app.services.ai.prompt_mgr import PromptBuilder
 
 logger = logging.getLogger(__name__)
 
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
+
+
 def sanitize_telegram_html(text: str) -> str:
     """Sanitization layer to ensure AI model HTML output is legally parseable by Telegram."""
-    # This serves as a safety catch. Proper production implementations might regex match supported tags.
-    # Telegram supports: <b>, <i>, <u>, <s>, <tg-spoiler>, <a href="...">, <code>, <pre>
-    # Note: the PromptBuilder heavily warns the model to behave, but we double-check here.
-    return text.replace("**", "<b>").replace("`", "<code>")
+    # Convert the markdown patterns we explicitly ask the model for into
+    # Telegram-supported HTML while leaving already-valid HTML untouched.
+    text = _BOLD_RE.sub(r"<b>\1</b>", text)
+    text = _INLINE_CODE_RE.sub(r"<code>\1</code>", text)
+    return text
 
 class ModelRouter:
     """

@@ -26,8 +26,9 @@ class AdminService:
         self.billing = billing
 
     async def add_credits_to_user(self, admin_telegram_id: int, target_telegram_id: int, amount: int) -> int:
-        from app.core.exceptions import AppError
         import uuid
+        if amount <= 0:
+            raise ValueError("Credit amount must be positive.")
         user = await self.get_user_details(target_telegram_id)
         
         # We explicitly trigger the billing bounds mapping rather than SQL hacking
@@ -44,11 +45,15 @@ class AdminService:
     async def update_feature_price(self, feature_name: FeatureName, new_cost: int) -> bool:
         from app.db.models import FeatureConfig
         from sqlalchemy import select
+        if new_cost <= 0:
+            raise ValueError("Feature cost must be positive.")
         feature = await self.session.scalar(select(FeatureConfig).where(FeatureConfig.name == feature_name))
         if not feature:
             raise ValueError("Feature not natively located.")
         
         feature.credit_cost = new_cost
+        await self.session.commit()
+        await self.session.refresh(feature)
         return True
 
     async def get_system_stats(self) -> Dict[str, Any]:
