@@ -113,6 +113,10 @@ class Conversation(Base):
     total_tokens_used: Mapped[int] = mapped_column(default=0)
     summary_version: Mapped[int] = mapped_column(default=0)
     summary_text: Mapped[Optional[str]] = mapped_column(Text) 
+    summarization_pending: Mapped[bool] = mapped_column(default=False)
+    summarization_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    summarization_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_summary_job_id: Mapped[Optional[str]] = mapped_column(String(255))
     
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

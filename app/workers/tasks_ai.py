@@ -51,6 +51,8 @@ async def summarize_chat(ctx: dict, conversation_id: int):
         try:
             # 5. Guaranteed ACID boundaries implementing Session Begin
             async with session.begin():
+                from datetime import datetime, timezone
+                conv.summarization_started_at = datetime.now(timezone.utc)
                 # 3. Call injected Provider safely executing the flash-lite endpoint dynamically
                 response = await ai_provider.generate_text(
                     model_name="gemini-3.1-flash-lite-preview",  # Refined explicit 1. cheap model configuration
@@ -72,3 +74,8 @@ async def summarize_chat(ctx: dict, conversation_id: int):
         except Exception as e:
             logger.error(f"Failed completely summarizing conversation {conversation_id}: {e}", exc_info=True)
             # Safe rollback automatically handles inside `Session.begin()` context bounding
+        finally:
+            async with session.begin():
+                clean_conv = await session.get(Conversation, conversation_id)
+                if clean_conv:
+                    clean_conv.summarization_pending = False

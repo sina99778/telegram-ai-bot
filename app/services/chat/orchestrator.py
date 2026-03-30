@@ -10,6 +10,7 @@ from app.core.exceptions import InsufficientCreditsError
 from app.services.billing.billing_service import BillingService
 from app.services.ai.router import ModelRouter
 from app.services.chat.memory import MemoryManager
+from app.services.queue.queue_service import QueueService
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +23,12 @@ class ChatResult:
     error_message: Optional[str] = None
 
 class ChatOrchestrator:
-    def __init__(self, session: AsyncSession, billing: BillingService, router: ModelRouter, memory: MemoryManager):
+    def __init__(self, session: AsyncSession, billing: BillingService, router: ModelRouter, memory: MemoryManager, queue_service: QueueService):
         self.session = session
         self.billing = billing
         self.router = router
         self.memory = memory
+        self.queue_service = queue_service
 
     async def _get_or_create_active_conversation(self, user_id: int, mode_str: str) -> Conversation:
         stmt = select(Conversation).where(
@@ -139,6 +141,23 @@ class ChatOrchestrator:
             # In cases where the AI actually spent the token computing the response successfully,
             # we prioritize returning the successful answer instead of punishing the user explicitly.
             
+            
+        # 8. SAFE BACKGROUND TRIGGER
+        if conv.total_tokens_used > 3000 and not conv.summarization_pending:
+            from datetime import datetime, timezone
+            conv.summarization_pending = True
+            conv.summarization_requested_at = datetime.now(timezone.utc)
+            await self.session.commit() # Commit the flag first
+            
+            result = await self.queue_service.enqueue_summarization(conv.id)
+            if not result.success:
+                # Rollback flag if queue fails
+                conv.summarization_pending = False
+                await self.session.commit()
+            else:
+                conv.last_summary_job_id = result.job_id
+                await self.session.commit()
+
         return ChatResult(
             text=response.text, 
             success=True, 

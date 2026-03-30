@@ -7,6 +7,7 @@ from app.services.ai.router import ModelRouter
 from app.services.chat.memory import MemoryManager
 from app.services.chat.orchestrator import ChatOrchestrator
 from app.services.chat.image_orchestrator import ImageOrchestrator
+from app.services.queue.queue_service import QueueService
 
 class ServicesMiddleware(BaseMiddleware):
     """
@@ -33,12 +34,14 @@ class ServicesMiddleware(BaseMiddleware):
             billing_service = BillingService(session)
             model_router = ModelRouter(session, self.providers)
             memory_manager = MemoryManager(session)
+            queue_service = QueueService()
             
             chat_orchestrator = ChatOrchestrator(
                 session_factory=self.session_factory, 
                 billing=billing_service, 
                 router=model_router, 
-                memory=memory_manager
+                memory=memory_manager,
+                queue_service=queue_service
             )
             
             image_orchestrator = ImageOrchestrator(
