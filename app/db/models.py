@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional, Any, List
 from sqlalchemy import BigInteger, String, Float, Boolean, Text, CheckConstraint, Index, Enum as SQLEnum, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.core.enums import TransactionStatus, LedgerEntryType, FeatureName, MessageRole
@@ -76,7 +77,7 @@ class PaymentTransaction(Base):
     credits_granted: Mapped[int] = mapped_column()
     status: Mapped[TransactionStatus] = mapped_column(SQLEnum(TransactionStatus), default=TransactionStatus.PENDING)
     idempotency_key: Mapped[str] = mapped_column(String(255), unique=True, index=True) 
-    raw_payload: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB) 
+    raw_payload: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON().with_variant(JSONB, "postgresql")) 
     
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
