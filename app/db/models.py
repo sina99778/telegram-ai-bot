@@ -97,15 +97,6 @@ class User(Base):
     conversations: Mapped[List["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
     @property
-    def premium_credits(self) -> int:
-        """Backward-compatible alias for legacy code paths."""
-        return self.vip_credits
-
-    @premium_credits.setter
-    def premium_credits(self, value: int) -> None:
-        self.vip_credits = value
-
-    @property
     def has_active_vip(self) -> bool:
         if not self.is_vip:
             return False

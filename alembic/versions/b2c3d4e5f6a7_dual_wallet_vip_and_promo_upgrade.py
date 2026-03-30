@@ -38,10 +38,15 @@ def upgrade() -> None:
     wallet_enum.create(bind, checkfirst=True)
     promo_kind_enum.create(bind, checkfirst=True)
 
-    if _has_column("users", "premium_credits") and not _has_column("users", "vip_credits"):
-        op.alter_column("users", "premium_credits", new_column_name="vip_credits")
-    elif not _has_column("users", "vip_credits"):
+    if not _has_column("users", "vip_credits"):
         op.add_column("users", sa.Column("vip_credits", sa.Integer(), nullable=False, server_default="0"))
+    if _has_column("users", "premium_credits"):
+        op.execute(
+            "UPDATE users "
+            "SET vip_credits = COALESCE(premium_credits, 0) "
+            "WHERE premium_credits IS NOT NULL"
+        )
+        op.drop_column("users", "premium_credits")
 
     if not _has_column("credit_ledger", "wallet_type"):
         op.add_column(
@@ -116,7 +121,13 @@ def downgrade() -> None:
         op.drop_column("credit_ledger", "wallet_type")
 
     if _has_column("users", "vip_credits") and not _has_column("users", "premium_credits"):
-        op.alter_column("users", "vip_credits", new_column_name="premium_credits")
+        op.add_column("users", sa.Column("premium_credits", sa.Integer(), nullable=False, server_default="0"))
+        op.execute(
+            "UPDATE users "
+            "SET premium_credits = COALESCE(vip_credits, 0) "
+            "WHERE vip_credits IS NOT NULL"
+        )
+        op.drop_column("users", "vip_credits")
 
     bind = op.get_bind()
     promo_kind_enum.drop(bind, checkfirst=True)

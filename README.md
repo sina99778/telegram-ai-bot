@@ -93,7 +93,9 @@ alembic upgrade head
 
 The migration upgrades the schema to:
 
-- rename `premium_credits` to `vip_credits`
+- add `vip_credits`
+- backfill data from `premium_credits` when present
+- drop `premium_credits` after the backfill
 - make ledger entries wallet-aware
 - expand promo code metadata
 - expand redemption tracking
