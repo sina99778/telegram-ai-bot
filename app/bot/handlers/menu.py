@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aiogram import F, Router
+from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, CallbackQuery
 
 from app.bot.keyboards.inline import get_profile_keyboard
@@ -144,3 +145,56 @@ async def menu_tools(message: Message, chat_service: ChatService) -> None:
             await message.answer("🎨 <b>Imagen 3 is Ready!</b>\n\nTo generate an image, use the command like this:\n<code>/image A futuristic city at night</code>", parse_mode="HTML")
         else:
             await message.answer("🎨 <b>Image Generation</b> requires VIP or at least 15 Premium Credits. Please upgrade your plan.", parse_mode="HTML")
+
+# --- GROUP CHAT HANDLER ---
+
+@menu_router.message(Command("ai"), F.chat.type.in_({"group", "supergroup"}))
+async def handle_group_ai_command(message: Message, command: CommandObject, chat_service: ChatService):
+    """Handles the /ai command strictly inside groups/supergroups."""
+    
+    # 1. Check if user provided a prompt
+    if not command.args:
+        help_text = (
+            "🤖 <b>AI Group Assistant</b>\n\n"
+            "To ask me a question in this group, type the command followed by your question.\n"
+            "<i>Example:</i> <code>/ai What is the capital of Japan?</code>"
+        )
+        if message.from_user.language_code == 'fa':
+            help_text = "🤖 <b>راهنما:</b> برای استفاده از هوش مصنوعی در گروه، سوال خود را جلوی دستور بنویسید.\nمثال: <code>/ai پایتخت ژاپن کجاست؟</code>"
+        return await message.reply(help_text, parse_mode="HTML")
+        
+    user_id = message.from_user.id
+    user = await chat_service._repo.get_user_by_telegram_id(user_id)
+    
+    # 2. Force user to start the bot in private first (Growth Hack)
+    if not user:
+        bot_info = await message.bot.get_me()
+        err_msg = f"⚠️ You need to register first! Please start me in private: @{bot_info.username}"
+        if message.from_user.language_code == 'fa':
+            err_msg = f"⚠️ شما هنوز عضو ربات نیستید! لطفا ابتدا در پیوی ربات استارت بزنید: @{bot_info.username}"
+        return await message.reply(err_msg)
+        
+    # 3. Check Free Tier Credits
+    if user.normal_credits <= 0:
+        err_msg = "❌ You don't have enough Normal Credits! Claim your daily reward in my private chat."
+        if user.language == "fa":
+            err_msg = "❌ سکههای عادی شما تمام شده است! برای دریافت سکه رایگان روزانه به پیوی ربات مراجعه کنید."
+        return await message.reply(err_msg)
+        
+    processing_msg = await message.reply("💭 <i>Thinking...</i>", parse_mode="HTML")
+    
+    # 4. Deduct credit
+    user.normal_credits -= 1
+    await chat_service._session.commit()
+    
+    # 5. Force Free Model (Flash) and Stateless History (None)
+    prompt = command.args
+    try:
+        response = await chat_service._ai_service.generate_text(
+            prompt=prompt, 
+            use_pro=False, # STRICTLY FALSE FOR GROUPS
+            history=None   # NO HISTORY IN GROUPS TO SAVE TOKENS
+        )
+        await processing_msg.edit_text(response, parse_mode="Markdown")
+    except Exception as e:
+        await processing_msg.edit_text("⚠️ An error occurred while generating the response. Please try again later.")
