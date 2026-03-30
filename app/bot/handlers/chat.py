@@ -25,9 +25,8 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
     
     # 3. Extract explicit conversational modes from User preferences resiliently
     # Defaulting to Flash if not explicit UI choice found
-    preferred_mode = getattr(db_user, 'subscription_plan', 'flash').lower() 
-    if not preferred_mode: 
-        preferred_mode = 'flash'
+    raw_mode = db_user.preferred_text_model or getattr(db_user, 'subscription_plan', None) or 'flash'
+    preferred_mode = raw_mode.lower()
         
     feature_mapping = {
         "premium": FeatureName.PRO_TEXT,
