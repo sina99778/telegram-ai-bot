@@ -19,6 +19,8 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
     username: Mapped[Optional[str]] = mapped_column(String(255))
+    first_name: Mapped[Optional[str]] = mapped_column(String(255))
+    last_name: Mapped[Optional[str]] = mapped_column(String(255))
     
     credit_balance: Mapped[int] = mapped_column(default=0)
     lifetime_credits_purchased: Mapped[int] = mapped_column(default=0)
