@@ -21,6 +21,9 @@ from app.core.config import settings
 from app.db.models import User
 from app.bot.keyboards.admin_kb import get_admin_main_kb, get_back_to_admin_kb
 from app.services.chat_service import ChatService
+from app.services.billing.billing_service import BillingService
+from app.core.enums import LedgerEntryType
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +31,8 @@ admin_router = Router(name="admin")
 
 
 # ── FSM States for Gift Flow ─────────────────
-class GiftCreditsStates(StatesGroup):
-    waiting_for_telegram_id = State()
+class AdminStates(StatesGroup):
+    waiting_for_user_id = State()
     waiting_for_amount = State()
 
 
@@ -178,81 +181,72 @@ async def cb_gift_start(callback: CallbackQuery, state: FSMContext):
     if not _is_admin(callback.from_user.id):
         return await callback.answer("⛔️ دسترسی ندارید", show_alert=True)
 
-    await state.set_state(GiftCreditsStates.waiting_for_telegram_id)
+    await state.set_state(AdminStates.waiting_for_user_id)
     await callback.message.edit_text(
-        "💰 <b>مدیریت موجودی</b>\n\n"
-        "لطفاً <b>شناسه تلگرام</b> (Telegram ID) کاربر مورد نظر را ارسال کنید:",
-        parse_mode="HTML",
+        "لطفاً آیدی عددی کاربر را ارسال کنید:",
         reply_markup=get_back_to_admin_kb(),
     )
     await callback.answer()
 
 
-@admin_router.message(GiftCreditsStates.waiting_for_telegram_id)
+@admin_router.message(AdminStates.waiting_for_user_id)
 async def gift_receive_tg_id(message: Message, state: FSMContext, chat_service: ChatService):
     if not _is_admin(message.from_user.id):
         return
 
-    try:
-        target_id = int(message.text.strip())
-    except (ValueError, AttributeError):
+    if not message.text or not message.text.lstrip('-').isdigit():
         return await message.answer("❌ لطفاً یک عدد معتبر (شناسه تلگرام) وارد کنید.")
+        
+    target_id = int(message.text.strip())
 
     # Verify user exists
     user = await chat_service._repo.get_user_by_telegram_id(target_id)
     if not user:
+        await state.clear()
         return await message.answer(
-            f"❌ کاربری با شناسه <code>{target_id}</code> یافت نشد.",
+            f"❌ کاربری با شناسه <code>{target_id}</code> پیدا نشد.",
             parse_mode="HTML",
         )
 
-    await state.update_data(target_telegram_id=target_id, target_name=user.first_name or "—")
-    await state.set_state(GiftCreditsStates.waiting_for_amount)
-    await message.answer(
-        f"✅ کاربر: <b>{user.first_name or '—'}</b> (<code>{target_id}</code>)\n"
-        f"موجودی فعلی: 💬 {user.normal_credits} | 🪙 {user.premium_credits}\n\n"
-        "حالا <b>تعداد اعتبار ویژه</b> (Premium Credits) برای افزودن را وارد کنید:\n"
-        "<i>(عدد منفی برای کسر)</i>",
-        parse_mode="HTML",
-    )
+    await state.update_data(target_db_id=user.id, target_tg_id=target_id)
+    await state.set_state(AdminStates.waiting_for_amount)
+    await message.answer("چه مقدار سکه هدیه داده شود؟")
 
 
-@admin_router.message(GiftCreditsStates.waiting_for_amount)
+@admin_router.message(AdminStates.waiting_for_amount)
 async def gift_receive_amount(message: Message, state: FSMContext, session: AsyncSession):
     if not _is_admin(message.from_user.id):
         return
 
-    try:
-        amount = int(message.text.strip())
-    except (ValueError, AttributeError):
+    if not message.text or not message.text.lstrip('-').isdigit():
         return await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.")
+        
+    amount = int(message.text.strip())
 
     data = await state.get_data()
-    target_id = data["target_telegram_id"]
-    target_name = data["target_name"]
+    target_db_id = data["target_db_id"]
+    target_tg_id = data["target_tg_id"]
 
-    # Fetch and update
-    user = await session.scalar(
-        select(User).where(User.telegram_id == target_id)
-    )
-    if not user:
+    billing = BillingService(session)
+    ref_id = f"admin_gift_{message.from_user.id}_{uuid.uuid4().hex[:6]}"
+    
+    try:
+        await billing.add_credits(
+            user_id=target_db_id,
+            amount=amount,
+            entry_type=LedgerEntryType.ADMIN_ADJUSTMENT,
+            reference_type="admin_gift",
+            reference_id=ref_id,
+            description=f"Admin {message.from_user.id} gifted {amount} credits"
+        )
+        await session.commit()
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"Gift amount error: {e}")
         await state.clear()
-        return await message.answer("❌ کاربر یافت نشد. عملیات لغو شد.")
+        return await message.answer("⚠️ خطا در افزودن موجودی. عملیات لغو شد.")
 
-    user.premium_credits += amount
-    if user.premium_credits < 0:
-        user.premium_credits = 0
-    await session.commit()
-
-    sign = "+" if amount >= 0 else ""
-    await message.answer(
-        f"✅ <b>عملیات موفق</b>\n\n"
-        f"کاربر: <b>{target_name}</b> (<code>{target_id}</code>)\n"
-        f"تغییر: <code>{sign}{amount}</code> اعتبار ویژه\n"
-        f"موجودی جدید: 🪙 <code>{user.premium_credits}</code>",
-        parse_mode="HTML",
-        reply_markup=get_back_to_admin_kb(),
-    )
+    await message.answer(f"تعداد {amount} سکه به کاربر {target_tg_id} با موفقیت اضافه شد.")
     await state.clear()
 
 
