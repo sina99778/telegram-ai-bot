@@ -24,14 +24,21 @@ from app.services.chat_service import ChatService
 logger = logging.getLogger(__name__)
 
 
+from app.services.billing.billing_service import BillingService
+from app.services.ai.router import ModelRouter
+from app.services.chat.memory import MemoryManager
+from app.services.queue.queue_service import QueueService
+from app.services.chat.orchestrator import ChatOrchestrator
+
 class DbSessionMiddleware(BaseMiddleware):
     """Opens an ``AsyncSession`` before the handler runs and guarantees
     it is closed afterwards — regardless of success or failure.
 
-    Injects two keys into the handler's ``data`` dict:
-
-    * ``session``      – the raw ``AsyncSession``
-    * ``chat_service`` – a ``ChatService`` bound to that session
+    Injects dependencies into the handler's ``data`` dict:
+    * ``session``
+    * ``chat_service``
+    * ``db_user``
+    * ``chat_orchestrator``
     """
 
     async def __call__(
@@ -40,21 +47,40 @@ class DbSessionMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: Dict[str, Any],
     ) -> Any:
-        """Wrap every incoming update in a database session scope."""
-
+        
         async with AsyncSessionLocal() as session:
-            # Make the session and service available to handlers
-            # via keyword injection  (handler(message, session=..., chat_service=...))
             data["session"] = session
-            data["chat_service"] = ChatService(session)
+            chat_service = ChatService(session)
+            data["chat_service"] = chat_service
+
+            # 1. Inject db_user
+            if event.from_user:
+                db_user = await chat_service._repo.get_or_create_user(
+                    telegram_id=event.from_user.id,
+                    username=event.from_user.username,
+                    first_name=event.from_user.first_name
+                )
+                data["db_user"] = db_user
+
+            # 2. Inject chat_orchestrator locally
+            billing = BillingService(session)
+            router = ModelRouter(session, {})
+            memory = MemoryManager(session)
+            queue = QueueService()
+            chat_orchestrator = ChatOrchestrator(
+                session=session,
+                billing=billing,
+                router=router,
+                memory=memory,
+                queue_service=queue
+            )
+            data["chat_orchestrator"] = chat_orchestrator
 
             logger.debug("DB session opened for update")
 
             try:
                 result = await handler(event, data)
             finally:
-                # AsyncSessionLocal().__aexit__ handles close/rollback,
-                # but we log explicitly for observability.
                 logger.debug("DB session closed for update")
 
             return result

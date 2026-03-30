@@ -17,13 +17,10 @@ async def send_chunked_message(message: Message, text: str, parse_mode: str = "H
         await message.answer(text[i:i+chunk_size], parse_mode=parse_mode)
 
 @chat_router.message(F.text & ~F.text.startswith('/') & (F.chat.type == "private"))
-async def handle_user_message(message: Message, chat_service, chat_orchestrator: ChatOrchestrator):
+async def handle_user_message(message: Message, db_user: User, chat_orchestrator: ChatOrchestrator):
     """Handles strictly private standard text messages from users."""
     
-    # 1. Fetch user manually since db_user isn't injected globally
-    db_user = await chat_service._repo.get_or_create_user(message.from_user.id)
-    
-    # 2. Send initial "thinking" message
+    # 1. Send initial "thinking" message
     processing_msg = await message.reply("💭 <i>Thinking...</i>", parse_mode="HTML")
     
     # 3. Extract explicit conversational modes from User preferences resiliently

@@ -49,8 +49,7 @@ async def cq_toggle_model(callback: CallbackQuery, chat_service: ChatService) ->
         f"<b>Name:</b> {user.first_name}\n"
         f"<b>ID:</b> <code>{user.telegram_id}</code>\n\n"
         f"🏷️ <b>Current Plan:</b> {plan_name}{expire_text}\n"
-        f"💬 <b>Normal Credits:</b> {user.normal_credits} <i>(Free Daily)</i>\n"
-        f"🪙 <b>Premium Credits:</b> {user.premium_credits} <i>(Images / Pro Chat)</i>\n\n"
+        f"🪙 <b>Credit Balance:</b> {user.credit_balance} <i>(For all AI features)</i>\n\n"
         f"⚙️ <b>Preferred Text Model:</b>\n<b>{new_model}</b>"
     )
 
@@ -103,8 +102,7 @@ async def cq_toggle_memory(callback: CallbackQuery, chat_service: ChatService):
         f"<b>Name:</b> {user.first_name}\n"
         f"<b>ID:</b> <code>{user.telegram_id}</code>\n\n"
         f"🏷️ <b>Current Plan:</b> {plan_name}\n"
-        f"💬 <b>Normal Credits:</b> {user.normal_credits}\n"
-        f"🪙 <b>Premium Credits:</b> {user.premium_credits}\n\n"
+        f"🪙 <b>Credit Balance:</b> {user.credit_balance}\n\n"
         f"⚙️ <b>Model:</b> {current_model}\n"
         f"🧠 <b>Memory:</b> {mem_status}"
     )
@@ -139,15 +137,25 @@ async def cq_claim_daily_reward(callback: CallbackQuery, chat_service: ChatServi
                 
             return await callback.answer(alert_msg, show_alert=True)
             
-    # Grant Reward: 2 Premium Credits + 10 Normal Credits
-    user.premium_credits += 2
-    user.normal_credits += 10
+    # Grant Reward: 12 Credits (Consolidated)
+    from app.services.billing.billing_service import BillingService
+    from app.core.enums import LedgerEntryType
+    
+    billing = BillingService(chat_service._session)
+    await billing.add_credits(
+        user_id=user.id,
+        amount=12,
+        entry_type=LedgerEntryType.BONUS,
+        reference_type="daily_reward",
+        reference_id=f"daily_{user.id}_{int(now.timestamp())}",
+        description="Daily Reward Claimed"
+    )
     user.last_daily_reward = now
     await chat_service._session.commit()
     
-    success_msg = "🎉 Congratulations! You received 2 Premium Credits and 10 Normal Credits!"
+    success_msg = "🎉 Congratulations! You received 12 Credits!"
     if user.language == "fa":
-        success_msg = "🎉 تبریک! ۲ سکه پریمیوم و ۱۰ سکه عادی به حساب شما اضافه شد!"
+        success_msg = "🎉 تبریک! ۱۲ سکه به حساب شما اضافه شد!"
         
     await callback.answer(success_msg, show_alert=True)
     
@@ -162,8 +170,7 @@ async def cq_claim_daily_reward(callback: CallbackQuery, chat_service: ChatServi
             f"<b>نام:</b> {user.first_name}\n"
             f"<b>آیدی:</b> <code>{user.telegram_id}</code>\n\n"
             f"🏷️ <b>طرح فعلی:</b> {plan_name}\n"
-            f"💬 <b>سکه‌های عادی:</b> {user.normal_credits}\n"
-            f"🪙 <b>سکه‌های پریمیوم:</b> {user.premium_credits}\n\n"
+            f"🪙 <b>موجودی اعتبار:</b> {user.credit_balance}\n\n"
             f"⚙️ <b>مدل هوش مصنوعی:</b> {current_model}\n"
             f"🧠 <b>وضعیت حافظه:</b> {mem_status}"
         )
@@ -173,8 +180,7 @@ async def cq_claim_daily_reward(callback: CallbackQuery, chat_service: ChatServi
             f"<b>Name:</b> {user.first_name}\n"
             f"<b>ID:</b> <code>{user.telegram_id}</code>\n\n"
             f"🏷️ <b>Current Plan:</b> {plan_name}\n"
-            f"💬 <b>Normal Credits:</b> {user.normal_credits}\n"
-            f"🪙 <b>Premium Credits:</b> {user.premium_credits}\n\n"
+            f"🪙 <b>Credit Balance:</b> {user.credit_balance}\n\n"
             f"⚙️ <b>Model:</b> {current_model}\n"
             f"🧠 <b>Memory:</b> {mem_status}"
         )
@@ -364,12 +370,9 @@ async def process_promo_code(message: Message, state: FSMContext, chat_service: 
             amount=promo.credits,
             entry_type=LedgerEntryType.BONUS, # Or appropriate enum
             reference_type="promo_code",
-            reference_id=f"promo_{promo.id}_user_{user.id}",
+            reference_id=f"promo_{promo.id}_{int(datetime.now().timestamp())}",
             description=f"Redeemed promo code: {promo.code}"
         )
-        
-    # Also add to legacy premium_credits if system relies on both currently
-    user.premium_credits += promo.credits
         
     if promo.vip_days > 0:
         user.is_vip = True

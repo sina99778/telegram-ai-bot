@@ -78,6 +78,7 @@ class BillingService:
         try:
             await self.session.flush() # Ensure DB constraints pass without committing
             await self.session.commit() # Explicitly commit the transaction as requested
+            await self.session.refresh(user)
         except IntegrityError as e:
             await self.session.rollback()
             # Catching rare race conditions on unique composite index
@@ -124,6 +125,7 @@ class BillingService:
         try:
             await self.session.flush()
             await self.session.commit() # Explicitly commit the transaction as requested
+            await self.session.refresh(user)
         except IntegrityError as e:
             await self.session.rollback()
             raise DuplicateTransactionError(f"Transaction {reference_id} already processed concurrently.") from e
