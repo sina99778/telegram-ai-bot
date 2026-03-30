@@ -3,7 +3,7 @@ import logging
 import asyncio
 from dataclasses import dataclass
 from typing import Optional
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.models import FeatureConfig, Message, Conversation
 from app.core.enums import FeatureName, MessageRole
@@ -21,14 +21,14 @@ class ImageResult:
     error_message: Optional[str] = None
 
 class ImageOrchestrator:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], billing: BillingService, router: ModelRouter):
-        self.session_factory = session_factory
+    def __init__(self, session: AsyncSession, billing: BillingService, router: ModelRouter):
+        self.session = session
         self.billing = billing
         self.router = router
 
-    async def _get_feature_config(self, session: AsyncSession) -> FeatureConfig:
+    async def _get_feature_config(self) -> FeatureConfig:
         stmt = select(FeatureConfig).where(FeatureConfig.name == FeatureName.IMAGE_GENERATION)
-        config = await session.scalar(stmt)
+        config = await self.session.scalar(stmt)
         if not config or not config.is_active:
             raise ValueError("Image generation feature is disabled globally.")
         return config
@@ -41,26 +41,25 @@ class ImageOrchestrator:
         reference_id = f"img_{uuid.uuid4().hex}"
         
         # --- Transaction 1: Cost Config & Pre-Deduct ---
-        async with self.session_factory() as session:
-            try:
-                config = await self._get_feature_config(session)
-                cost = config.credit_cost
-                
-                await self.billing.deduct_credits(
-                    user_id=user_id,
-                    amount=cost,
-                    reference_type="image_generation",
-                    reference_id=reference_id,
-                    description="AI Image Generation"
-                )
-                await session.commit()
-            except InsufficientCreditsError:
-                await session.rollback()
-                return ImageResult(image_bytes=None, success=False, error_message=f"❌ Insufficient balance. Generator costs {15 if 'cost' not in locals() else cost} credits.")
-            except Exception as e:
-                logger.error(f"Billing error in image flow: {e}")
-                await session.rollback()
-                return ImageResult(image_bytes=None, success=False, error_message="⚠️ System error checking balance.")
+        try:
+            config = await self._get_feature_config()
+            cost = config.credit_cost
+            
+            await self.billing.deduct_credits(
+                user_id=user_id,
+                amount=cost,
+                reference_type="image_generation",
+                reference_id=reference_id,
+                description="AI Image Generation"
+            )
+            await self.session.commit()
+        except InsufficientCreditsError:
+            await self.session.rollback()
+            return ImageResult(image_bytes=None, success=False, error_message=f"❌ Insufficient balance. Generator costs {cost if 'cost' in locals() else 15} credits.")
+        except Exception as e:
+            logger.error(f"Billing error in image flow: {e}")
+            await self.session.rollback()
+            return ImageResult(image_bytes=None, success=False, error_message="⚠️ System error checking balance.")
 
         # --- Generation & Metadata Context (Async Queue Ready) ---
         # The AI execution operates outside lock dependencies using robust timeouts
@@ -83,35 +82,33 @@ class ImageOrchestrator:
 
         # Handle Failures explicitly using Saga Refund Sequence
         if not image_bytes:
-            async with self.session_factory() as session:
-                try:
-                    await self.billing.refund_credits(
-                        user_id=user_id,
-                        original_reference_id=reference_id,
-                        amount=cost,
-                        description="Refund: Image Timeout/Failure"
-                    )
-                    await session.commit()
-                except Exception as refund_err:
-                    logger.error(f"CRITICAL: Image Refund failed for {reference_id}: {refund_err}")
-                    await session.rollback()
+            try:
+                await self.billing.refund_credits(
+                    user_id=user_id,
+                    original_reference_id=reference_id,
+                    amount=cost,
+                    description="Refund: Image Timeout/Failure"
+                )
+                await self.session.commit()
+            except Exception as refund_err:
+                logger.error(f"CRITICAL: Image Refund failed for {reference_id}: {refund_err}")
+                await self.session.rollback()
             return ImageResult(image_bytes=None, success=False, error_message=error_msg)
 
         # --- Transaction 2: Persist Metadata for Audit Analytics ---
-        async with self.session_factory() as session:
-            try:
-                # Store the request purely for analytical inspection
-                user_msg = Message(
-                    conversation_id=None, # System-level standalone message or retrieve default active context
-                    role=MessageRole.USER, 
-                    content=f"[IMAGE_REQUEST]: {prompt}",
-                    tokens_used=cost  # Using credit metric since pure tokens are opaque in image gen
-                )
-                session.add(user_msg)
-                await session.commit()
-            except Exception as db_err:
-                logger.error(f"Failed to save image audit metadata: {db_err}")
-                await session.rollback()
-                # Continue safely returning the image despite metadata drop
+        try:
+            # Store the request purely for analytical inspection
+            user_msg = Message(
+                conversation_id=None, # System-level standalone message or retrieve default active context
+                role=MessageRole.USER, 
+                content=f"[IMAGE_REQUEST]: {prompt}",
+                tokens_used=cost  # Using credit metric since pure tokens are opaque in image gen
+            )
+            self.session.add(user_msg)
+            await self.session.commit()
+        except Exception as db_err:
+            logger.error(f"Failed to save image audit metadata: {db_err}")
+            await self.session.rollback()
+            # Continue safely returning the image despite metadata drop
 
         return ImageResult(image_bytes=image_bytes, success=True)

@@ -151,30 +151,64 @@ async def nowpayments_webhook(request: Request) -> dict[str, str]:
 
     if payment_status == "finished" and order_id:
         try:
-            telegram_id = int(order_id)
+            # order_id format is VIP_{user_id}_{timestamp}
+            parts = str(order_id).split("_")
+            if len(parts) >= 2 and parts[0] == "VIP":
+                telegram_id = int(parts[1])
+            else:
+                # Fallback if old format was just numeric
+                telegram_id = int(order_id)
+                
             async with AsyncSessionLocal() as session:
                 repo = ChatRepository(session)
+                user = await repo.get_user_by_telegram_id(telegram_id)
                 
-                # Upgrade user for 30 days and add 100 premium credits (matches $2 pricing)
-                expire_date = datetime.now(timezone.utc) + timedelta(days=30)
-                success = await repo.upgrade_to_vip(
-                    telegram_id=telegram_id, 
-                    add_credits=100, 
-                    expire_date=expire_date
-                )
-                
-                if success:
+                if user:
+                    from app.services.billing.billing_service import BillingService
+                    from app.core.enums import LedgerEntryType
+                    
+                    price_amount = float(payload.get("price_amount", 0))
+                    
+                    # Dynamically assign credits based on paid amount
+                    added_credits = 150 # Default Starter
+                    days = 30
+                    if price_amount >= 14.0:
+                        added_credits = 1800
+                        days = 90
+                    elif price_amount >= 6.0:
+                        added_credits = 700
+                        days = 60
+                        
+                    user.is_vip = True
+                    # Extend or start VIP
+                    current_expire = user.vip_expire_date if user.vip_expire_date and user.vip_expire_date > datetime.now(timezone.utc) else datetime.now(timezone.utc)
+                    user.vip_expire_date = current_expire + timedelta(days=days)
+                    
+                    billing = BillingService(session)
+                    payment_id_str = str(payload.get("payment_id", order_id))
+                    
+                    await billing.add_credits(
+                        user_id=user.id,
+                        amount=added_credits,
+                        entry_type=LedgerEntryType.PURCHASE,
+                        reference_type="nowpayments_ipn",
+                        reference_id=f"np_{payment_id_str}",
+                        description=f"Crypto Payment: ${price_amount}"
+                    )
+                    
+                    # session.commit() is natively handled gracefully inside billing.add_credits
+                    
                     # Notify the user via Telegram
                     try:
                         await bot.send_message(
                             chat_id=telegram_id,
-                            text="🎉 <b>Payment Successful!</b>\n\nYou are now a VIP member. You received <b>100 Premium Credits</b>! Enjoy Gemini 3.1 Pro & Nano Banana 2.",
+                            text=f"🎉 <b>Payment Successful!</b>\n\nYou purchased a Premium Pack!\n🎁 <b>Reward:</b> {added_credits} Credits & {days} Days VIP active.\nEnjoy full features!",
                             parse_mode="HTML"
                         )
                     except Exception as e:
                         logger.error(f"Could not send VIP confirmation to {telegram_id}: {e}")
                         
         except Exception as e:
-            logger.error(f"Error processing NowPayments IPN: {e}")
+            logger.error(f"Error processing NowPayments IPN: {e}", exc_info=True)
 
     return {"status": "ok"}

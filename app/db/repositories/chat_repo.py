@@ -296,29 +296,11 @@ class ChatRepository:
         stmt = select(User).where(User.telegram_id == telegram_id)
         return await self._session.scalar(stmt)
 
-    async def deduct_image_credit(self, telegram_id: int) -> bool:
-        """Deduct one image credit if the user has enough. Returns True if successful."""
-        user = await self.get_user_by_telegram_id(telegram_id)
-        if user and user.premium_credits > 0:
-            user.premium_credits -= 1
-            await self._session.commit()
-            return True
-        return False
-
-    async def upgrade_to_vip(self, telegram_id: int, add_credits: int, expire_date: datetime | None = None) -> bool:
-        """Upgrade a user to VIP status and add credits."""
-        user = await self.get_user_by_telegram_id(telegram_id)
-        if user:
-            user.is_vip = True
-            user.premium_credits += add_credits
-            if expire_date:
-                user.vip_expire_date = expire_date
-            await self._session.commit()
-            return True
-        return False
+    # [DEPRECATED] deduct_image_credit and upgrade_to_vip removed. 
+    # Use BillingService natively.
 
     async def ensure_daily_credits(self, telegram_id: int) -> User | None:
-        """Lazy evaluation to reset daily credits if a new day has started."""
+        """Lazy evaluation to ensure a daily minimum baseline for free usage."""
         user = await self.get_user_by_telegram_id(telegram_id)
         if not user:
             return None
@@ -326,15 +308,28 @@ class ChatRepository:
         now = datetime.now(timezone.utc)
         # If last_credit_reset is None, or if the date has changed
         if not user.last_credit_reset or user.last_credit_reset.date() < now.date():
-            user.normal_credits = 50
-            # Top up premium credits to at least 10, keeping any extra referral bonuses
-            user.premium_credits = max(10, user.premium_credits)
+            # In the new system, we prevent destructive override. We grant them up to 50 credits to play with if they are empty.
+            if user.credit_balance < 50:
+                deficit = 50 - user.credit_balance
+                from app.services.billing.billing_service import BillingService
+                from app.core.enums import LedgerEntryType
+                import time
+                billing = BillingService(self._session)
+                await billing.add_credits(
+                    user_id=user.id,
+                    amount=deficit,
+                    entry_type=LedgerEntryType.BONUS,
+                    reference_type="daily_reset",
+                    reference_id=f"daily_reset_{user.id}_{int(time.time())}",
+                    description="Daily Login Baseline Top-up"
+                )
+            
             user.last_credit_reset = now
             await self._session.commit()
         return user
 
     async def process_referral(self, invitee_id: int, referrer_id: int) -> bool:
-        """Handle the referral logic: Reward referrer and invitee."""
+        """Handle the referral logic: Reward referrer and invitee via BillingService."""
         if invitee_id == referrer_id:
             return False
 
@@ -345,12 +340,31 @@ class ChatRepository:
             if invitee.referred_by:
                 return False
 
-            # Reward both
-            invitee.premium_credits += 25
+            from app.services.billing.billing_service import BillingService
+            from app.core.enums import LedgerEntryType
+            import time
+            billing = BillingService(self._session)
+
+            # Reward Invitee (25 credits)
+            await billing.add_credits(
+                user_id=invitee.id,
+                amount=25,
+                entry_type=LedgerEntryType.BONUS,
+                reference_type="referral_invitee",
+                reference_id=f"ref_in_{invitee.id}_{int(time.time())}",
+                description=f"Referred by {referrer.telegram_id}"
+            )
             invitee.referred_by = referrer.telegram_id
             
-            # --- NEW REFERRAL RULES ---
-            referrer.premium_credits += 10
+            # Reward Referrer (10 credits)
+            await billing.add_credits(
+                user_id=referrer.id,
+                amount=10,
+                entry_type=LedgerEntryType.BONUS,
+                reference_type="referral_referrer",
+                reference_id=f"ref_out_{referrer.id}_{invitee.id}_{int(time.time())}",
+                description=f"Referred user {invitee.telegram_id}"
+            )
             referrer.total_invites += 1
             
             # Special 10-invite threshold check
