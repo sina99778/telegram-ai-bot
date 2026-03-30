@@ -22,14 +22,34 @@ class User(Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(255))
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
     
+    # ── Billing (new system) ──────────────────
     credit_balance: Mapped[int] = mapped_column(default=0)
     lifetime_credits_purchased: Mapped[int] = mapped_column(default=0)
     lifetime_credits_used: Mapped[int] = mapped_column(default=0)
     
+    # ── Legacy credit system (used by chat_repo) ──
+    normal_credits: Mapped[int] = mapped_column(default=50)
+    premium_credits: Mapped[int] = mapped_column(default=0)
+    last_credit_reset: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    
+    # ── Subscription / VIP ────────────────────
     subscription_plan: Mapped[Optional[str]] = mapped_column(String(50))
     subscription_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     is_premium: Mapped[bool] = mapped_column(default=False)
+    is_vip: Mapped[bool] = mapped_column(default=False)
+    vip_expire_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     
+    # ── Referral system ───────────────────────
+    referred_by: Mapped[Optional[int]] = mapped_column(BigInteger)
+    total_invites: Mapped[int] = mapped_column(default=0)
+    special_reward_images_left: Mapped[int] = mapped_column(default=0)
+    special_reward_expire: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    
+    # ── Admin / moderation ────────────────────
+    is_admin: Mapped[bool] = mapped_column(default=False)
+    is_banned: Mapped[bool] = mapped_column(default=False)
+    
+    # ── Timestamps ────────────────────────────
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
