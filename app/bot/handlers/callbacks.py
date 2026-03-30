@@ -199,8 +199,51 @@ async def cq_show_vip_plans_from_profile(callback: CallbackQuery) -> None:
     from app.bot.keyboards.inline import get_vip_plans_keyboard
     await callback.message.edit_text(text=text, reply_markup=get_vip_plans_keyboard(), parse_mode="HTML")
 
+import os
+import time
+import aiohttp
+
+async def create_nowpayments_invoice(price: float, plan_name: str, user_id: int) -> str:
+    """Calls NowPayments API to generate a dynamic invoice link."""
+    api_key = os.environ.get("NOWPAYMENTS_API_KEY")
+    fallback_url = "https://nowpayments.io"
+    
+    if not api_key:
+        return fallback_url
+
+    url = "https://api.nowpayments.io/v1/invoice"
+    headers = {
+        "x-api-key": api_key,
+        "Content-Type": "application/json"
+    }
+    
+    # Create a unique order ID for tracking
+    order_id = f"VIP_{user_id}_{int(time.time())}"
+    
+    payload = {
+        "price_amount": price,
+        "price_currency": "usd",
+        "order_id": order_id,
+        "order_description": f"Premium Credits: {plan_name}",
+        # Change this to your actual bot's t.me link
+        "success_url": "https://t.me/YOUR_BOT_USERNAME", 
+        "cancel_url": "https://t.me/YOUR_BOT_USERNAME"
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("invoice_url", fallback_url)
+                else:
+                    return fallback_url
+    except Exception:
+        return fallback_url
+
+
 @callback_router.callback_query(F.data.startswith("buy_plan_"))
-async def process_plan_selection(callback: CallbackQuery) -> None:
+async def process_plan_selection(callback: CallbackQuery):
     plan_type = callback.data.split("_")[2]
     
     plans = {
@@ -213,18 +256,16 @@ async def process_plan_selection(callback: CallbackQuery) -> None:
     if not selected:
         return await callback.answer("Error loading plan.", show_alert=True)
         
-    await callback.message.edit_text("⏳ Generating your secure payment link...", parse_mode="HTML")
+    # Show a loading message while API is fetching the link
+    await callback.message.edit_text("⏳ <i>Generating secure payment link...</i>", parse_mode="HTML")
     
-    try:
-        from app.services.nowpayments_service import NowPaymentsService
-        invoice_url = await NowPaymentsService.create_invoice(telegram_id=callback.from_user.id, price_usd=selected['price'])
-    except Exception:
-        invoice_url = None
-        
-    if not invoice_url:
-         # Fallback generic placeholder if service fails
-         invoice_url = "https://nowpayments.io/pay/"
-        
+    # Call the API dynamically
+    payment_url = await create_nowpayments_invoice(
+        price=selected['price'], 
+        plan_name=selected['name'], 
+        user_id=callback.from_user.id
+    )
+    
     checkout_text = (
         f"🧾 <b>Invoice Generated</b>\n\n"
         f"📦 <b>Item:</b> {selected['name']}\n"
@@ -235,7 +276,7 @@ async def process_plan_selection(callback: CallbackQuery) -> None:
     
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     pay_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"💳 Pay ${selected['price']} in Crypto", url=invoice_url)],
+        [InlineKeyboardButton(text=f"💳 Pay ${selected['price']} in Crypto", url=payment_url)],
         [InlineKeyboardButton(text="🔙 Back to Plans", callback_data="back_to_plans")]
     ])
     
