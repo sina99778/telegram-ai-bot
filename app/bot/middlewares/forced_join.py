@@ -24,6 +24,10 @@ class CheckUserStatusMiddleware(BaseMiddleware):
             if user and user.is_banned:
                 return # Silently drop the update if banned
 
+        # Skip forced join check in groups to prevent spam
+        if getattr(event, "chat", None) and event.chat.type != "private":
+            return await handler(event, data)
+
         # 2. Check Forced Channel Join
         CHANNEL_USERNAME = "@usefullbotsarchive"
         bot = data.get("bot")

@@ -96,7 +96,7 @@ class DbSessionMiddleware(BaseMiddleware):
                 queue_service=queue
             )
             data["chat_orchestrator"] = chat_orchestrator
-            data["group_policy_service"] = GroupPolicyService
+            data["group_policy_service"] = GroupPolicyService()
 
             image_orchestrator = ImageOrchestrator(
                 session=session,

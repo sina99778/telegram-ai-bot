@@ -34,11 +34,12 @@ async def _safe_edit(message: Message, text: str, *, parse_mode: str = "HTML") -
 
 
 async def _is_group_trigger(message: Message) -> bool:
-    if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_bot:
-        return True
+    bot_info = await message.bot.get_me()
+    if message.reply_to_message and message.reply_to_message.from_user:
+        if message.reply_to_message.from_user.id == bot_info.id:
+            return True
     if not message.text:
         return False
-    bot_info = await message.bot.get_me()
     return f"@{bot_info.username}".lower() in message.text.lower()
 
 
