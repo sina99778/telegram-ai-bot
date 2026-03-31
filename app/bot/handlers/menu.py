@@ -5,7 +5,12 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from app.bot.keyboards.admin_kb import get_admin_main_kb
-from app.bot.keyboards.inline import get_profile_keyboard, get_vip_plans_keyboard
+from app.bot.keyboards.inline import (
+    get_profile_keyboard,
+    get_support_menu_keyboard,
+    get_vip_menu_keyboard,
+    get_wallet_menu_keyboard,
+)
 from app.bot.keyboards.reply import get_main_menu
 from app.core.access import is_configured_admin
 from app.core.enums import FeatureName
@@ -26,6 +31,7 @@ PROFILE_BTNS = _labels("buttons.wallet")
 INVITE_BTNS = _labels("buttons.invite")
 VIP_BTNS = _labels("buttons.vip")
 SUPPORT_BTNS = _labels("buttons.support")
+CODES_BTNS = _labels("buttons.codes")
 ADMIN_BTNS = _labels("buttons.admin")
 LANG_BTNS = _labels("buttons.language")
 TOOLS_BTNS = _labels("buttons.chat") | _labels("buttons.image")
@@ -85,45 +91,66 @@ async def menu_admin_entry(message: Message, db_user: User) -> None:
 
 
 @menu_router.message(F.text.in_(INVITE_BTNS), F.chat.type == "private")
-async def menu_invite(message: Message, chat_repo: ChatRepository, db_user: User) -> None:
+async def menu_invite(message: Message, chat_repo: ChatRepository) -> None:
     user = await chat_repo.get_user_by_telegram_id(message.from_user.id)
     lang = _user_lang(user)
     bot_info = await message.bot.get_me()
     invite_link = f"https://t.me/{bot_info.username}?start=ref_{user.telegram_id}" if user else ""
     await message.answer(
-        t(lang, "invite.menu", invites=user.total_invites if user else 0, images=user.special_reward_images_left if user else 0, link=invite_link),
+        t(
+            lang,
+            "invite.menu",
+            invites=user.total_invites if user else 0,
+            images=user.special_reward_images_left if user else 0,
+            link=invite_link,
+        ),
         parse_mode="HTML",
     )
 
 
 @menu_router.message(F.text.in_(PROFILE_BTNS), F.chat.type == "private")
-async def menu_profile(message: Message, chat_repo: ChatRepository) -> None:
+async def menu_wallet(message: Message, chat_repo: ChatRepository) -> None:
     user = await chat_repo.ensure_daily_credits(message.from_user.id)
     if not user:
         return
-    await message.answer(_profile_text(user), reply_markup=get_profile_keyboard(user), parse_mode="HTML")
+    lang = _user_lang(user)
+    await message.answer(
+        t(lang, "wallet.menu_intro"),
+        parse_mode="HTML",
+        reply_markup=get_wallet_menu_keyboard(lang),
+    )
 
 
 @menu_router.message(F.text.in_(VIP_BTNS), F.chat.type == "private")
-async def show_vip_plans(message: Message, db_user: User) -> None:
+async def show_vip_menu(message: Message, db_user: User) -> None:
     lang = _user_lang(db_user)
-    await message.answer(t(lang, "vip.menu"), reply_markup=get_vip_plans_keyboard(lang), parse_mode="HTML")
+    await message.answer(t(lang, "vip.menu"), reply_markup=get_vip_menu_keyboard(lang), parse_mode="HTML")
 
 
-@menu_router.message(F.text.in_(SUPPORT_BTNS))
-async def menu_support(message: Message, db_user: User | None = None) -> None:
+@menu_router.message(F.text.in_(SUPPORT_BTNS), F.chat.type == "private")
+async def menu_support(message: Message, db_user: User) -> None:
     lang = _user_lang(db_user)
-    await message.answer(t(lang, "support.menu"), parse_mode="HTML")
+    await message.answer(t(lang, "support.menu"), parse_mode="HTML", reply_markup=get_support_menu_keyboard(lang))
+
+
+@menu_router.message(F.text.in_(CODES_BTNS), F.chat.type == "private")
+async def menu_codes(message: Message, chat_repo: ChatRepository) -> None:
+    user = await chat_repo.get_user_by_telegram_id(message.from_user.id)
+    lang = _user_lang(user)
+    await message.answer(
+        t(lang, "promo.menu_hint"),
+        parse_mode="HTML",
+        reply_markup=get_wallet_menu_keyboard(lang),
+    )
 
 
 @menu_router.message(F.text.in_(TOOLS_BTNS), F.chat.type == "private")
-async def menu_tools(message: Message, chat_repo: ChatRepository, db_user: User) -> None:
+async def menu_tools(message: Message, chat_repo: ChatRepository) -> None:
     user = await chat_repo.get_user_by_telegram_id(message.from_user.id)
     lang = _user_lang(user)
     if message.text in _labels("buttons.chat"):
         await message.answer(t(lang, "tools.chat_hint"))
         return
-
     if user and (user.has_active_vip or user.vip_credits >= 10):
         await message.answer(t(lang, "tools.image_private"), parse_mode="HTML")
     else:
@@ -163,3 +190,4 @@ async def handle_group_ai_command(
         await processing_msg.edit_text(result.text, parse_mode="HTML")
     else:
         await processing_msg.edit_text(result.text or t(lang, "errors.delivery_failed"), parse_mode="HTML")
+

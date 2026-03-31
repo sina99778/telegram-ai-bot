@@ -25,6 +25,7 @@ from app.core.config import settings
 from app.db.session import engine, AsyncSessionLocal
 from app.db.models import Base
 from app.db.repositories.chat_repo import ChatRepository
+from app.services.purchase.catalog import PurchaseKind, get_product, parse_order_id
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -201,14 +202,18 @@ async def nowpayments_webhook(request: Request) -> dict[str, str]:
 
     if payment_status == "finished" and order_id:
         try:
-            # order_id format is VIP_{user_id}_{timestamp}
-            parts = str(order_id).split("_")
-            if len(parts) >= 2 and parts[0] == "VIP":
-                telegram_id = int(parts[1])
+            parsed = parse_order_id(str(order_id))
+            if parsed is not None:
+                product_code, telegram_id = parsed
+                product = get_product(product_code)
             else:
-                # Fallback if old format was just numeric
-                telegram_id = int(order_id)
-                
+                product = None
+                legacy_parts = str(order_id).split("_")
+                if len(legacy_parts) >= 2 and legacy_parts[0] == "VIP":
+                    telegram_id = int(legacy_parts[1])
+                else:
+                    telegram_id = int(order_id)
+
             async with AsyncSessionLocal() as session:
                 repo = ChatRepository(session)
                 user = await repo.get_user_by_telegram_id(telegram_id)
@@ -218,44 +223,82 @@ async def nowpayments_webhook(request: Request) -> dict[str, str]:
                     from app.core.enums import LedgerEntryType, WalletType
                     
                     price_amount = float(payload.get("price_amount", 0))
-                    
-                    # Dynamically assign credits based on paid amount
-                    added_credits = 150 # Default Starter
-                    days = 30
-                    if price_amount >= 14.0:
-                        added_credits = 1800
-                        days = 90
-                    elif price_amount >= 6.0:
-                        added_credits = 700
-                        days = 60
-                        
                     billing = BillingService(session)
                     payment_id_str = str(payload.get("payment_id", order_id))
-                    
-                    await billing.add_credits(
-                        user_id=user.id,
-                        amount=added_credits,
-                        entry_type=LedgerEntryType.PURCHASE,
-                        reference_type="nowpayments_ipn",
-                        reference_id=f"np_{payment_id_str}",
-                        description=f"Crypto Payment: ${price_amount}",
-                        wallet_type=WalletType.VIP
-                    )
-                    await billing.grant_vip_access(
-                        user_id=user.id,
-                        days=days,
-                        reference_type="nowpayments_vip_access",
-                        reference_id=f"np_vip_{payment_id_str}",
-                        description=f"VIP access granted from crypto payment ${price_amount}"
-                    )
-                    
-                    # session.commit() is natively handled gracefully inside billing.add_credits
-                    
+
+                    if product is not None:
+                        if product.kind == PurchaseKind.NORMAL_CREDITS and product.normal_credits > 0:
+                            await billing.add_credits(
+                                user_id=user.id,
+                                amount=product.normal_credits,
+                                entry_type=LedgerEntryType.PURCHASE,
+                                reference_type="nowpayments_normal_pack",
+                                reference_id=f"np_{payment_id_str}",
+                                description=f"Normal credits purchase ${price_amount}",
+                                wallet_type=WalletType.NORMAL,
+                            )
+                        elif product.kind == PurchaseKind.VIP_CREDITS and product.vip_credits > 0:
+                            await billing.add_credits(
+                                user_id=user.id,
+                                amount=product.vip_credits,
+                                entry_type=LedgerEntryType.PURCHASE,
+                                reference_type="nowpayments_vip_pack",
+                                reference_id=f"np_{payment_id_str}",
+                                description=f"VIP credits purchase ${price_amount}",
+                                wallet_type=WalletType.VIP,
+                            )
+                        elif product.kind == PurchaseKind.VIP_ACCESS and product.vip_days > 0:
+                            await billing.grant_vip_access(
+                                user_id=user.id,
+                                days=product.vip_days,
+                                reference_type="nowpayments_vip_access",
+                                reference_id=f"np_access_{payment_id_str}",
+                                description=f"VIP access purchase ${price_amount}",
+                            )
+                    else:
+                        # Backward compatibility for older order IDs:
+                        await billing.add_credits(
+                            user_id=user.id,
+                            amount=150,
+                            entry_type=LedgerEntryType.PURCHASE,
+                            reference_type="nowpayments_legacy_vip_pack",
+                            reference_id=f"np_{payment_id_str}",
+                            description=f"Legacy VIP credits purchase ${price_amount}",
+                            wallet_type=WalletType.VIP,
+                        )
+                        await billing.grant_vip_access(
+                            user_id=user.id,
+                            days=30,
+                            reference_type="nowpayments_legacy_vip_access",
+                            reference_id=f"np_access_{payment_id_str}",
+                            description=f"Legacy VIP access purchase ${price_amount}",
+                        )
+
+                    lang = user.language if user.language else "en"
+                    if product and product.kind == PurchaseKind.NORMAL_CREDITS:
+                        notify_text = (
+                            f"🎉 <b>{'Purchase completed' if lang == 'en' else 'خرید با موفقیت انجام شد'}</b>\n\n"
+                            f"{'Normal credits added' if lang == 'en' else 'اعتبار عادی اضافه شد'}: <code>{product.normal_credits}</code>"
+                        )
+                    elif product and product.kind == PurchaseKind.VIP_CREDITS:
+                        notify_text = (
+                            f"🎉 <b>{'Purchase completed' if lang == 'en' else 'خرید با موفقیت انجام شد'}</b>\n\n"
+                            f"{'VIP credits added' if lang == 'en' else 'اعتبار VIP اضافه شد'}: <code>{product.vip_credits}</code>"
+                        )
+                    elif product and product.kind == PurchaseKind.VIP_ACCESS:
+                        notify_text = (
+                            f"🎉 <b>{'Purchase completed' if lang == 'en' else 'خرید با موفقیت انجام شد'}</b>\n\n"
+                            f"{'VIP access extended' if lang == 'en' else 'دسترسی VIP تمدید شد'}: <code>{product.vip_days}</code> "
+                            f"{'days' if lang == 'en' else 'روز'}"
+                        )
+                    else:
+                        notify_text = "🎉 <b>Payment successful.</b>"
+
                     # Notify the user via Telegram
                     try:
                         await bot.send_message(
                             chat_id=telegram_id,
-                            text=f"🎉 <b>Payment Successful!</b>\n\nYou purchased a Premium Pack!\n🎁 <b>Reward:</b> {added_credits} Credits & {days} Days VIP active.\nEnjoy full features!",
+                            text=notify_text,
                             parse_mode="HTML"
                         )
                     except Exception as e:

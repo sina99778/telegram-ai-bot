@@ -9,13 +9,25 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot.keyboards.inline import get_cancel_promo_keyboard, get_profile_keyboard, get_vip_plans_keyboard
-from app.core.i18n import t
+from app.bot.keyboards.inline import (
+    get_cancel_promo_keyboard,
+    get_checkout_keyboard,
+    get_normal_credit_packs_keyboard,
+    get_profile_keyboard,
+    get_support_menu_keyboard,
+    get_vip_access_packs_keyboard,
+    get_vip_credit_packs_keyboard,
+    get_vip_menu_keyboard,
+    get_wallet_menu_keyboard,
+)
 from app.core.enums import LedgerEntryType, WalletType
+from app.core.i18n import t
 from app.db.models import User
 from app.db.repositories.chat_repo import ChatRepository
 from app.services.admin.admin_service import AdminService
 from app.services.billing.billing_service import BillingService
+from app.services.payment_service import NowPaymentsService
+from app.services.purchase.catalog import build_order_id, get_product
 
 callback_router = Router(name="callbacks")
 
@@ -50,6 +62,119 @@ def _format_profile(user: User) -> str:
             t(lang, "profile.memory", value=memory),
         ]
     )
+
+
+@callback_router.callback_query(F.data == "wallet:open")
+async def cb_wallet_open(callback: CallbackQuery, db_user: User | None = None):
+    lang = _lang(db_user)
+    await callback.message.edit_text(
+        t(lang, "wallet.menu_intro"),
+        parse_mode="HTML",
+        reply_markup=get_wallet_menu_keyboard(lang),
+    )
+    await callback.answer()
+
+
+@callback_router.callback_query(F.data == "wallet:buy_normal")
+async def cb_wallet_buy_normal(callback: CallbackQuery, db_user: User | None = None):
+    lang = _lang(db_user)
+    await callback.message.edit_text(
+        t(lang, "purchase.normal_intro"),
+        parse_mode="HTML",
+        reply_markup=get_normal_credit_packs_keyboard(lang),
+    )
+    await callback.answer()
+
+
+@callback_router.callback_query(F.data == "wallet:buy_vip")
+async def cb_wallet_buy_vip(callback: CallbackQuery, db_user: User | None = None):
+    lang = _lang(db_user)
+    await callback.message.edit_text(
+        t(lang, "purchase.vip_intro"),
+        parse_mode="HTML",
+        reply_markup=get_vip_credit_packs_keyboard(lang),
+    )
+    await callback.answer()
+
+
+@callback_router.callback_query(F.data == "wallet:buy_access")
+async def cb_wallet_buy_access(callback: CallbackQuery, db_user: User | None = None):
+    lang = _lang(db_user)
+    await callback.message.edit_text(
+        t(lang, "purchase.access_intro"),
+        parse_mode="HTML",
+        reply_markup=get_vip_access_packs_keyboard(lang),
+    )
+    await callback.answer()
+
+
+@callback_router.callback_query(F.data == "vip:open")
+async def cb_vip_open(callback: CallbackQuery, db_user: User | None = None):
+    lang = _lang(db_user)
+    await callback.message.edit_text(
+        t(lang, "vip.menu"),
+        parse_mode="HTML",
+        reply_markup=get_vip_menu_keyboard(lang),
+    )
+    await callback.answer()
+
+
+@callback_router.callback_query(F.data == "vip:benefits")
+async def cb_vip_benefits(callback: CallbackQuery, db_user: User | None = None):
+    lang = _lang(db_user)
+    await callback.message.edit_text(
+        t(lang, "vip.benefits"),
+        parse_mode="HTML",
+        reply_markup=get_vip_menu_keyboard(lang),
+    )
+    await callback.answer()
+
+
+@callback_router.callback_query(F.data == "support:back")
+async def cb_support_back(callback: CallbackQuery, db_user: User | None = None):
+    lang = _lang(db_user)
+    await callback.message.edit_text(
+        t(lang, "support.menu"),
+        parse_mode="HTML",
+        reply_markup=get_support_menu_keyboard(lang),
+    )
+    await callback.answer()
+
+
+@callback_router.callback_query(F.data.startswith("purchase:"))
+async def cb_purchase_checkout(callback: CallbackQuery, db_user: User | None = None):
+    lang = _lang(db_user)
+    code = callback.data.split(":", 1)[1]
+    product = get_product(code)
+    if not product:
+        return await callback.answer(t(lang, "purchase.not_found"), show_alert=True)
+
+    bot_info = await callback.bot.get_me()
+    bot_link = f"https://t.me/{bot_info.username}" if bot_info.username else "https://t.me"
+    order_id = build_order_id(code, callback.from_user.id, int(datetime.now(timezone.utc).timestamp()))
+    invoice_url = await NowPaymentsService.create_invoice(
+        order_id=order_id,
+        price_usd=product.usd_price,
+        description=t(lang, f"purchase.description.{product.kind.value}"),
+        success_url=bot_link,
+        cancel_url=bot_link,
+    )
+    if not invoice_url:
+        return await callback.answer(t(lang, "purchase.temporarily_unavailable"), show_alert=True)
+
+    await callback.message.edit_text(
+        t(
+            lang,
+            f"purchase.checkout.{product.kind.value}",
+            price=f"{product.usd_price:.2f}",
+            normal=product.normal_credits,
+            vip=product.vip_credits,
+            days=product.vip_days,
+        ),
+        parse_mode="HTML",
+        reply_markup=get_checkout_keyboard(lang, invoice_url),
+    )
+    await callback.answer()
 
 
 @callback_router.callback_query(F.data == "profile_refresh")
@@ -125,36 +250,6 @@ async def cq_claim_daily_reward(callback: CallbackQuery, chat_repo: ChatReposito
     await callback.answer(t(lang, "wallet.daily_reward_added"))
 
 
-@callback_router.callback_query(F.data == "upgrade_vip")
-async def cq_show_vip_plans_from_profile(callback: CallbackQuery, db_user: User | None = None) -> None:
-    lang = _lang(db_user)
-    await callback.message.edit_text(text=t(lang, "vip.menu"), reply_markup=get_vip_plans_keyboard(lang), parse_mode="HTML")
-
-
-@callback_router.callback_query(F.data.startswith("buy_plan_"))
-async def process_plan_selection(callback: CallbackQuery, db_user: User | None = None):
-    lang = _lang(db_user)
-    plan_type = callback.data.split("_")[2]
-    plans = {
-        "starter": {"price": 1.99, "credits": 150, "name": "Starter Pack"},
-        "popular": {"price": 6.99, "credits": 700, "name": "Popular Pack"},
-        "pro": {"price": 14.99, "credits": 1800, "name": "Pro Pack"},
-    }
-    selected = plans.get(plan_type)
-    if not selected:
-        return await callback.answer(t(lang, "errors.feature_disabled"), show_alert=True)
-
-    checkout_text = t(lang, "vip.checkout", name=selected["name"], price=selected["price"], credits=selected["credits"])
-    pay_kb = InlineKeyboardBuilder()
-    pay_kb.row(InlineKeyboardButton(text=t(lang, "vip.back_to_plans"), callback_data="back_to_plans"))
-    await callback.message.edit_text(text=checkout_text, reply_markup=pay_kb.as_markup(), parse_mode="HTML")
-
-
-@callback_router.callback_query(F.data == "back_to_plans")
-async def back_to_plans(callback: CallbackQuery, db_user: User | None = None) -> None:
-    await cq_show_vip_plans_from_profile(callback, db_user)
-
-
 @callback_router.callback_query(F.data == "cancel_action")
 async def cq_cancel(callback: CallbackQuery) -> None:
     await callback.message.delete()
@@ -172,7 +267,7 @@ async def cq_redeem_promo_init(callback: CallbackQuery, state: FSMContext, db_us
 async def cq_cancel_promo(callback: CallbackQuery, state: FSMContext, db_user: User | None = None):
     lang = _lang(db_user)
     await state.clear()
-    await callback.message.edit_text(t(lang, "promo.cancelled"))
+    await callback.message.edit_text(t(lang, "promo.cancelled"), parse_mode="HTML", reply_markup=get_wallet_menu_keyboard(lang))
 
 
 @callback_router.message(PromoStates.waiting_for_code)
@@ -181,8 +276,8 @@ async def process_promo_code(message: Message, state: FSMContext, session: Async
     service = AdminService(session, BillingService(session))
     try:
         promo = await service.redeem_promo_code(message.from_user.id, (message.text or "").strip())
-    except ValueError as exc:
-        return await message.answer(str(exc), reply_markup=get_cancel_promo_keyboard(lang))
+    except ValueError:
+        return await message.answer(t(lang, "promo.invalid"), reply_markup=get_cancel_promo_keyboard(lang))
 
     user = await chat_repo.get_user_by_telegram_id(message.from_user.id)
     await state.clear()

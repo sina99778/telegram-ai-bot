@@ -76,7 +76,7 @@ async def test_orchestrator_insufficient_balance(db_session, setup_base_data, mo
     
     res = await orchestrator.process_message(setup_base_data["user_id"], "hi", FeatureName.FLASH_TEXT)
     assert res.success is False
-    assert "Insufficient balance" in res.text
+    assert "not have enough normal credits" in res.text
 
 @pytest.mark.asyncio
 async def test_orchestrator_ai_failure_refunds_credits(db_session, setup_base_data, mock_router):
@@ -93,6 +93,6 @@ async def test_orchestrator_ai_failure_refunds_credits(db_session, setup_base_da
     res = await orchestrator.process_message(setup_base_data["user_id"], "crash please", FeatureName.FLASH_TEXT)
     
     assert res.success is False
-    assert "encountered an error" in res.text
+    assert "Any deducted credits were refunded" in res.text
     # Refund SAGA strictly initiated correctly recovering state!
     billing.refund_credits.assert_called_once()

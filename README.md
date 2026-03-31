@@ -1,98 +1,71 @@
 # Telegram AI Bot
 
-Production-minded Telegram bot built with FastAPI, aiogram, SQLAlchemy, Redis/ARQ, and Google Gemini.
+Production-focused Telegram bot built with FastAPI, aiogram, SQLAlchemy, Redis/ARQ, and Gemini.
 
-## Final product rules
+## Product Rules
 
 - Free users use only `gemini-3.1-flash-lite-preview`
-- VIP users unlock `gemini-3.1-pro-preview`
-- VIP access only unlocks Pro
-- Actual Pro usage still consumes `vip_credits`
-- Free usage consumes `normal_credits`
-- Default message cost is `1 normal_credit` for Flash-Lite and `1 vip_credit` for Pro
-- If VIP access exists but VIP credits are empty, the bot falls back to Flash-Lite when `VIP_DEPLETION_BEHAVIOR=fallback_to_normal`
-- Configured admins automatically get an admin shortcut in the main menu
-- Group chats always use Flash-Lite only and never consume VIP credits
-- Group chats respond only on mention, reply-to-bot, or `/ai`
-- Group chats use stricter caps, cooldowns, and prompt-length limits
+- VIP users can use `gemini-3.1-pro-preview` only if VIP access is active
+- Flash-Lite usage consumes `normal_credits`
+- Pro usage consumes `vip_credits`
+- VIP access is only an unlock flag and does not provide unlimited Pro usage
+- If VIP access is active but VIP credits are empty, behavior follows `VIP_DEPLETION_BEHAVIOR`
 
-## Architecture notes
+## Runtime Design
 
-- `BillingService` is the source of truth for wallet mutations, ledger entries, and VIP access granting
-- `ChatOrchestrator` is the source of truth for text routing and wallet consumption
-- `AdminService` centralizes user management, VIP granting, promo code creation, listing, disabling, and redemption
-- `FeatureConfig` still maps features to provider/model configuration
-- `credit_balance` remains as a backward-compatible aggregate, but new logic uses `normal_credits` and `vip_credits`
+- `BillingService` is the source of truth for wallet mutation and ledger entries
+- `ChatOrchestrator` is the source of truth for text model routing and credit deduction
+- `ImageOrchestrator` handles image billing/deduction/refund with user-safe messaging
+- `ChatRepository` handles user/conversation persistence and daily baseline logic
 
-## Data model changes
+## Group Rules
 
-### User
+- Group chats always use Flash-Lite only
+- Group chats never consume `vip_credits`
+- Group responses are limited to mention/reply/`/ai` triggers
+- Group caps/cooldowns/prompt limits are configurable from env
 
-- `normal_credits`: free wallet
-- `vip_credits`: VIP wallet
-- `is_vip` + `vip_expire_date`: VIP access state
-- `subscription_plan` + `subscription_expires_at`: kept aligned with VIP access
+## Wallet & Purchase UX
 
-### CreditLedger
+Purchases are separated into three clear product types:
 
-- wallet-aware via `wallet_type`
+- `Normal Credits` packs:
+- Adds only `normal_credits`
+- Used only for Flash-Lite
+- `VIP Credits` packs:
+- Adds only `vip_credits`
+- Used only for Pro responses
+- `VIP Access` packs:
+- Extends VIP access duration
+- Unlocks Pro mode
+- Pro usage still consumes `vip_credits`
 
-### PromoCode
+Webhook order IDs now carry product metadata and are applied product-by-product instead of using a generic VIP heuristic.
 
-- `kind`
-- `normal_credits`
-- `vip_credits`
-- `vip_days`
-- `discount_percent`
-- `max_uses`
-- `used_count`
-- `max_uses_per_user`
-- `is_active`
-- `created_by_admin_id`
-- `expires_at`
+## Bilingual UX
 
-### UserPromo
+- Persian (`fa`) and English (`en`) are centralized in `app/core/i18n.py`
+- `/start` language picker is shown when no language is set yet
+- Main menus, wallet/purchase flows, VIP flows, support flows, and group notices are localized
 
-- tracks per-user usage count per code
+## Admin Panel
 
-## Admin panel
-
-The admin dashboard now supports:
+Main admin capabilities:
 
 - statistics
-- paginated user list
-- user search by Telegram ID or username
-- per-user actions
-- add normal credits
-- add VIP credits
-- give or extend VIP access
-- ban / unban
-- create gift / discount codes
-- list codes
-- disable code
-- inspect code usage
+- users (search + pagination)
+- wallet/VIP adjustments
+- gift/discount codes
 - broadcast
-- pricing/config inspection
+- pricing inspection
 
-## UI and group UX
-
-- Main menu uses cleaner grouped reply buttons
-- Admins see a `🛠 Admin Panel` shortcut automatically when their Telegram ID is in `ADMIN_IDS`
-- Profile/VIP/admin inline keyboards now include clearer grouping plus `Back`, `Home`, `Cancel`, and `Refresh` actions where useful
-- Group mode is intentionally quieter and more restrictive than private chat
+Configured admins in `ADMIN_IDS` automatically see the admin shortcut in the main menu.
 
 ## Environment
 
-## Bilingual onboarding and runtime
+Copy `.env.example` to `.env` and set real values.
 
-- `/start` now shows an inline language picker when the user has no saved language yet
-- Major user-facing flows now use centralized translation keys for Persian (`fa`) and English (`en`)
-- Runtime request handling is unified around `ChatRepository` and `ChatOrchestrator`; handlers no longer rely on `chat_service._repo`
-- Group replies remain free-model only and admin/financial flows stay private-chat oriented
-
-Copy `.env.example` to `.env` and fill in the real values.
-
-Important settings:
+Important keys:
 
 - `GEMINI_MODEL_NORMAL=gemini-3.1-flash-lite-preview`
 - `GEMINI_MODEL_PRO=gemini-3.1-pro-preview`
@@ -105,28 +78,17 @@ Important settings:
 - `GROUP_USER_COOLDOWN_SECONDS=20`
 - `GROUP_MAX_PROMPT_LENGTH=1000`
 - `ADMIN_IDS=123456789,987654321`
+- `NOWPAYMENTS_API_KEY=...`
 
 ## Migrations
-
-Run Alembic after pulling the changes:
 
 ```bash
 alembic upgrade head
 ```
 
-The migration upgrades the schema to:
-
-- add `vip_credits`
-- backfill data from `premium_credits` when present
-- drop `premium_credits` after the backfill
-- make ledger entries wallet-aware
-- expand promo code metadata
-- expand redemption tracking
-
-## Running tests
+## Verification
 
 ```bash
+python -m compileall app tests
 python -m pytest -q
 ```
-
-PostgreSQL stress tests are skipped automatically if PostgreSQL is unreachable.
