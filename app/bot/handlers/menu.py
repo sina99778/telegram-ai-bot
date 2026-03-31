@@ -16,10 +16,13 @@ from app.core.enums import FeatureName
 from app.core.i18n import t
 from app.db.models import User
 from app.db.repositories.chat_repo import ChatRepository
+from app.bot.handlers.chat import finalize_group_response
 from app.services.chat.group_policy import GroupPolicyService
 from app.services.chat.orchestrator import ChatOrchestrator
+import logging
 
 menu_router = Router(name="menu")
+logger = logging.getLogger(__name__)
 
 
 def _labels(key: str) -> set[str]:
@@ -227,9 +230,12 @@ async def handle_group_ai_command(
     lang = _user_lang(db_user)
     if not command.args:
         return await message.reply(t(lang, "group.command_help"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+    logger.info("Group pipeline: trigger accepted chat_id=%s message_id=%s via=command_ai", message.chat.id, message.message_id)
 
     if not group_policy_service.claim_message(group_id=message.chat.id, message_id=message.message_id):
+        logger.info("Group pipeline: duplicate skipped chat_id=%s message_id=%s", message.chat.id, message.message_id)
         return
+    logger.info("Group pipeline: dedup passed chat_id=%s message_id=%s", message.chat.id, message.message_id)
 
     decision = group_policy_service.evaluate(
         group_id=message.chat.id,
@@ -238,20 +244,25 @@ async def handle_group_ai_command(
         lang=lang,
     )
     if not decision.allowed:
+        logger.info("Group pipeline: blocked by policy chat_id=%s message_id=%s", message.chat.id, message.message_id)
         return await message.reply(decision.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+    logger.info("Group pipeline: cooldown/policy passed chat_id=%s message_id=%s", message.chat.id, message.message_id)
 
     processing_msg = await message.reply(t(lang, "group.thinking"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
-    result = await chat_orchestrator.process_message(
-        user_id=db_user.id,
-        prompt=command.args,
-        feature_name=FeatureName.FLASH_TEXT,
-        allow_vip=False,
+    logger.info("Group pipeline: placeholder sent chat_id=%s message_id=%s", message.chat.id, message.message_id)
+    result, delivered = await finalize_group_response(
+        trigger_message=message,
+        processing_msg=processing_msg,
+        generation_coro=chat_orchestrator.process_message(
+            user_id=db_user.id,
+            prompt=command.args,
+            feature_name=FeatureName.FLASH_TEXT,
+            allow_vip=False,
+        ),
+        lang=lang,
     )
-    if result.success:
+    if delivered and result:
         group_policy_service.record_usage(group_id=message.chat.id, user_id=db_user.id)
-        await processing_msg.edit_text(result.text, parse_mode="HTML")
-    else:
-        await processing_msg.edit_text(result.text or t(lang, "errors.delivery_failed"), parse_mode="HTML")
 
 
 @menu_router.message(Command("help"), F.chat.type == "private")
