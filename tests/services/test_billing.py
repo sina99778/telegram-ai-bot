@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from app.services.billing.billing_service import BillingService
 from app.core.exceptions import InsufficientCreditsError, DuplicateTransactionError
 from app.db.models import User, CreditLedger
+from app.core.enums import WalletType
 
 @pytest.mark.asyncio
 async def test_deduct_credits_success(db_session, setup_base_data):
@@ -19,6 +20,11 @@ async def test_deduct_credits_success(db_session, setup_base_data):
     user = await db_session.get(User, user_id)
     assert user.credit_balance == 90
     assert user.lifetime_credits_used == 10
+    ledger = await db_session.scalar(
+        select(CreditLedger).where(CreditLedger.user_id == user_id, CreditLedger.reference_id == "tx_1")
+    )
+    assert ledger is not None
+    assert ledger.wallet_type == WalletType.NORMAL
 
 @pytest.mark.asyncio
 async def test_deduct_credits_insufficient(db_session, setup_base_data):
