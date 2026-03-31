@@ -10,7 +10,8 @@ def get_main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
         [KeyboardButton(text=t(lang, "buttons.chat")), KeyboardButton(text=t(lang, "buttons.search"))],
         [KeyboardButton(text=t(lang, "buttons.image")), KeyboardButton(text=t(lang, "buttons.wallet"))],
         [KeyboardButton(text=t(lang, "buttons.vip")), KeyboardButton(text=t(lang, "buttons.invite"))],
-        [KeyboardButton(text=t(lang, "buttons.support")), KeyboardButton(text=t(lang, "buttons.language"))],
+        [KeyboardButton(text=t(lang, "buttons.support")), KeyboardButton(text=t(lang, "buttons.guide"))],
+        [KeyboardButton(text=t(lang, "buttons.language"))],
     ]
     if is_admin:
         keyboard.append([KeyboardButton(text=t(lang, "buttons.admin"))])

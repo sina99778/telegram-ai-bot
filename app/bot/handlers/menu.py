@@ -30,6 +30,7 @@ PROFILE_BTNS = _labels("buttons.wallet")
 INVITE_BTNS = _labels("buttons.invite")
 VIP_BTNS = _labels("buttons.vip")
 SUPPORT_BTNS = _labels("buttons.support")
+GUIDE_BTNS = _labels("buttons.guide")
 CODES_BTNS = _labels("buttons.codes")
 ADMIN_BTNS = _labels("buttons.admin")
 LANG_BTNS = _labels("buttons.language")
@@ -48,6 +49,38 @@ def _profile_text(user: User) -> str:
         t(lang, "profile.vip.active_until", date=vip_until.strftime("%Y-%m-%d"))
         if user.has_active_vip and vip_until
         else (t(lang, "profile.vip.active") if user.has_active_vip else t(lang, "profile.vip.inactive"))
+    )
+
+
+def _private_help_text(lang: str, *, is_admin: bool) -> str:
+    lines = [
+        t(lang, "help.private.title"),
+        "",
+        t(lang, "help.private.chat"),
+        t(lang, "help.private.search"),
+        t(lang, "help.private.image"),
+        t(lang, "help.private.wallet"),
+        t(lang, "help.private.vip"),
+        t(lang, "help.private.invite"),
+        t(lang, "help.private.support"),
+        t(lang, "help.private.language"),
+    ]
+    if is_admin:
+        lines.append(t(lang, "help.private.admin"))
+    return "\n".join(lines)
+
+
+def _group_help_text(lang: str) -> str:
+    return "\n".join(
+        [
+            t(lang, "help.group.title"),
+            "",
+            t(lang, "help.group.trigger"),
+            t(lang, "help.group.search"),
+            t(lang, "help.group.limit"),
+            t(lang, "help.group.cooldown"),
+            t(lang, "help.group.private_only"),
+        ]
     )
     current_model = str(user.preferred_text_model).upper() if user.preferred_text_model else "FLASH"
     memory = t(lang, "profile.memory.keep") if user.keep_chat_history else t(lang, "profile.memory.clear")
@@ -134,6 +167,15 @@ async def menu_support(message: Message, db_user: User) -> None:
     await message.answer(t(lang, "support.menu"), parse_mode="HTML", reply_markup=get_support_menu_keyboard(lang))
 
 
+@menu_router.message(F.text.in_(GUIDE_BTNS), F.chat.type == "private")
+async def menu_private_help(message: Message, db_user: User) -> None:
+    lang = _user_lang(db_user)
+    await message.answer(
+        _private_help_text(lang, is_admin=is_configured_admin(message.from_user.id)),
+        parse_mode="HTML",
+    )
+
+
 @menu_router.message(F.text.in_(SEARCH_BTNS), F.chat.type == "private")
 async def menu_search_help(message: Message, db_user: User) -> None:
     lang = _user_lang(db_user)
@@ -207,3 +249,19 @@ async def handle_group_ai_command(
         await processing_msg.edit_text(result.text, parse_mode="HTML")
     else:
         await processing_msg.edit_text(result.text or t(lang, "errors.delivery_failed"), parse_mode="HTML")
+
+
+@menu_router.message(Command("help"), F.chat.type == "private")
+async def command_private_help(message: Message, db_user: User) -> None:
+    lang = _user_lang(db_user)
+    await message.answer(
+        _private_help_text(lang, is_admin=is_configured_admin(message.from_user.id)),
+        parse_mode="HTML",
+    )
+
+
+@menu_router.message(Command("help"), F.chat.type.in_({"group", "supergroup"}))
+@menu_router.message(Command("group_help"), F.chat.type.in_({"group", "supergroup"}))
+async def command_group_help(message: Message, db_user: User) -> None:
+    lang = _user_lang(db_user)
+    await message.reply(_group_help_text(lang), parse_mode="HTML")
