@@ -57,20 +57,21 @@ def _admin_service(session: AsyncSession) -> AdminService:
 
 
 def _format_user_detail(user: User) -> str:
+    lang = _lang(user)
     display_name = user.username or user.first_name or "unknown"
     vip_until = user.active_vip_until
-    vip_status = f"ACTIVE until {vip_until:%Y-%m-%d}" if user.has_active_vip and vip_until else (
-        "ACTIVE" if user.has_active_vip else "INACTIVE"
+    vip_status = t(lang, "admin.user_vip_until", date=vip_until.strftime("%Y-%m-%d")) if user.has_active_vip and vip_until else (
+        t(lang, "admin.user_vip_active") if user.has_active_vip else t(lang, "admin.user_vip_inactive")
     )
-    ban_status = "BANNED" if user.is_banned else "ACTIVE"
+    ban_status = t(lang, "admin.user_banned") if user.is_banned else t(lang, "admin.user_not_banned")
     return (
-        "<b>User Management</b>\n\n"
-        f"ID: <code>{user.telegram_id}</code>\n"
-        f"Name: {display_name}\n"
-        f"Normal credits: <code>{user.normal_credits}</code>\n"
-        f"VIP credits: <code>{user.vip_credits}</code>\n"
-        f"VIP status: <b>{vip_status}</b>\n"
-        f"Ban status: <b>{ban_status}</b>"
+        f"<b>{t(lang, 'admin.user_management_title')}</b>\n\n"
+        f"{t(lang, 'admin.user_id')}: <code>{user.telegram_id}</code>\n"
+        f"{t(lang, 'admin.user_name')}: {display_name}\n"
+        f"{t(lang, 'admin.user_normal_credits')}: <code>{user.normal_credits}</code>\n"
+        f"{t(lang, 'admin.user_vip_credits')}: <code>{user.vip_credits}</code>\n"
+        f"{t(lang, 'admin.user_vip_status')}: <b>{vip_status}</b>\n"
+        f"{t(lang, 'admin.user_ban_status')}: <b>{ban_status}</b>"
     )
 
 
@@ -114,10 +115,7 @@ async def _render_user_page(
     lang: str = "fa",
 ) -> None:
     result = await service.list_users(page=page, search=search)
-    text = (
-        "<b>Users</b>\n\n"
-        "Each row shows: telegram_id | username/name | normal credits | vip credits | VIP status | ban status\n"
-    )
+    text = t(lang, "admin.users_title")
     markup = get_admin_users_kb(result.users, result.page, result.total_pages, search, lang)
     target = message.message if isinstance(message, CallbackQuery) else message
     await target.edit_text(text, parse_mode="HTML", reply_markup=markup) if isinstance(message, CallbackQuery) else await target.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -195,7 +193,7 @@ async def process_user_search(message: Message, session: AsyncSession, state: FS
     await _render_user_page(message, _admin_service(session), page=1, search=(message.text or "").strip(), lang=_lang(user))
 
 
-@admin_router.callback_query(F.data.startswith("admin:user:") & F.data.contains(":page:"))
+@admin_router.callback_query(F.data.regexp(r"^admin:user:\d+:page:\d+(?::search:.*)?$"))
 async def cb_admin_user_detail(callback: CallbackQuery, session: AsyncSession):
     if not await _is_admin(callback.from_user.id, session):
         return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
@@ -337,7 +335,7 @@ async def cb_admin_ban_toggle(callback: CallbackQuery, session: AsyncSession):
         parse_mode="HTML",
         reply_markup=get_user_manage_kb(updated_user, _lang(admin_user), page=page, search=search),
     )
-    await callback.answer("Updated")
+    await callback.answer(t(_lang(admin_user), "admin.user_updated"))
 
 
 @admin_router.callback_query(F.data == "admin:codes")

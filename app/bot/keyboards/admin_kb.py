@@ -38,7 +38,7 @@ def get_admin_users_kb(users: list[User], page: int, total_pages: int, search: s
 
     for user in users:
         display_name = user.username or user.first_name or "unknown"
-        vip_status = "VIP" if user.has_active_vip else "Free"
+        vip_status = t(lang, "admin.user_vip_short") if user.has_active_vip else t(lang, "admin.user_free_short")
         ban_status = "🚫" if user.is_banned else "✅"
         label = f"{ban_status} {display_name} | N:{user.normal_credits} V:{user.vip_credits} | {vip_status}"
         builder.row(
@@ -56,7 +56,7 @@ def get_admin_users_kb(users: list[User], page: int, total_pages: int, search: s
         nav_row.append(InlineKeyboardButton(text="➡️", callback_data=f"admin:users:page:{page + 1}:search:{search_token}"))
     builder.row(*nav_row)
     builder.row(
-        InlineKeyboardButton(text="🔎 Search", callback_data="admin:users:search"),
+        InlineKeyboardButton(text=t(lang, "admin.search"), callback_data="admin:users:search"),
         InlineKeyboardButton(text=t(lang, "buttons.refresh"), callback_data=f"admin:users:page:{page}:search:{search_token}"),
     )
     builder.row(InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"))
@@ -65,8 +65,8 @@ def get_admin_users_kb(users: list[User], page: int, total_pages: int, search: s
 
 def get_user_manage_kb(user: User, lang: str, page: int = 1, search: str | None = None) -> object:
     search_token = search or "-"
-    ban_label = "✅ Unban" if user.is_banned else "🚫 Ban"
-    vip_label = "🗓 Extend VIP" if user.has_active_vip else "✨ Give VIP"
+    ban_label = t(lang, "admin.unban") if user.is_banned else t(lang, "admin.ban")
+    vip_label = t(lang, "admin.extend_vip") if user.has_active_vip else t(lang, "admin.give_vip")
     add_normal_cb = f"admin:user:add_normal:{user.telegram_id}:page:{page}:search:{search_token}"
     add_vip_cb = f"admin:user:add_vip:{user.telegram_id}:page:{page}:search:{search_token}"
     vip_cb = f"admin:user:vip:{user.telegram_id}:page:{page}:search:{search_token}"
@@ -74,8 +74,8 @@ def get_user_manage_kb(user: User, lang: str, page: int = 1, search: str | None 
     return markup(
         [
             [
-                InlineKeyboardButton(text="➕ Normal Credits", callback_data=add_normal_cb),
-                InlineKeyboardButton(text="➕ VIP Credits", callback_data=add_vip_cb),
+                InlineKeyboardButton(text=t(lang, "admin.add_normal_credits"), callback_data=add_normal_cb),
+                InlineKeyboardButton(text=t(lang, "admin.add_vip_credits"), callback_data=add_vip_cb),
             ],
             [
                 InlineKeyboardButton(text=vip_label, callback_data=vip_cb),
