@@ -1,5 +1,6 @@
 import pytest
 from sqlalchemy import select
+from datetime import datetime, timedelta
 from app.services.billing.billing_service import BillingService
 from app.core.exceptions import InsufficientCreditsError, DuplicateTransactionError
 from app.db.models import User, CreditLedger
@@ -71,3 +72,24 @@ async def test_refund_credits_expanded(db_session, setup_base_data):
     # Verify Refund Idempotency mapping
     with pytest.raises(DuplicateTransactionError):
          await billing.refund_credits(user_id, "tx_img_1", 15, "Double Refund attempt")
+
+
+@pytest.mark.asyncio
+async def test_grant_vip_access_handles_naive_expiry(db_session, setup_base_data):
+    billing = BillingService(db_session)
+    user = await db_session.get(User, setup_base_data["user_id"])
+    user.is_vip = True
+    user.vip_expire_date = datetime.utcnow() + timedelta(days=2)
+    await db_session.commit()
+
+    new_expiry = await billing.grant_vip_access(
+        user_id=user.id,
+        days=5,
+        reference_type="admin_vip_grant",
+        reference_id="vip_test_1",
+        description="test grant",
+    )
+
+    assert new_expiry.tzinfo is not None
+    refreshed_user = await db_session.get(User, user.id)
+    assert refreshed_user.has_active_vip is True

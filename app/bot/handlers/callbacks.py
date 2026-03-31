@@ -42,9 +42,10 @@ def _lang(user: User | None) -> str:
 
 def _format_profile(user: User) -> str:
     lang = _lang(user)
+    vip_until = user.active_vip_until
     vip_status = (
-        t(lang, "profile.vip.active_until", date=user.vip_expire_date.strftime("%Y-%m-%d"))
-        if user.has_active_vip and user.vip_expire_date
+        t(lang, "profile.vip.active_until", date=vip_until.strftime("%Y-%m-%d"))
+        if user.has_active_vip and vip_until
         else (t(lang, "profile.vip.active") if user.has_active_vip else t(lang, "profile.vip.inactive"))
     )
     current_model = str(user.preferred_text_model).upper() if user.preferred_text_model else "FLASH"
@@ -152,13 +153,16 @@ async def cb_purchase_checkout(callback: CallbackQuery, db_user: User | None = N
     bot_info = await callback.bot.get_me()
     bot_link = f"https://t.me/{bot_info.username}" if bot_info.username else "https://t.me"
     order_id = build_order_id(code, callback.from_user.id, int(datetime.now(timezone.utc).timestamp()))
-    invoice_url = await NowPaymentsService.create_invoice(
-        order_id=order_id,
-        price_usd=product.usd_price,
-        description=t(lang, f"purchase.description.{product.kind.value}"),
-        success_url=bot_link,
-        cancel_url=bot_link,
-    )
+    try:
+        invoice_url = await NowPaymentsService.create_invoice(
+            order_id=order_id,
+            price_usd=product.usd_price,
+            description=t(lang, f"purchase.description.{product.kind.value}"),
+            success_url=bot_link,
+            cancel_url=bot_link,
+        )
+    except Exception:
+        invoice_url = None
     if not invoice_url:
         return await callback.answer(t(lang, "purchase.temporarily_unavailable"), show_alert=True)
 

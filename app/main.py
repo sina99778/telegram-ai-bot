@@ -26,6 +26,7 @@ from app.db.session import engine, AsyncSessionLocal
 from app.db.models import Base
 from app.db.repositories.chat_repo import ChatRepository
 from app.services.purchase.catalog import PurchaseKind, get_product, parse_order_id
+from app.core.i18n import t
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -276,21 +277,11 @@ async def nowpayments_webhook(request: Request) -> dict[str, str]:
 
                     lang = user.language if user.language else "en"
                     if product and product.kind == PurchaseKind.NORMAL_CREDITS:
-                        notify_text = (
-                            f"🎉 <b>{'Purchase completed' if lang == 'en' else 'خرید با موفقیت انجام شد'}</b>\n\n"
-                            f"{'Normal credits added' if lang == 'en' else 'اعتبار عادی اضافه شد'}: <code>{product.normal_credits}</code>"
-                        )
+                        notify_text = t(lang, "purchase.success.normal_credits", normal=product.normal_credits)
                     elif product and product.kind == PurchaseKind.VIP_CREDITS:
-                        notify_text = (
-                            f"🎉 <b>{'Purchase completed' if lang == 'en' else 'خرید با موفقیت انجام شد'}</b>\n\n"
-                            f"{'VIP credits added' if lang == 'en' else 'اعتبار VIP اضافه شد'}: <code>{product.vip_credits}</code>"
-                        )
+                        notify_text = t(lang, "purchase.success.vip_credits", vip=product.vip_credits)
                     elif product and product.kind == PurchaseKind.VIP_ACCESS:
-                        notify_text = (
-                            f"🎉 <b>{'Purchase completed' if lang == 'en' else 'خرید با موفقیت انجام شد'}</b>\n\n"
-                            f"{'VIP access extended' if lang == 'en' else 'دسترسی VIP تمدید شد'}: <code>{product.vip_days}</code> "
-                            f"{'days' if lang == 'en' else 'روز'}"
-                        )
+                        notify_text = t(lang, "purchase.success.vip_access", days=product.vip_days)
                     else:
                         notify_text = "🎉 <b>Payment successful.</b>"
 

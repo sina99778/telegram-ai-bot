@@ -30,6 +30,14 @@ class BillingService:
         self.session = session
 
     @staticmethod
+    def _normalize_utc(dt: datetime | None) -> datetime | None:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    @staticmethod
     def _get_wallet_balance(user: User, wallet_type: WalletType) -> int:
         return user.normal_credits if wallet_type == WalletType.NORMAL else user.vip_credits
 
@@ -237,7 +245,9 @@ class BillingService:
         user = await self._get_user_for_update(user_id)
 
         now = datetime.now(timezone.utc)
-        current_expiry = user.vip_expire_date if user.vip_expire_date and user.vip_expire_date > now else now
+        current_expiry = self._normalize_utc(user.vip_expire_date)
+        if current_expiry is None or current_expiry <= now:
+            current_expiry = now
         new_expiry = current_expiry + timedelta(days=days)
 
         user.is_vip = True

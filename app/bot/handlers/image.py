@@ -25,7 +25,12 @@ async def handle_image_command(message: Message, command: CommandObject, db_user
     safe_prompt = html.escape(prompt)
     processing_msg = await message.reply(t(lang, "image.generating"), parse_mode="HTML")
 
-    result = await image_orchestrator.process_image_request(user_id=db_user.id, prompt=prompt)
+    try:
+        result = await image_orchestrator.process_image_request(user_id=db_user.id, prompt=prompt)
+    except Exception:
+        await processing_msg.edit_text(t(lang, "image.billing_temporary_issue"), parse_mode="HTML")
+        return
+
     if not result.success:
         topup_kb = None
         if result.error_code in {"insufficient_vip", "billing_error"}:

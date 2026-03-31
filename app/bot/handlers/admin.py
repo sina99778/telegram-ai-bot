@@ -58,7 +58,8 @@ def _admin_service(session: AsyncSession) -> AdminService:
 
 def _format_user_detail(user: User) -> str:
     display_name = user.username or user.first_name or "unknown"
-    vip_status = f"ACTIVE until {user.vip_expire_date:%Y-%m-%d}" if user.has_active_vip and user.vip_expire_date else (
+    vip_until = user.active_vip_until
+    vip_status = f"ACTIVE until {vip_until:%Y-%m-%d}" if user.has_active_vip and vip_until else (
         "ACTIVE" if user.has_active_vip else "INACTIVE"
     )
     ban_status = "BANNED" if user.is_banned else "ACTIVE"
@@ -71,6 +72,14 @@ def _format_user_detail(user: User) -> str:
         f"VIP status: <b>{vip_status}</b>\n"
         f"Ban status: <b>{ban_status}</b>"
     )
+
+
+def _admin_action_error(lang: str) -> str:
+    return t(lang, "admin.action_failed")
+
+
+def _admin_saved(lang: str) -> str:
+    return t(lang, "admin.action_saved")
 
 
 def _format_stats(stats: dict) -> str:
@@ -203,10 +212,12 @@ async def cb_admin_add_credits_start(callback: CallbackQuery, session: AsyncSess
     telegram_id = int(callback.data.split(":")[-1])
     await state.update_data(target_tg_id=telegram_id, wallet_type=wallet_type.value)
     await state.set_state(AdminStates.waiting_for_credit_amount)
+    admin_user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(admin_user)
     await callback.message.edit_text(
-        f"<b>Add {wallet_type.value.title()} Credits</b>\n\nSend the amount for <code>{telegram_id}</code>.",
+        t(lang, "admin.add_credits_prompt", wallet=wallet_type.value.lower(), telegram_id=telegram_id),
         parse_mode="HTML",
-        reply_markup=get_back_to_admin_kb("fa"),
+        reply_markup=get_back_to_admin_kb(lang),
     )
     await callback.answer()
 
@@ -215,23 +226,34 @@ async def cb_admin_add_credits_start(callback: CallbackQuery, session: AsyncSess
 async def process_add_credit_amount(message: Message, session: AsyncSession, state: FSMContext):
     if not await _is_admin(message.from_user.id, session):
         return
+    admin_user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
+    lang = _lang(admin_user)
     if not message.text or not message.text.isdigit():
-        return await message.answer("Please send a positive integer amount.")
+        return await message.answer(t(lang, "admin.enter_positive_amount"))
 
     data = await state.get_data()
     wallet_type = WalletType(data["wallet_type"])
     target_tg_id = int(data["target_tg_id"])
     service = _admin_service(session)
-    await service.add_credits_to_user(
-        admin_telegram_id=message.from_user.id,
-        target_telegram_id=target_tg_id,
-        amount=int(message.text),
-        wallet_type=wallet_type,
-    )
-    user = await service.get_user_details(target_tg_id)
+    try:
+        await service.add_credits_to_user(
+            admin_telegram_id=message.from_user.id,
+            target_telegram_id=target_tg_id,
+            amount=int(message.text),
+            wallet_type=wallet_type,
+        )
+        user = await service.get_user_details(target_tg_id)
+    except Exception:
+        await session.rollback()
+        await state.clear()
+        return await message.answer(_admin_action_error(lang), reply_markup=get_back_to_admin_kb(lang))
+
     await state.clear()
-    admin_user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
-    await message.answer(_format_user_detail(user), parse_mode="HTML", reply_markup=get_user_manage_kb(user, _lang(admin_user)))
+    await message.answer(
+        f"{_admin_saved(lang)}\n\n{_format_user_detail(user)}",
+        parse_mode="HTML",
+        reply_markup=get_user_manage_kb(user, lang),
+    )
 
 
 @admin_router.callback_query(F.data.startswith("admin:user:vip:"))
@@ -241,10 +263,12 @@ async def cb_admin_give_vip_start(callback: CallbackQuery, session: AsyncSession
     telegram_id = int(callback.data.split(":")[-1])
     await state.update_data(target_tg_id=telegram_id)
     await state.set_state(AdminStates.waiting_for_vip_days)
+    admin_user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(admin_user)
     await callback.message.edit_text(
-        f"<b>Give / Extend VIP</b>\n\nSend the number of VIP days for <code>{telegram_id}</code>.",
+        t(lang, "admin.vip_days_prompt", telegram_id=telegram_id),
         parse_mode="HTML",
-        reply_markup=get_back_to_admin_kb("fa"),
+        reply_markup=get_back_to_admin_kb(lang),
     )
     await callback.answer()
 
@@ -253,17 +277,28 @@ async def cb_admin_give_vip_start(callback: CallbackQuery, session: AsyncSession
 async def process_vip_days(message: Message, session: AsyncSession, state: FSMContext):
     if not await _is_admin(message.from_user.id, session):
         return
+    admin_user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
+    lang = _lang(admin_user)
     if not message.text or not message.text.isdigit():
-        return await message.answer("Please send a positive integer number of days.")
+        return await message.answer(t(lang, "admin.enter_positive_days"))
 
     data = await state.get_data()
     target_tg_id = int(data["target_tg_id"])
     service = _admin_service(session)
-    await service.grant_vip_to_user(message.from_user.id, target_tg_id, int(message.text))
-    user = await service.get_user_details(target_tg_id)
+    try:
+        await service.grant_vip_to_user(message.from_user.id, target_tg_id, int(message.text))
+        user = await service.get_user_details(target_tg_id)
+    except Exception:
+        await session.rollback()
+        await state.clear()
+        return await message.answer(_admin_action_error(lang), reply_markup=get_back_to_admin_kb(lang))
+
     await state.clear()
-    admin_user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
-    await message.answer(_format_user_detail(user), parse_mode="HTML", reply_markup=get_user_manage_kb(user, _lang(admin_user)))
+    await message.answer(
+        f"{t(lang, 'admin.vip_updated')}\n\n{_format_user_detail(user)}",
+        parse_mode="HTML",
+        reply_markup=get_user_manage_kb(user, lang),
+    )
 
 
 @admin_router.callback_query(F.data.startswith("admin:user:ban:"))

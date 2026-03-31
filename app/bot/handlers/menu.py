@@ -43,9 +43,10 @@ def _user_lang(user: User | None) -> str:
 
 def _profile_text(user: User) -> str:
     lang = _user_lang(user)
+    vip_until = user.active_vip_until
     vip_status = (
-        t(lang, "profile.vip.active_until", date=user.vip_expire_date.strftime("%Y-%m-%d"))
-        if user.has_active_vip and user.vip_expire_date
+        t(lang, "profile.vip.active_until", date=vip_until.strftime("%Y-%m-%d"))
+        if user.has_active_vip and vip_until
         else (t(lang, "profile.vip.active") if user.has_active_vip else t(lang, "profile.vip.inactive"))
     )
     current_model = str(user.preferred_text_model).upper() if user.preferred_text_model else "FLASH"
@@ -190,4 +191,3 @@ async def handle_group_ai_command(
         await processing_msg.edit_text(result.text, parse_mode="HTML")
     else:
         await processing_msg.edit_text(result.text or t(lang, "errors.delivery_failed"), parse_mode="HTML")
-

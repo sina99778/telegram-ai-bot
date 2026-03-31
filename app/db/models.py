@@ -96,13 +96,26 @@ class User(Base):
     payments: Mapped[List["PaymentTransaction"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     conversations: Mapped[List["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
+    @staticmethod
+    def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
     @property
     def has_active_vip(self) -> bool:
         if not self.is_vip:
             return False
-        if self.vip_expire_date is None:
+        vip_expiry = self._as_utc(self.vip_expire_date)
+        if vip_expiry is None:
             return True
-        return self.vip_expire_date > datetime.now(timezone.utc)
+        return vip_expiry > datetime.now(timezone.utc)
+
+    @property
+    def active_vip_until(self) -> Optional[datetime]:
+        return self._as_utc(self.vip_expire_date)
 
     def sync_credit_balance(self) -> None:
         self.credit_balance = max(0, self.normal_credits) + max(0, self.vip_credits)
