@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.enums import FeatureName, MessageRole, WalletType
 from app.core.exceptions import InsufficientCreditsError
+from app.core.i18n import t
 from app.db.models import Conversation, Message, User
 from app.services.ai.router import ModelRouter
 from app.services.billing.billing_service import BillingService
@@ -59,6 +60,8 @@ class ChatOrchestrator:
         self.queue_service = queue_service
 
     async def _get_or_create_active_conversation(self, user_id: int, mode_str: str) -> Conversation:
+        user = await self.session.get(User, user_id)
+        preferred_language = user.language if user and user.language else "fa"
         stmt = (
             select(Conversation)
             .where(
@@ -72,12 +75,19 @@ class ChatOrchestrator:
 
         conversation = await self.session.scalar(stmt)
         if not conversation:
-            conversation = Conversation(user_id=user_id, conversation_mode=mode_str)
+            conversation = Conversation(
+                user_id=user_id,
+                conversation_mode=mode_str,
+                language_preference=preferred_language,
+            )
             self.session.add(conversation)
             await self.session.flush()
+        elif conversation.language_preference != preferred_language:
+            conversation.language_preference = preferred_language
         return conversation
 
     async def _resolve_policy(self, user: User, requested_feature: FeatureName, allow_vip: bool = True) -> RoutedChatPolicy:
+        lang = user.language or "fa"
         if not allow_vip:
             return RoutedChatPolicy(
                 feature_name=FeatureName.FLASH_TEXT,
@@ -103,13 +113,13 @@ class ChatOrchestrator:
                     wallet_type=WalletType.NORMAL,
                     cost=settings.NORMAL_MESSAGE_COST,
                     depleted_vip_fallback=True,
-                    notice="VIP credits are finished, so I switched you to Flash-Lite for this message.",
+                    notice=t(lang, "chat.vip_fallback"),
                 )
             return RoutedChatPolicy(
                 feature_name=FeatureName.PRO_TEXT,
                 wallet_type=WalletType.VIP,
                 cost=settings.VIP_MESSAGE_COST,
-                notice="VIP access is active, but your VIP credits are finished.",
+                notice=t(lang, "chat.vip_depleted"),
             )
 
         return RoutedChatPolicy(
@@ -121,7 +131,8 @@ class ChatOrchestrator:
     async def process_message(self, user_id: int, prompt: str, feature_name: FeatureName, allow_vip: bool = True) -> ChatResult:
         user = await self.session.get(User, user_id)
         if not user:
-            return ChatResult(text="User not found.", success=False, error_message="user_not_found")
+            return ChatResult(text=t("en", "chat.user_not_found"), success=False, error_message="user_not_found")
+        lang = user.language or "fa"
 
         policy = await self._resolve_policy(user, feature_name, allow_vip=allow_vip)
         if policy.notice and not policy.depleted_vip_fallback and policy.wallet_type == WalletType.VIP:
@@ -137,7 +148,7 @@ class ChatOrchestrator:
             config = await self.router._get_feature_config(policy.feature_name)
         except Exception as exc:
             return ChatResult(
-                text="This feature is currently disabled.",
+                text=t(lang, "errors.feature_disabled"),
                 success=False,
                 error_message=str(exc),
                 feature_name=policy.feature_name,
@@ -159,9 +170,9 @@ class ChatOrchestrator:
             )
         except InsufficientCreditsError:
             await self.session.rollback()
-            wallet_name = "VIP" if policy.wallet_type == WalletType.VIP else "normal"
+            key = "errors.insufficient_vip" if policy.wallet_type == WalletType.VIP else "errors.insufficient_normal"
             return ChatResult(
-                text=f"Insufficient balance in your {wallet_name} wallet. You need {cost} credits.",
+                text=t(lang, key, cost=cost),
                 success=False,
                 error_message="insufficient_funds",
                 feature_name=policy.feature_name,
@@ -171,7 +182,7 @@ class ChatOrchestrator:
             logger.error("Billing deduction error: %s", exc, exc_info=True)
             await self.session.rollback()
             return ChatResult(
-                text="System error checking wallet balance.",
+                text=t(lang, "errors.wallet_check_failed"),
                 success=False,
                 error_message="billing_error",
                 feature_name=policy.feature_name,
@@ -204,7 +215,7 @@ class ChatOrchestrator:
                 await self.session.rollback()
 
             return ChatResult(
-                text="My AI brain encountered an error and your credits were refunded.",
+                text=t(lang, "errors.ai_failed_refunded"),
                 success=False,
                 error_message=str(exc),
                 feature_name=policy.feature_name,

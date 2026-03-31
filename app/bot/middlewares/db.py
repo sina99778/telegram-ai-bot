@@ -1,8 +1,8 @@
 """
 app/bot/middlewares/db.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
-aiogram 3.x outer middleware that injects a **scoped database session**
-and a ready-to-use **ChatService** instance into every handler call.
+aiogram 3.x outer middleware that injects a scoped database session,
+repositories, and orchestrators into every handler call.
 
 Registration::
 
@@ -18,8 +18,8 @@ from typing import Any, Awaitable, Callable, Dict
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
 
+from app.db.repositories.chat_repo import ChatRepository
 from app.db.session import AsyncSessionLocal
-from app.services.chat_service import ChatService
 from app.core.access import is_configured_admin
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ class DbSessionMiddleware(BaseMiddleware):
 
     Injects dependencies into the handler's ``data`` dict:
     * ``session``
-    * ``chat_service``
+    * ``chat_repo``
     * ``db_user``
     * ``chat_orchestrator``
     """
@@ -53,8 +53,8 @@ class DbSessionMiddleware(BaseMiddleware):
         
         async with AsyncSessionLocal() as session:
             data["session"] = session
-            chat_service = ChatService(session)
-            data["chat_service"] = chat_service
+            chat_repo = ChatRepository(session)
+            data["chat_repo"] = chat_repo
 
             # 1. Extract the user from the update object
             user = None
@@ -69,7 +69,7 @@ class DbSessionMiddleware(BaseMiddleware):
 
             # 2. Inject db_user if user exists
             if user:
-                db_user = await chat_service._repo.get_or_create_user(
+                db_user = await chat_repo.get_or_create_user(
                     telegram_id=user.id,
                     username=user.username,
                     first_name=user.first_name

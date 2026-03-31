@@ -30,6 +30,7 @@ async def user_factory(db_session):
             normal_credits=balance,
             vip_credits=0,
             is_premium=is_premium,
+            language="en",
         )
         db_session.add(user)
         await db_session.flush()

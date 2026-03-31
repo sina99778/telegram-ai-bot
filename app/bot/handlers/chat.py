@@ -4,6 +4,7 @@ from aiogram import F, Router
 from aiogram.types import Message
 
 from app.core.enums import FeatureName
+from app.core.i18n import t
 from app.db.models import User
 from app.services.chat.group_policy import GroupPolicyService
 from app.services.chat.orchestrator import ChatOrchestrator
@@ -27,9 +28,14 @@ async def _is_group_trigger(message: Message) -> bool:
     return f"@{bot_info.username}".lower() in message.text.lower()
 
 
+def _lang(user: User | None) -> str:
+    return user.language if user and user.language else "fa"
+
+
 @chat_router.message(F.text & ~F.text.startswith("/") & (F.chat.type == "private"))
 async def handle_user_message(message: Message, db_user: User, chat_orchestrator: ChatOrchestrator):
-    processing_msg = await message.reply("💭 <i>Thinking…</i>", parse_mode="HTML")
+    lang = _lang(db_user)
+    processing_msg = await message.reply(t(lang, "chat.thinking"), parse_mode="HTML")
 
     raw_mode = db_user.preferred_text_model or getattr(db_user, "subscription_plan", None) or "flash"
     preferred_mode = raw_mode.lower()
@@ -48,7 +54,7 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
 
     try:
         if not result.success:
-            await processing_msg.edit_text(result.text or result.error_message or "Error", parse_mode="HTML")
+            await processing_msg.edit_text(result.text or result.error_message or t(lang, "errors.delivery_failed"), parse_mode="HTML")
             return
 
         if len(result.text) <= 4050:
@@ -60,7 +66,7 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
             await processing_msg.delete()
             await send_chunked_message(message, result.text)
     except Exception:
-        await processing_msg.edit_text("⚠️ An error occurred while delivering the response.")
+        await processing_msg.edit_text(t(lang, "errors.delivery_failed"))
 
 
 @chat_router.message(F.text & ~F.text.startswith("/") & F.chat.type.in_({"group", "supergroup"}))
@@ -73,12 +79,13 @@ async def handle_group_message(
     if not await _is_group_trigger(message):
         return
 
+    lang = _lang(db_user)
     prompt = message.text or ""
-    decision = group_policy_service.evaluate(group_id=message.chat.id, user_id=db_user.id, prompt=prompt)
+    decision = group_policy_service.evaluate(group_id=message.chat.id, user_id=db_user.id, prompt=prompt, lang=lang)
     if not decision.allowed:
         return await message.reply(decision.reason, parse_mode="HTML")
 
-    processing_msg = await message.reply("💬 <i>Thinking with Flash-Lite…</i>", parse_mode="HTML")
+    processing_msg = await message.reply(t(lang, "group.thinking"), parse_mode="HTML")
     result = await chat_orchestrator.process_message(
         user_id=db_user.id,
         prompt=prompt,
@@ -93,4 +100,4 @@ async def handle_group_message(
             await processing_msg.delete()
             await send_chunked_message(message, result.text)
     else:
-        await processing_msg.edit_text(result.text or "An error occurred.", parse_mode="HTML")
+        await processing_msg.edit_text(result.text or t(lang, "errors.delivery_failed"), parse_mode="HTML")

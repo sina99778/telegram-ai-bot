@@ -5,13 +5,17 @@ from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 from app.core.i18n import t
 
 
-def get_main_menu(lang: str = "fa", *, is_admin: bool = False) -> ReplyKeyboardMarkup:
+def get_main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
     keyboard = [
-        [KeyboardButton(text=t("btn_chat", lang)), KeyboardButton(text=t("btn_image", lang))],
-        [KeyboardButton(text=t("btn_profile", lang)), KeyboardButton(text=t("btn_vip", lang))],
-        [KeyboardButton(text=t("btn_invite", lang)), KeyboardButton(text=t("btn_support", lang))],
+        [KeyboardButton(text=t(lang, "buttons.chat")), KeyboardButton(text=t(lang, "buttons.image"))],
+        [KeyboardButton(text=t(lang, "buttons.wallet")), KeyboardButton(text=t(lang, "buttons.vip"))],
+        [KeyboardButton(text=t(lang, "buttons.invite")), KeyboardButton(text=t(lang, "buttons.support"))],
     ]
     if is_admin:
-        keyboard.append([KeyboardButton(text=t("btn_admin", lang))])
-    keyboard.append([KeyboardButton(text=t("btn_lang", lang))])
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, input_field_placeholder=t("menu_hint", lang))
+        keyboard.append([KeyboardButton(text=t(lang, "buttons.admin"))])
+    keyboard.append([KeyboardButton(text=t(lang, "buttons.language"))])
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard,
+        resize_keyboard=True,
+        input_field_placeholder=t(lang, "main.menu_placeholder"),
+    )

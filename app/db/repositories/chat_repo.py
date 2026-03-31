@@ -88,6 +88,7 @@ class ChatRepository:
             first_name=first_name,
             normal_credits=settings.DEFAULT_DAILY_NORMAL_CREDITS,
             credit_balance=settings.DEFAULT_DAILY_NORMAL_CREDITS,
+            language="",
         )
         self._session.add(user)
         await self._session.commit()
@@ -180,6 +181,37 @@ class ChatRepository:
         )
         # Commit will be handled by caller
         return True
+
+    async def reset_active_conversation(self, telegram_id: int) -> bool:
+        user = await self.get_user_by_telegram_id(telegram_id)
+        if not user:
+            return False
+
+        stmt = (
+            select(Conversation)
+            .where(
+                Conversation.user_id == user.id,
+                Conversation.is_active.is_(True),
+            )
+            .order_by(Conversation.created_at.desc())
+            .limit(1)
+        )
+        conversation = await self._session.scalar(stmt)
+        if conversation is None:
+            return False
+
+        conversation.is_active = False
+        await self._session.commit()
+        return True
+
+    async def set_user_language(self, telegram_id: int, language: str) -> User | None:
+        user = await self.get_user_by_telegram_id(telegram_id)
+        if not user:
+            return None
+        user.language = language
+        await self._session.commit()
+        await self._session.refresh(user)
+        return user
 
     # ──────────────────────────────────────────
     #  Message Management

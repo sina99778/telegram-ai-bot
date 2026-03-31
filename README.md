@@ -83,6 +83,13 @@ The admin dashboard now supports:
 
 ## Environment
 
+## Bilingual onboarding and runtime
+
+- `/start` now shows an inline language picker when the user has no saved language yet
+- Major user-facing flows now use centralized translation keys for Persian (`fa`) and English (`en`)
+- Runtime request handling is unified around `ChatRepository` and `ChatOrchestrator`; handlers no longer rely on `chat_service._repo`
+- Group replies remain free-model only and admin/financial flows stay private-chat oriented
+
 Copy `.env.example` to `.env` and fill in the real values.
 
 Important settings:
@@ -97,6 +104,7 @@ Important settings:
 - `GROUP_DAILY_USER_CAP=12`
 - `GROUP_USER_COOLDOWN_SECONDS=20`
 - `GROUP_MAX_PROMPT_LENGTH=1000`
+- `ADMIN_IDS=123456789,987654321`
 
 ## Migrations
 

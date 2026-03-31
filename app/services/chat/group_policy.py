@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 from app.core.config import settings
+from app.core.i18n import t
 
 
 @dataclass
@@ -30,7 +31,7 @@ class GroupPolicyService:
             cls._last_user_message_at = {}
 
     @classmethod
-    def evaluate(cls, *, group_id: int, user_id: int, prompt: str) -> GroupPolicyDecision:
+    def evaluate(cls, *, group_id: int, user_id: int, prompt: str, lang: str = "en") -> GroupPolicyDecision:
         cls._reset_if_needed()
         now = datetime.now(timezone.utc)
         user_key = (group_id, user_id)
@@ -38,21 +39,21 @@ class GroupPolicyService:
         if len(prompt) > settings.GROUP_MAX_PROMPT_LENGTH:
             return GroupPolicyDecision(
                 allowed=False,
-                reason=f"Group prompts are limited to {settings.GROUP_MAX_PROMPT_LENGTH} characters.",
+                reason=t(lang, "group.prompt_limit", limit=settings.GROUP_MAX_PROMPT_LENGTH),
             )
 
         group_count = cls._group_counts.get(group_id, 0)
         if group_count >= settings.GROUP_DAILY_GROUP_CAP:
             return GroupPolicyDecision(
                 allowed=False,
-                reason="This group has reached its daily AI usage limit.",
+                reason=t(lang, "group.group_cap"),
             )
 
         user_count = cls._user_counts.get(user_key, 0)
         if user_count >= settings.GROUP_DAILY_USER_CAP:
             return GroupPolicyDecision(
                 allowed=False,
-                reason="You reached your daily AI limit in this group.",
+                reason=t(lang, "group.user_cap"),
             )
 
         last_seen = cls._last_user_message_at.get(user_key)
@@ -60,7 +61,7 @@ class GroupPolicyService:
             remaining = settings.GROUP_USER_COOLDOWN_SECONDS - int((now - last_seen).total_seconds())
             return GroupPolicyDecision(
                 allowed=False,
-                reason=f"Please wait {remaining} more seconds before asking again in this group.",
+                reason=t(lang, "group.cooldown", seconds=remaining),
             )
 
         return GroupPolicyDecision(allowed=True)
