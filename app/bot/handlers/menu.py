@@ -154,9 +154,17 @@ async def menu_tools(message: Message, chat_repo: ChatRepository) -> None:
         await message.answer(t(lang, "tools.chat_hint"))
         return
     if user and (user.has_active_vip or user.vip_credits >= 10):
-        await message.answer(t(lang, "tools.image_private"), parse_mode="HTML")
+        await message.answer(
+            t(lang, "tools.image_private"),
+            parse_mode="HTML",
+            reply_markup=get_vip_menu_keyboard(lang),
+        )
     else:
-        await message.answer(t(lang, "tools.image_locked"), parse_mode="HTML")
+        await message.answer(
+            t(lang, "tools.image_locked"),
+            parse_mode="HTML",
+            reply_markup=get_wallet_menu_keyboard(lang),
+        )
 
 
 @menu_router.message(Command("ai"), F.chat.type.in_({"group", "supergroup"}))

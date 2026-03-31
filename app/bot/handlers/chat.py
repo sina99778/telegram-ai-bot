@@ -14,9 +14,23 @@ chat_router = Router()
 
 async def send_chunked_message(message: Message, text: str, parse_mode: str = "HTML", chunk_size: int = 4050):
     if len(text) <= chunk_size:
-        return await message.answer(text, parse_mode=parse_mode)
+        try:
+            return await message.answer(text, parse_mode=parse_mode)
+        except Exception:
+            return await message.answer(text)
     for i in range(0, len(text), chunk_size):
-        await message.answer(text[i:i + chunk_size], parse_mode=parse_mode)
+        chunk = text[i:i + chunk_size]
+        try:
+            await message.answer(chunk, parse_mode=parse_mode)
+        except Exception:
+            await message.answer(chunk)
+
+
+async def _safe_edit(message: Message, text: str, *, parse_mode: str = "HTML") -> None:
+    try:
+        await message.edit_text(text, parse_mode=parse_mode)
+    except Exception:
+        await message.edit_text(text)
 
 
 async def _is_group_trigger(message: Message) -> bool:
@@ -54,19 +68,16 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
 
     try:
         if not result.success:
-            await processing_msg.edit_text(result.text or result.error_message or t(lang, "errors.delivery_failed"), parse_mode="HTML")
+            await _safe_edit(processing_msg, result.text or result.error_message or t(lang, "errors.delivery_failed"))
             return
 
         if len(result.text) <= 4050:
-            try:
-                await processing_msg.edit_text(result.text, parse_mode="HTML")
-            except Exception:
-                await processing_msg.edit_text(result.text)
+            await _safe_edit(processing_msg, result.text)
         else:
             await processing_msg.delete()
             await send_chunked_message(message, result.text)
     except Exception:
-        await processing_msg.edit_text(t(lang, "errors.delivery_failed"))
+        await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
 
 
 @chat_router.message(F.text & ~F.text.startswith("/") & F.chat.type.in_({"group", "supergroup"}))
@@ -95,9 +106,9 @@ async def handle_group_message(
     if result.success:
         group_policy_service.record_usage(group_id=message.chat.id, user_id=db_user.id)
         if len(result.text) <= 4050:
-            await processing_msg.edit_text(result.text, parse_mode="HTML")
+            await _safe_edit(processing_msg, result.text)
         else:
             await processing_msg.delete()
             await send_chunked_message(message, result.text)
     else:
-        await processing_msg.edit_text(result.text or t(lang, "errors.delivery_failed"), parse_mode="HTML")
+        await _safe_edit(processing_msg, result.text or t(lang, "errors.delivery_failed"))
