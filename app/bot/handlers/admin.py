@@ -83,9 +83,21 @@ def _admin_saved(lang: str) -> str:
     return t(lang, "admin.action_saved")
 
 
-def _parse_page_search(parts: list[str], page_index: int = 4) -> tuple[int, str | None]:
-    page = int(parts[page_index]) if len(parts) > page_index else 1
-    search = parts[page_index + 2] if len(parts) > page_index + 2 and parts[page_index + 1] == "search" and parts[page_index + 2] != "-" else None
+def _parse_page_search(parts: list[str]) -> tuple[int, str | None]:
+    try:
+        p_idx = parts.index("page")
+        page = int(parts[p_idx + 1])
+    except (ValueError, IndexError):
+        page = 1
+        
+    try:
+        s_idx = parts.index("search")
+        search = parts[s_idx + 1]
+        if search == "-":
+            search = None
+    except (ValueError, IndexError):
+        search = None
+        
     return page, search
 
 
@@ -163,8 +175,7 @@ async def cb_admin_users(callback: CallbackQuery, session: AsyncSession):
         return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
 
     parts = callback.data.split(":")
-    page = int(parts[3])
-    search = parts[5] if len(parts) > 5 and parts[4] == "search" and parts[5] != "-" else None
+    page, search = _parse_page_search(parts)
     user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
     await _render_user_page(callback, _admin_service(session), page, search, _lang(user))
     await callback.answer()
@@ -199,8 +210,7 @@ async def cb_admin_user_detail(callback: CallbackQuery, session: AsyncSession):
         return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
     parts = callback.data.split(":")
     telegram_id = int(parts[2])
-    page = int(parts[4])
-    search = parts[6] if len(parts) > 6 and parts[5] == "search" and parts[6] != "-" else None
+    page, search = _parse_page_search(parts)
     user = await _admin_service(session).get_user_details(telegram_id)
     admin_user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
     await callback.message.edit_text(

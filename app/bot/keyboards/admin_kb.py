@@ -16,14 +16,13 @@ def get_admin_main_kb(lang: str) -> object:
                 InlineKeyboardButton(text=t(lang, "buttons.admin_users"), callback_data="admin:users:page:1"),
             ],
             [
-                InlineKeyboardButton(text="💳 Wallet & VIP", callback_data="admin:users:page:1"),
                 InlineKeyboardButton(text=t(lang, "buttons.admin_codes"), callback_data="admin:codes"),
+                InlineKeyboardButton(text=t(lang, "buttons.admin_broadcast"), callback_data="admin:broadcast"),
             ],
             [
-                InlineKeyboardButton(text=t(lang, "buttons.admin_broadcast"), callback_data="admin:broadcast"),
                 InlineKeyboardButton(text=t(lang, "buttons.admin_pricing"), callback_data="admin:pricing"),
+                InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"),
             ],
-            [InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main")],
         ]
     )
 
