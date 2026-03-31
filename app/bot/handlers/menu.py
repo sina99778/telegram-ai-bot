@@ -6,7 +6,6 @@ from aiogram.types import Message
 
 from app.bot.keyboards.admin_kb import get_admin_main_kb
 from app.bot.keyboards.inline import (
-    get_profile_keyboard,
     get_support_menu_keyboard,
     get_vip_menu_keyboard,
     get_wallet_menu_keyboard,
@@ -135,11 +134,13 @@ async def menu_support(message: Message, db_user: User) -> None:
 
 
 @menu_router.message(F.text.in_(CODES_BTNS), F.chat.type == "private")
-async def menu_codes(message: Message, chat_repo: ChatRepository) -> None:
-    user = await chat_repo.get_user_by_telegram_id(message.from_user.id)
+async def menu_codes_legacy(message: Message, chat_repo: ChatRepository) -> None:
+    user = await chat_repo.ensure_daily_credits(message.from_user.id)
+    if not user:
+        return
     lang = _user_lang(user)
     await message.answer(
-        t(lang, "promo.menu_hint"),
+        t(lang, "wallet.menu_intro"),
         parse_mode="HTML",
         reply_markup=get_wallet_menu_keyboard(lang),
     )

@@ -82,6 +82,16 @@ def _admin_saved(lang: str) -> str:
     return t(lang, "admin.action_saved")
 
 
+def _parse_page_search(parts: list[str], page_index: int = 4) -> tuple[int, str | None]:
+    page = int(parts[page_index]) if len(parts) > page_index else 1
+    search = parts[page_index + 2] if len(parts) > page_index + 2 and parts[page_index + 1] == "search" and parts[page_index + 2] != "-" else None
+    return page, search
+
+
+def _user_detail_callback(telegram_id: int, page: int, search: str | None) -> str:
+    return f"admin:user:{telegram_id}:page:{page}:search:{search or '-'}"
+
+
 def _format_stats(stats: dict) -> str:
     return (
         "<b>System Statistics</b>\n\n"
@@ -209,15 +219,17 @@ async def cb_admin_add_credits_start(callback: CallbackQuery, session: AsyncSess
         return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
 
     wallet_type = WalletType.NORMAL if ":add_normal:" in callback.data else WalletType.VIP
-    telegram_id = int(callback.data.split(":")[-1])
-    await state.update_data(target_tg_id=telegram_id, wallet_type=wallet_type.value)
+    parts = callback.data.split(":")
+    telegram_id = int(parts[3])
+    page, search = _parse_page_search(parts)
+    await state.update_data(target_tg_id=telegram_id, wallet_type=wallet_type.value, source_page=page, source_search=search)
     await state.set_state(AdminStates.waiting_for_credit_amount)
     admin_user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
     lang = _lang(admin_user)
     await callback.message.edit_text(
         t(lang, "admin.add_credits_prompt", wallet=wallet_type.value.lower(), telegram_id=telegram_id),
         parse_mode="HTML",
-        reply_markup=get_back_to_admin_kb(lang),
+        reply_markup=get_back_to_admin_kb(lang, back=_user_detail_callback(telegram_id, page, search)),
     )
     await callback.answer()
 
@@ -234,6 +246,9 @@ async def process_add_credit_amount(message: Message, session: AsyncSession, sta
     data = await state.get_data()
     wallet_type = WalletType(data["wallet_type"])
     target_tg_id = int(data["target_tg_id"])
+    source_page = int(data.get("source_page", 1))
+    source_search = data.get("source_search")
+    back_cb = _user_detail_callback(target_tg_id, source_page, source_search)
     service = _admin_service(session)
     try:
         await service.add_credits_to_user(
@@ -246,13 +261,13 @@ async def process_add_credit_amount(message: Message, session: AsyncSession, sta
     except Exception:
         await session.rollback()
         await state.clear()
-        return await message.answer(_admin_action_error(lang), reply_markup=get_back_to_admin_kb(lang))
+        return await message.answer(_admin_action_error(lang), reply_markup=get_back_to_admin_kb(lang, back=back_cb))
 
     await state.clear()
     await message.answer(
         f"{_admin_saved(lang)}\n\n{_format_user_detail(user)}",
         parse_mode="HTML",
-        reply_markup=get_user_manage_kb(user, lang),
+        reply_markup=get_user_manage_kb(user, lang, page=source_page, search=source_search),
     )
 
 
@@ -260,15 +275,17 @@ async def process_add_credit_amount(message: Message, session: AsyncSession, sta
 async def cb_admin_give_vip_start(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     if not await _is_admin(callback.from_user.id, session):
         return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
-    telegram_id = int(callback.data.split(":")[-1])
-    await state.update_data(target_tg_id=telegram_id)
+    parts = callback.data.split(":")
+    telegram_id = int(parts[3])
+    page, search = _parse_page_search(parts)
+    await state.update_data(target_tg_id=telegram_id, source_page=page, source_search=search)
     await state.set_state(AdminStates.waiting_for_vip_days)
     admin_user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
     lang = _lang(admin_user)
     await callback.message.edit_text(
         t(lang, "admin.vip_days_prompt", telegram_id=telegram_id),
         parse_mode="HTML",
-        reply_markup=get_back_to_admin_kb(lang),
+        reply_markup=get_back_to_admin_kb(lang, back=_user_detail_callback(telegram_id, page, search)),
     )
     await callback.answer()
 
@@ -284,6 +301,9 @@ async def process_vip_days(message: Message, session: AsyncSession, state: FSMCo
 
     data = await state.get_data()
     target_tg_id = int(data["target_tg_id"])
+    source_page = int(data.get("source_page", 1))
+    source_search = data.get("source_search")
+    back_cb = _user_detail_callback(target_tg_id, source_page, source_search)
     service = _admin_service(session)
     try:
         await service.grant_vip_to_user(message.from_user.id, target_tg_id, int(message.text))
@@ -291,13 +311,13 @@ async def process_vip_days(message: Message, session: AsyncSession, state: FSMCo
     except Exception:
         await session.rollback()
         await state.clear()
-        return await message.answer(_admin_action_error(lang), reply_markup=get_back_to_admin_kb(lang))
+        return await message.answer(_admin_action_error(lang), reply_markup=get_back_to_admin_kb(lang, back=back_cb))
 
     await state.clear()
     await message.answer(
         f"{t(lang, 'admin.vip_updated')}\n\n{_format_user_detail(user)}",
         parse_mode="HTML",
-        reply_markup=get_user_manage_kb(user, lang),
+        reply_markup=get_user_manage_kb(user, lang, page=source_page, search=source_search),
     )
 
 
@@ -305,7 +325,9 @@ async def process_vip_days(message: Message, session: AsyncSession, state: FSMCo
 async def cb_admin_ban_toggle(callback: CallbackQuery, session: AsyncSession):
     if not await _is_admin(callback.from_user.id, session):
         return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
-    telegram_id = int(callback.data.split(":")[-1])
+    parts = callback.data.split(":")
+    telegram_id = int(parts[3])
+    page, search = _parse_page_search(parts)
     service = _admin_service(session)
     user = await service.get_user_details(telegram_id)
     updated_user = await service.set_user_ban_status(telegram_id, not user.is_banned)
@@ -313,7 +335,7 @@ async def cb_admin_ban_toggle(callback: CallbackQuery, session: AsyncSession):
     await callback.message.edit_text(
         _format_user_detail(updated_user),
         parse_mode="HTML",
-        reply_markup=get_user_manage_kb(updated_user, _lang(admin_user)),
+        reply_markup=get_user_manage_kb(updated_user, _lang(admin_user), page=page, search=search),
     )
     await callback.answer("Updated")
 

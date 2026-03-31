@@ -28,8 +28,8 @@ def get_admin_main_kb(lang: str) -> object:
     )
 
 
-def get_back_to_admin_kb(lang: str) -> object:
-    return markup(nav_buttons(lang, home="admin:main", refresh="admin:main"))
+def get_back_to_admin_kb(lang: str, back: str | None = None) -> object:
+    return markup(nav_buttons(lang, back=back, home="admin:main", refresh="admin:main"))
 
 
 def get_admin_users_kb(users: list[User], page: int, total_pages: int, search: str | None, lang: str) -> object:
@@ -67,15 +67,19 @@ def get_user_manage_kb(user: User, lang: str, page: int = 1, search: str | None 
     search_token = search or "-"
     ban_label = "✅ Unban" if user.is_banned else "🚫 Ban"
     vip_label = "🗓 Extend VIP" if user.has_active_vip else "✨ Give VIP"
+    add_normal_cb = f"admin:user:add_normal:{user.telegram_id}:page:{page}:search:{search_token}"
+    add_vip_cb = f"admin:user:add_vip:{user.telegram_id}:page:{page}:search:{search_token}"
+    vip_cb = f"admin:user:vip:{user.telegram_id}:page:{page}:search:{search_token}"
+    ban_cb = f"admin:user:ban:{user.telegram_id}:page:{page}:search:{search_token}"
     return markup(
         [
             [
-                InlineKeyboardButton(text="➕ Normal Credits", callback_data=f"admin:user:add_normal:{user.telegram_id}"),
-                InlineKeyboardButton(text="➕ VIP Credits", callback_data=f"admin:user:add_vip:{user.telegram_id}"),
+                InlineKeyboardButton(text="➕ Normal Credits", callback_data=add_normal_cb),
+                InlineKeyboardButton(text="➕ VIP Credits", callback_data=add_vip_cb),
             ],
             [
-                InlineKeyboardButton(text=vip_label, callback_data=f"admin:user:vip:{user.telegram_id}"),
-                InlineKeyboardButton(text=ban_label, callback_data=f"admin:user:ban:{user.telegram_id}"),
+                InlineKeyboardButton(text=vip_label, callback_data=vip_cb),
+                InlineKeyboardButton(text=ban_label, callback_data=ban_cb),
             ],
             [
                 InlineKeyboardButton(text=t(lang, "buttons.back"), callback_data=f"admin:users:page:{page}:search:{search_token}"),
