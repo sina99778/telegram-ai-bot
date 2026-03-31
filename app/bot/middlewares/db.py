@@ -20,6 +20,7 @@ from aiogram.types import TelegramObject
 
 from app.db.session import AsyncSessionLocal
 from app.services.chat_service import ChatService
+from app.core.access import is_configured_admin
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ from app.services.chat.memory import MemoryManager
 from app.services.queue.queue_service import QueueService
 from app.services.chat.orchestrator import ChatOrchestrator
 from app.services.chat.image_orchestrator import ImageOrchestrator
+from app.services.chat.group_policy import GroupPolicyService
 
 class DbSessionMiddleware(BaseMiddleware):
     """Opens an ``AsyncSession`` before the handler runs and guarantees
@@ -72,7 +74,13 @@ class DbSessionMiddleware(BaseMiddleware):
                     username=user.username,
                     first_name=user.first_name
                 )
+                expected_admin = is_configured_admin(user.id)
+                if db_user.is_admin != expected_admin:
+                    db_user.is_admin = expected_admin
+                    await session.commit()
+                    await session.refresh(db_user)
                 data["db_user"] = db_user
+                data["is_admin"] = expected_admin
 
             # 2. Inject chat_orchestrator locally
             billing = BillingService(session)
@@ -88,6 +96,7 @@ class DbSessionMiddleware(BaseMiddleware):
                 queue_service=queue
             )
             data["chat_orchestrator"] = chat_orchestrator
+            data["group_policy_service"] = GroupPolicyService
 
             image_orchestrator = ImageOrchestrator(
                 session=session,

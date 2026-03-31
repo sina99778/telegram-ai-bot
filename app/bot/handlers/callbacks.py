@@ -39,6 +39,19 @@ def _format_profile(user) -> str:
     )
 
 
+@callback_router.callback_query(F.data == "profile_refresh")
+async def cq_profile_refresh(callback: CallbackQuery, chat_service: ChatService) -> None:
+    user = await chat_service._repo.get_user_by_telegram_id(callback.from_user.id)
+    if not user:
+        return await callback.answer("User not found.", show_alert=True)
+    await callback.message.edit_text(
+        _format_profile(user),
+        parse_mode="HTML",
+        reply_markup=get_profile_keyboard(user),
+    )
+    await callback.answer("Profile refreshed")
+
+
 @callback_router.callback_query(F.data == "toggle_model")
 async def cq_toggle_model(callback: CallbackQuery, chat_service: ChatService) -> None:
     user = await chat_service._repo.get_user_by_telegram_id(callback.from_user.id)
@@ -156,13 +169,13 @@ async def back_to_plans(callback: CallbackQuery) -> None:
 @callback_router.callback_query(F.data == "cancel_action")
 async def cq_cancel(callback: CallbackQuery) -> None:
     await callback.message.delete()
-    await callback.answer("Action canceled.")
+    await callback.answer("Closed")
 
 
 @callback_router.callback_query(F.data == "redeem_promo_code")
 async def cq_redeem_promo_init(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
-        "<b>Redeem Code</b>\n\nSend your code below.",
+        "🎟 <b>Redeem Code</b>\n\nSend your code below.",
         reply_markup=get_cancel_promo_keyboard(),
         parse_mode="HTML",
     )
@@ -172,7 +185,7 @@ async def cq_redeem_promo_init(callback: CallbackQuery, state: FSMContext):
 @callback_router.callback_query(F.data == "cancel_promo_action")
 async def cq_cancel_promo(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("Canceled.")
+    await callback.message.edit_text("Canceled. Use your profile menu any time to try again.")
 
 
 @callback_router.message(PromoStates.waiting_for_code)
@@ -186,7 +199,7 @@ async def process_promo_code(message: Message, state: FSMContext, chat_service: 
     user = await chat_service._repo.get_user_by_telegram_id(message.from_user.id)
     await state.clear()
     await message.answer(
-        "<b>Code Redeemed</b>\n\n"
+        "🎉 <b>Code Redeemed</b>\n\n"
         f"Code: <code>{promo.code}</code>\n"
         f"Normal credits: <code>{promo.normal_credits}</code>\n"
         f"VIP credits: <code>{promo.vip_credits}</code>\n"
@@ -212,7 +225,7 @@ async def view_chat_history(callback: CallbackQuery, chat_service: ChatService):
     for conv in conversations:
         title = f"Chat {conv.created_at.strftime('%Y-%m-%d %H:%M')}"
         builder.row(InlineKeyboardButton(text=title, callback_data=f"resume_chat_{conv.id}"))
-    builder.row(InlineKeyboardButton(text="Back to Profile", callback_data="cancel_action"))
+    builder.row(InlineKeyboardButton(text="⬅️ Back to Profile", callback_data="profile_refresh"))
 
     await callback.message.edit_text(
         "<b>Your Saved Conversations</b>\n\nSelect a chat below to resume it.",

@@ -22,6 +22,7 @@ from app.bot.keyboards.admin_kb import (
     get_codes_list_kb,
     get_user_manage_kb,
 )
+from app.core.access import is_configured_admin
 from app.core.enums import PromoCodeKind, WalletType
 from app.db.models import FeatureConfig, User
 from app.services.admin.admin_service import AdminService
@@ -43,8 +44,7 @@ class AdminStates(StatesGroup):
 
 
 async def _is_admin(user_id: int, session: AsyncSession) -> bool:
-    user = await session.scalar(select(User).where(User.telegram_id == user_id))
-    return bool(user and user.is_admin)
+    return is_configured_admin(user_id)
 
 
 def _admin_service(session: AsyncSession) -> AdminService:
@@ -95,6 +95,8 @@ async def _render_user_page(message: Message | CallbackQuery, service: AdminServ
 
 @admin_router.message(Command("admin"))
 async def cmd_admin(message: Message, session: AsyncSession, state: FSMContext):
+    if message.chat.type != "private":
+        return
     if not await _is_admin(message.from_user.id, session):
         return
     await state.clear()

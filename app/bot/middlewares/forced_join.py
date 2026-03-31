@@ -18,7 +18,7 @@ class CheckUserStatusMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         # 1. Check if user is banned in DB
-        session: AsyncSession = data.get("db_session")
+        session: AsyncSession = data.get("session")
         if session:
             user = await session.scalar(select(User).where(User.telegram_id == event.from_user.id))
             if user and user.is_banned:

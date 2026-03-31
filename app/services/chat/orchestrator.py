@@ -77,7 +77,14 @@ class ChatOrchestrator:
             await self.session.flush()
         return conversation
 
-    async def _resolve_policy(self, user: User, requested_feature: FeatureName) -> RoutedChatPolicy:
+    async def _resolve_policy(self, user: User, requested_feature: FeatureName, allow_vip: bool = True) -> RoutedChatPolicy:
+        if not allow_vip:
+            return RoutedChatPolicy(
+                feature_name=FeatureName.FLASH_TEXT,
+                wallet_type=WalletType.NORMAL,
+                cost=settings.NORMAL_MESSAGE_COST,
+            )
+
         requested_is_pro = requested_feature == FeatureName.PRO_TEXT
         has_vip_access = user.has_active_vip
         vip_credits = user.vip_credits
@@ -111,12 +118,12 @@ class ChatOrchestrator:
             cost=settings.NORMAL_MESSAGE_COST,
         )
 
-    async def process_message(self, user_id: int, prompt: str, feature_name: FeatureName) -> ChatResult:
+    async def process_message(self, user_id: int, prompt: str, feature_name: FeatureName, allow_vip: bool = True) -> ChatResult:
         user = await self.session.get(User, user_id)
         if not user:
             return ChatResult(text="User not found.", success=False, error_message="user_not_found")
 
-        policy = await self._resolve_policy(user, feature_name)
+        policy = await self._resolve_policy(user, feature_name, allow_vip=allow_vip)
         if policy.notice and not policy.depleted_vip_fallback and policy.wallet_type == WalletType.VIP:
             return ChatResult(
                 text=policy.notice,

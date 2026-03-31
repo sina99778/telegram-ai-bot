@@ -1,6 +1,6 @@
 from aiogram.filters import Filter
 from aiogram.types import Message, CallbackQuery
-from app.core.config import settings
+from app.core.access import is_configured_admin
 
 
 class IsAdminFilter(Filter):
@@ -11,13 +11,9 @@ class IsAdminFilter(Filter):
     """
 
     async def __call__(self, event: Message | CallbackQuery) -> bool:
-        admin_ids = settings.admin_ids_list
-        if not admin_ids:
-            return False
-
         if isinstance(event, CallbackQuery):
             user_id = event.from_user.id
         else:
             user_id = event.from_user.id
 
-        return user_id in admin_ids
+        return is_configured_admin(user_id)

@@ -7,7 +7,7 @@ from app.db.models import User
 
 image_router = Router()
 
-@image_router.message(Command("image"))
+@image_router.message(Command("image"), F.chat.type == "private")
 async def handle_image_command(message: Message, command: CommandObject, db_user: User, image_orchestrator: ImageOrchestrator):
     """Handles /image <prompt> commands explicitly isolated within Private Chats."""
     
@@ -45,3 +45,11 @@ async def handle_image_command(message: Message, command: CommandObject, db_user
     finally:
         # Cleanup the temporary processing message
         await processing_msg.delete()
+
+
+@image_router.message(Command("image"), F.chat.type.in_({"group", "supergroup"}))
+async def handle_group_image_command(message: Message):
+    await message.reply(
+        "🖼 Image generation is available only in private chat. Open the bot privately to use VIP image features.",
+        parse_mode="HTML",
+    )

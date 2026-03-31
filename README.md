@@ -11,6 +11,10 @@ Production-minded Telegram bot built with FastAPI, aiogram, SQLAlchemy, Redis/AR
 - Free usage consumes `normal_credits`
 - Default message cost is `1 normal_credit` for Flash-Lite and `1 vip_credit` for Pro
 - If VIP access exists but VIP credits are empty, the bot falls back to Flash-Lite when `VIP_DEPLETION_BEHAVIOR=fallback_to_normal`
+- Configured admins automatically get an admin shortcut in the main menu
+- Group chats always use Flash-Lite only and never consume VIP credits
+- Group chats respond only on mention, reply-to-bot, or `/ai`
+- Group chats use stricter caps, cooldowns, and prompt-length limits
 
 ## Architecture notes
 
@@ -70,6 +74,13 @@ The admin dashboard now supports:
 - broadcast
 - pricing/config inspection
 
+## UI and group UX
+
+- Main menu uses cleaner grouped reply buttons
+- Admins see a `🛠 Admin Panel` shortcut automatically when their Telegram ID is in `ADMIN_IDS`
+- Profile/VIP/admin inline keyboards now include clearer grouping plus `Back`, `Home`, `Cancel`, and `Refresh` actions where useful
+- Group mode is intentionally quieter and more restrictive than private chat
+
 ## Environment
 
 Copy `.env.example` to `.env` and fill in the real values.
@@ -82,6 +93,10 @@ Important settings:
 - `VIP_MESSAGE_COST=1`
 - `VIP_DEPLETION_BEHAVIOR=fallback_to_normal`
 - `DEFAULT_DAILY_NORMAL_CREDITS=50`
+- `GROUP_DAILY_GROUP_CAP=150`
+- `GROUP_DAILY_USER_CAP=12`
+- `GROUP_USER_COOLDOWN_SECONDS=20`
+- `GROUP_MAX_PROMPT_LENGTH=1000`
 
 ## Migrations
 
