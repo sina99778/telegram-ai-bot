@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     VIP_DEFAULT_PLAN_NAME: str = "vip"
     GROUP_DAILY_GROUP_CAP: int = 150
     GROUP_DAILY_USER_CAP: int = 12
-    GROUP_USER_COOLDOWN_SECONDS: int = 20
+    GROUP_USER_COOLDOWN_SECONDS: int = 5
     GROUP_MAX_PROMPT_LENGTH: int = 1000
     SYSTEM_PROMPT: str = "You are a helpful AI assistant."
 
