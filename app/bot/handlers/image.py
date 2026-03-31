@@ -2,7 +2,7 @@ import html
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyKeyboardRemove
 
 from app.core.i18n import t
 from app.db.models import User
@@ -51,4 +51,4 @@ async def handle_image_command(message: Message, command: CommandObject, db_user
 
 @image_router.message(Command("image"), F.chat.type.in_({"group", "supergroup"}))
 async def handle_group_image_command(message: Message, db_user: User):
-    await message.reply(t(_lang(db_user), "group.image_private_only"), parse_mode="HTML")
+    await message.reply(t(_lang(db_user), "group.image_private_only"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())

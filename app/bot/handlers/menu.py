@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardRemove
 
 from app.bot.keyboards.admin_kb import get_admin_main_kb
 from app.bot.keyboards.inline import (
@@ -226,7 +226,7 @@ async def handle_group_ai_command(
 ):
     lang = _user_lang(db_user)
     if not command.args:
-        return await message.reply(t(lang, "group.command_help"), parse_mode="HTML")
+        return await message.reply(t(lang, "group.command_help"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
 
     decision = group_policy_service.evaluate(
         group_id=message.chat.id,
@@ -235,9 +235,9 @@ async def handle_group_ai_command(
         lang=lang,
     )
     if not decision.allowed:
-        return await message.reply(decision.reason, parse_mode="HTML")
+        return await message.reply(decision.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
 
-    processing_msg = await message.reply(t(lang, "group.thinking"), parse_mode="HTML")
+    processing_msg = await message.reply(t(lang, "group.thinking"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
     result = await chat_orchestrator.process_message(
         user_id=db_user.id,
         prompt=command.args,
@@ -264,4 +264,4 @@ async def command_private_help(message: Message, db_user: User) -> None:
 @menu_router.message(Command("group_help"), F.chat.type.in_({"group", "supergroup"}))
 async def command_group_help(message: Message, db_user: User) -> None:
     lang = _user_lang(db_user)
-    await message.reply(_group_help_text(lang), parse_mode="HTML")
+    await message.reply(_group_help_text(lang), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())

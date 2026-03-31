@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import CallbackQuery, Message, URLInputFile
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove, URLInputFile
 
 from app.bot.keyboards.inline import get_language_picker_keyboard
 from app.bot.keyboards.reply import get_main_menu
@@ -30,6 +30,14 @@ def _main_menu_text(lang: str, first_name: str, is_admin: bool) -> str:
 @base_router.message(CommandStart())
 async def cmd_start(message: Message, command: CommandObject, chat_repo: ChatRepository) -> None:
     if message.from_user is None:
+        return
+
+    if message.chat.type in {"group", "supergroup"}:
+        await message.answer(
+            t("fa", "group.private_only"),
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove(),
+        )
         return
 
     user = await chat_repo.get_or_create_user(
@@ -99,6 +107,13 @@ async def cb_set_language(callback: CallbackQuery, chat_repo: ChatRepository) ->
 @base_router.message(Command("new"))
 async def cmd_new(message: Message, chat_repo: ChatRepository, db_user: User | None = None) -> None:
     if message.from_user is None:
+        return
+    if message.chat.type in {"group", "supergroup"}:
+        await message.answer(
+            t(db_user.language if db_user and db_user.language else "fa", "group.private_only"),
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove(),
+        )
         return
     lang = db_user.language if db_user and db_user.language else "fa"
     success = await chat_repo.reset_active_conversation(message.from_user.id)

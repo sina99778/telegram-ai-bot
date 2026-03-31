@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardRemove
 
 from app.core.enums import FeatureName
 from app.core.i18n import t
@@ -95,9 +95,9 @@ async def handle_group_message(
     prompt = message.text or ""
     decision = group_policy_service.evaluate(group_id=message.chat.id, user_id=db_user.id, prompt=prompt, lang=lang)
     if not decision.allowed:
-        return await message.reply(decision.reason, parse_mode="HTML")
+        return await message.reply(decision.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
 
-    processing_msg = await message.reply(t(lang, "group.thinking"), parse_mode="HTML")
+    processing_msg = await message.reply(t(lang, "group.thinking"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
     result = await chat_orchestrator.process_message(
         user_id=db_user.id,
         prompt=prompt,

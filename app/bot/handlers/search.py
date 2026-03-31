@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardRemove
 
 from app.core.i18n import t
 from app.db.models import User
@@ -43,9 +43,9 @@ async def handle_group_search(
     lang = _lang(db_user)
     query = (command.args or "").strip()
     if not query:
-        await message.reply(t(lang, "search.usage_group"), parse_mode="HTML")
+        await message.reply(t(lang, "search.usage_group"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
         return
 
-    processing_msg = await message.reply(t(lang, "search.processing"), parse_mode="HTML")
+    processing_msg = await message.reply(t(lang, "search.processing"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
     result = await search_service.search_for_group(user=db_user, group_id=message.chat.id, query=query)
     await processing_msg.edit_text(result.text, parse_mode="HTML")
