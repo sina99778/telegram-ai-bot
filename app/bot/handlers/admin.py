@@ -266,7 +266,9 @@ async def process_add_credit_amount(message: Message, session: AsyncSession, sta
             wallet_type=wallet_type,
         )
         user = await service.get_user_details(target_tg_id)
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Admin action failed: {e}", exc_info=True)
         await session.rollback()
         await state.clear()
         return await message.answer(_admin_action_error(lang), reply_markup=get_back_to_admin_kb(lang, back=back_cb))
@@ -316,7 +318,9 @@ async def process_vip_days(message: Message, session: AsyncSession, state: FSMCo
     try:
         await service.grant_vip_to_user(message.from_user.id, target_tg_id, int(message.text))
         user = await service.get_user_details(target_tg_id)
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Admin action failed: {e}", exc_info=True)
         await session.rollback()
         await state.clear()
         return await message.answer(_admin_action_error(lang), reply_markup=get_back_to_admin_kb(lang, back=back_cb))
