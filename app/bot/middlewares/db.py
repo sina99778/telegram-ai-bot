@@ -32,6 +32,8 @@ from app.services.queue.queue_service import QueueService
 from app.services.chat.orchestrator import ChatOrchestrator
 from app.services.chat.image_orchestrator import ImageOrchestrator
 from app.services.chat.group_policy import GroupPolicyService
+from app.services.search.search_service import SearchService
+from app.services.usage.quota_service import QuotaService
 
 class DbSessionMiddleware(BaseMiddleware):
     """Opens an ``AsyncSession`` before the handler runs and guarantees
@@ -97,11 +99,15 @@ class DbSessionMiddleware(BaseMiddleware):
             )
             data["chat_orchestrator"] = chat_orchestrator
             data["group_policy_service"] = GroupPolicyService()
+            quota_service = QuotaService(session)
+            data["quota_service"] = quota_service
+            data["search_service"] = SearchService(session=session, router=router, quota_service=quota_service)
 
             image_orchestrator = ImageOrchestrator(
                 session=session,
                 billing=billing,
-                router=router
+                router=router,
+                quota_service=quota_service,
             )
             data["image_orchestrator"] = image_orchestrator
 

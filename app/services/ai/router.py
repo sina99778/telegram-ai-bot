@@ -37,12 +37,12 @@ class ModelRouter:
             raise ValueError(f"Feature '{feature_name.value}' is disabled or missing from configuration.")
         return config
 
-    async def route_text_request(self, feature_name: FeatureName, prompt: str, history: List[AIMessage], persona: str, language: str) -> AIResponse:
+    async def route_text_request(self, feature_name: FeatureName, prompt: str, history: List[AIMessage], persona: str, language: str, *, enable_search: bool = False) -> AIResponse:
         """Handles text requests enforcing FeatureConfig constraints and fallback policies."""
         config = await self._get_feature_config(feature_name)
-        return await self.route_text_request_with_config(config, prompt, history, persona, language)
+        return await self.route_text_request_with_config(config, prompt, history, persona, language, enable_search=enable_search)
 
-    async def route_text_request_with_config(self, config: FeatureConfig, prompt: str, history: List[AIMessage], persona: str, language: str) -> AIResponse:
+    async def route_text_request_with_config(self, config: FeatureConfig, prompt: str, history: List[AIMessage], persona: str, language: str, *, enable_search: bool = False) -> AIResponse:
         """Processes requests utilizing an explicit pre-resolved Configuration object."""
         # 2. Select Provider dynamically
         provider = self.providers.get(config.provider)
@@ -66,7 +66,8 @@ class ModelRouter:
                 model_name=target_model,
                 messages=messages,
                 system_instruction=system_instruction,
-                max_tokens=config.max_output_tokens
+                max_tokens=config.max_output_tokens,
+                enable_search=enable_search,
             )
         except Exception as e:
             # Policy-aware Fallback Logic Evaluation
@@ -76,7 +77,8 @@ class ModelRouter:
                     model_name=config.fallback_model_name,
                     messages=messages,
                     system_instruction=system_instruction,
-                    max_tokens=config.max_output_tokens
+                    max_tokens=config.max_output_tokens,
+                    enable_search=enable_search,
                 )
             else:
                 logger.error(f"Routing completely failed on model {target_model} with no fallbacks.", exc_info=True)

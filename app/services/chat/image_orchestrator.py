@@ -15,6 +15,7 @@ from app.core.i18n import t
 from app.db.models import FeatureConfig, User
 from app.services.ai.router import ModelRouter
 from app.services.billing.billing_service import BillingService
+from app.services.usage.quota_service import QuotaService
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +27,20 @@ class ImageResult:
     tokens_used: int = 0
     error_message: Optional[str] = None
     error_code: Optional[str] = None
+    quota_limit: Optional[int] = None
+    quota_used: Optional[int] = None
 
 
 class ImageOrchestrator:
-    def __init__(self, session: AsyncSession, billing: BillingService, router: ModelRouter):
+    def __init__(self, session: AsyncSession, billing: BillingService, router: ModelRouter, quota_service: QuotaService):
         self.session = session
         self.billing = billing
         self.router = router
+        self.quota_service = quota_service
+
+    @staticmethod
+    def _is_premium_image_user(user: User) -> bool:
+        return user.has_active_vip or user.is_premium or user.vip_credits > 0
 
     async def _get_feature_config(self) -> FeatureConfig:
         stmt = select(FeatureConfig).where(FeatureConfig.name == FeatureName.IMAGE_GEN)
@@ -43,8 +51,11 @@ class ImageOrchestrator:
 
     async def process_image_request(self, user_id: int, prompt: str) -> ImageResult:
         user = await self.session.get(User, user_id)
+        if not user:
+            return ImageResult(image_bytes=None, success=False, error_message=t("en", "errors.user_not_found"), error_code="user_not_found")
         lang = user.language if user and user.language else "fa"
         reference_id = f"img_{uuid.uuid4().hex}"
+        premium_user = self._is_premium_image_user(user)
 
         try:
             config = await self._get_feature_config()
@@ -60,32 +71,45 @@ class ImageOrchestrator:
                 error_code="feature_unavailable",
             )
 
-        try:
-            await self.billing.deduct_credits(
-                user_id=user_id,
-                amount=cost,
-                reference_type="image_generation",
-                reference_id=reference_id,
-                description="AI Image Generation",
-                wallet_type=WalletType.VIP,
-            )
-        except InsufficientCreditsError:
-            await self.session.rollback()
-            return ImageResult(
-                image_bytes=None,
-                success=False,
-                error_message=t(lang, "image.insufficient_vip", cost=cost),
-                error_code="insufficient_vip",
-            )
-        except Exception as exc:
-            logger.error("Image billing deduction error: %s", exc, exc_info=True)
-            await self.session.rollback()
-            return ImageResult(
-                image_bytes=None,
-                success=False,
-                error_message=t(lang, "image.billing_temporary_issue"),
-                error_code="billing_error",
-            )
+        if not premium_user:
+            free_status = await self.quota_service.get_free_image_status_for_user(user.id)
+            if free_status.exhausted:
+                return ImageResult(
+                    image_bytes=None,
+                    success=False,
+                    error_message=t(lang, "image.free_quota_exhausted", limit=free_status.limit),
+                    error_code="free_quota_exhausted",
+                    quota_limit=free_status.limit,
+                    quota_used=free_status.used,
+                )
+
+        if premium_user:
+            try:
+                await self.billing.deduct_credits(
+                    user_id=user_id,
+                    amount=cost,
+                    reference_type="image_generation",
+                    reference_id=reference_id,
+                    description="AI Image Generation",
+                    wallet_type=WalletType.VIP,
+                )
+            except InsufficientCreditsError:
+                await self.session.rollback()
+                return ImageResult(
+                    image_bytes=None,
+                    success=False,
+                    error_message=t(lang, "image.insufficient_vip", cost=cost),
+                    error_code="insufficient_vip",
+                )
+            except Exception as exc:
+                logger.error("Image billing deduction error: %s", exc, exc_info=True)
+                await self.session.rollback()
+                return ImageResult(
+                    image_bytes=None,
+                    success=False,
+                    error_message=t(lang, "image.billing_temporary_issue"),
+                    error_code="billing_error",
+                )
 
         try:
             image_bytes = await asyncio.wait_for(
@@ -105,17 +129,18 @@ class ImageOrchestrator:
             error_message = t(lang, "image.failed_refunded")
 
         if not image_bytes:
-            try:
-                await self.billing.refund_credits(
-                    user_id=user_id,
-                    original_reference_id=reference_id,
-                    amount=cost,
-                    description="Refund: Image generation failed",
-                    wallet_type=WalletType.VIP,
-                )
-            except Exception as exc:
-                logger.error("Image refund failure for %s: %s", reference_id, exc, exc_info=True)
-                await self.session.rollback()
+            if premium_user:
+                try:
+                    await self.billing.refund_credits(
+                        user_id=user_id,
+                        original_reference_id=reference_id,
+                        amount=cost,
+                        description="Refund: Image generation failed",
+                        wallet_type=WalletType.VIP,
+                    )
+                except Exception as exc:
+                    logger.error("Image refund failure for %s: %s", reference_id, exc, exc_info=True)
+                    await self.session.rollback()
             return ImageResult(
                 image_bytes=None,
                 success=False,
@@ -123,7 +148,16 @@ class ImageOrchestrator:
                 error_code="generation_failed",
             )
 
+        quota_limit = None
+        quota_used = None
+        if not premium_user:
+            updated_status = await self.quota_service.consume_free_image_for_user(user.id)
+            quota_limit = updated_status.limit
+            quota_used = updated_status.used
+
         return ImageResult(
             image_bytes=image_bytes,
             success=True,
+            quota_limit=quota_limit,
+            quota_used=quota_used,
         )

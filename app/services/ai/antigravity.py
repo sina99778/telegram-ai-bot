@@ -35,6 +35,8 @@ class AntigravityProvider(BaseAIProvider):
             config.system_instruction = system_instruction
         if max_tokens:
             config.max_output_tokens = max_tokens
+        if kwargs.get("enable_search"):
+            config.tools = [{"google_search": {}}]
 
         try:
             response = await self.client.aio.models.generate_content(

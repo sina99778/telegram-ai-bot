@@ -34,11 +34,17 @@ class Settings(BaseSettings):
     # Final text models
     GEMINI_MODEL_NORMAL: str = "gemini-3.1-flash-lite-preview"
     GEMINI_MODEL_PRO: str = "gemini-3.1-pro-preview"
+    GEMINI_MODEL_IMAGE: str = "gemini-3.1-flash-image-preview"
     NORMAL_MESSAGE_COST: int = 1
     VIP_MESSAGE_COST: int = 1
     VIP_DEPLETION_BEHAVIOR: str = "fallback_to_normal"
     DEFAULT_DAILY_NORMAL_CREDITS: int = 50
     VIP_DEFAULT_PLAN_NAME: str = "vip"
+    SEARCH_DAILY_FREE_LIMIT: int = 5
+    SEARCH_DAILY_PAID_LIMIT: int = 15
+    SEARCH_DAILY_VIP_LIMIT: int = 25
+    SEARCH_DAILY_GROUP_LIMIT: int = 7
+    FREE_DAILY_IMAGE_LIMIT: int = 5
     GROUP_DAILY_GROUP_CAP: int = 150
     GROUP_DAILY_USER_CAP: int = 12
     GROUP_USER_COOLDOWN_SECONDS: int = 5

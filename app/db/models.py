@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional, Any, List
 from sqlalchemy import BigInteger, String, Float, Boolean, Text, CheckConstraint, Index, Enum as SQLEnum, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -257,3 +257,20 @@ class UserPromo(Base):
     promo_id: Mapped[int] = mapped_column(ForeignKey("promo_codes.id"), index=True)
     used_count: Mapped[int] = mapped_column(default=0)
     redeemed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class FeatureUsage(Base):
+    __tablename__ = "feature_usage"
+    __table_args__ = (
+        UniqueConstraint("scope_type", "scope_id", "feature", "reset_date", name="uq_feature_usage_scope_feature_reset"),
+        Index("ix_feature_usage_scope_feature", "scope_type", "scope_id", "feature"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    scope_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    scope_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    feature: Mapped[str] = mapped_column(String(50), nullable=False)
+    used_count: Mapped[int] = mapped_column(default=0)
+    reset_date: Mapped[date] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

@@ -33,6 +33,7 @@ SUPPORT_BTNS = _labels("buttons.support")
 CODES_BTNS = _labels("buttons.codes")
 ADMIN_BTNS = _labels("buttons.admin")
 LANG_BTNS = _labels("buttons.language")
+SEARCH_BTNS = _labels("buttons.search")
 TOOLS_BTNS = _labels("buttons.chat") | _labels("buttons.image")
 
 
@@ -133,6 +134,12 @@ async def menu_support(message: Message, db_user: User) -> None:
     await message.answer(t(lang, "support.menu"), parse_mode="HTML", reply_markup=get_support_menu_keyboard(lang))
 
 
+@menu_router.message(F.text.in_(SEARCH_BTNS), F.chat.type == "private")
+async def menu_search_help(message: Message, db_user: User) -> None:
+    lang = _user_lang(db_user)
+    await message.answer(t(lang, "search.helper"), parse_mode="HTML")
+
+
 @menu_router.message(F.text.in_(CODES_BTNS), F.chat.type == "private")
 async def menu_codes_legacy(message: Message, chat_repo: ChatRepository) -> None:
     user = await chat_repo.ensure_daily_credits(message.from_user.id)
@@ -153,7 +160,7 @@ async def menu_tools(message: Message, chat_repo: ChatRepository) -> None:
     if message.text in _labels("buttons.chat"):
         await message.answer(t(lang, "tools.chat_hint"))
         return
-    if user and (user.has_active_vip or user.vip_credits >= 10):
+    if user and (user.has_active_vip or user.is_premium or user.vip_credits > 0):
         await message.answer(
             t(lang, "tools.image_private"),
             parse_mode="HTML",

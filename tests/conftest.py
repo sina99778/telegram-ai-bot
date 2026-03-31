@@ -42,6 +42,7 @@ async def setup_base_data(db_session, user_factory):
     user = await user_factory(telegram_id=123456789, balance=100)
     flash = FeatureConfig(name=FeatureName.FLASH_TEXT, credit_cost=1, is_active=True, provider="antigravity", model_name="flash")
     pro = FeatureConfig(name=FeatureName.PRO_TEXT, credit_cost=7, is_active=True, provider="antigravity", model_name="pro")
+    image = FeatureConfig(name=FeatureName.IMAGE_GEN, credit_cost=10, is_active=True, provider="antigravity", model_name="gemini-3.1-flash-image-preview")
     
     # Pre-populate a transaction to satisfy foreign keys/logic
     tx = PaymentTransaction(
@@ -49,6 +50,6 @@ async def setup_base_data(db_session, user_factory):
         amount=0, currency="USD", credits_granted=0, status="COMPLETED",
         idempotency_key=str(uuid.uuid4())
     )
-    db_session.add_all([flash, pro, tx])
+    db_session.add_all([flash, pro, image, tx])
     await db_session.commit()
     return {"user_id": user.id, "telegram_id": user.telegram_id}

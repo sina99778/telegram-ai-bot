@@ -33,7 +33,7 @@ async def handle_image_command(message: Message, command: CommandObject, db_user
 
     if not result.success:
         topup_kb = None
-        if result.error_code in {"insufficient_vip", "billing_error"}:
+        if result.error_code in {"insufficient_vip", "billing_error", "free_quota_exhausted"}:
             topup_kb = InlineKeyboardMarkup(
                 inline_keyboard=[[InlineKeyboardButton(text=t(lang, "buttons.top_up"), callback_data="wallet:open")]]
             )
@@ -50,5 +50,5 @@ async def handle_image_command(message: Message, command: CommandObject, db_user
 
 
 @image_router.message(Command("image"), F.chat.type.in_({"group", "supergroup"}))
-async def handle_group_image_command(message: Message):
-    await message.reply(t("en", "group.image_private_only"), parse_mode="HTML")
+async def handle_group_image_command(message: Message, db_user: User):
+    await message.reply(t(_lang(db_user), "group.image_private_only"), parse_mode="HTML")

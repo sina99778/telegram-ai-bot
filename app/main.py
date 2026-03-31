@@ -22,8 +22,9 @@ from fastapi import FastAPI, Header, HTTPException, Request, status
 
 from app.bot.dispatcher import get_dispatcher
 from app.core.config import settings
+from app.core.enums import FeatureName
 from app.db.session import engine, AsyncSessionLocal
-from app.db.models import Base
+from app.db.models import Base, FeatureConfig
 from app.db.repositories.chat_repo import ChatRepository
 from app.services.purchase.catalog import PurchaseKind, get_product, parse_order_id
 from app.core.i18n import t
@@ -44,6 +45,52 @@ dp = get_dispatcher()
 # ── Startup validation ───────────────────────
 _CRITICAL_SETTINGS = ("BOT_TOKEN", "WEBHOOK_URL", "WEBHOOK_SECRET", "GEMINI_API_KEY",
                        "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_HOST")
+
+
+async def _ensure_feature_configs() -> None:
+    async with AsyncSessionLocal() as session:
+        defaults = {
+            FeatureName.FLASH_TEXT: {
+                "credit_cost": settings.NORMAL_MESSAGE_COST,
+                "description": "Standard private and group chat",
+                "provider": "antigravity",
+                "model_name": settings.GEMINI_MODEL_NORMAL,
+                "fallback_model_name": None,
+            },
+            FeatureName.PRO_TEXT: {
+                "credit_cost": settings.VIP_MESSAGE_COST,
+                "description": "VIP private chat",
+                "provider": "antigravity",
+                "model_name": settings.GEMINI_MODEL_PRO,
+                "fallback_model_name": settings.GEMINI_MODEL_NORMAL,
+            },
+            FeatureName.IMAGE_GEN: {
+                "credit_cost": 10,
+                "description": "Image generation",
+                "provider": "antigravity",
+                "model_name": settings.GEMINI_MODEL_IMAGE,
+                "fallback_model_name": None,
+            },
+        }
+
+        for feature_name, values in defaults.items():
+            feature = await session.get(FeatureConfig, feature_name)
+            if not feature:
+                session.add(FeatureConfig(name=feature_name, is_active=True, **values))
+                continue
+
+            if feature_name == FeatureName.IMAGE_GEN and feature.model_name != settings.GEMINI_MODEL_IMAGE:
+                feature.model_name = settings.GEMINI_MODEL_IMAGE
+            if feature_name == FeatureName.FLASH_TEXT and feature.model_name != settings.GEMINI_MODEL_NORMAL:
+                feature.model_name = settings.GEMINI_MODEL_NORMAL
+            if feature_name == FeatureName.PRO_TEXT and feature.model_name != settings.GEMINI_MODEL_PRO:
+                feature.model_name = settings.GEMINI_MODEL_PRO
+            if not feature.provider:
+                feature.provider = values["provider"]
+            if feature.credit_cost is None:
+                feature.credit_cost = values["credit_cost"]
+
+        await session.commit()
 
 def _validate_settings() -> list[str]:
     """Return names of required settings that are empty or placeholder."""
@@ -93,6 +140,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables verified / created")
+        await _ensure_feature_configs()
     except Exception as db_err:
         logger.critical("DATABASE CONNECTION FAILED: %s", db_err, exc_info=True)
         raise

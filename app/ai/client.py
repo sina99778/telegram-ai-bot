@@ -121,7 +121,13 @@ class GeminiClient:
         model_to_use = override_model or self._default_model
         if model_to_use not in self._allowed_text_models:
             raise AIException(f"Unsupported text model requested: {model_to_use}")
-        return await self._call_with_retries(messages, model_to_use)
+        return await self._call_with_retries(messages, model_to_use, enable_search=False)
+
+    async def generate_search_response(self, messages: list[types.Content], override_model: str | None = None) -> str:
+        model_to_use = override_model or self._default_model
+        if model_to_use not in self._allowed_text_models:
+            raise AIException(f"Unsupported text model requested: {model_to_use}")
+        return await self._call_with_retries(messages, model_to_use, enable_search=True)
 
     @retry(
         stop=stop_after_attempt(3),
@@ -130,14 +136,15 @@ class GeminiClient:
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=False,
     )
-    async def _call_with_retries(self, messages: list[types.Content], model: str) -> str:
+    async def _call_with_retries(self, messages: list[types.Content], model: str, enable_search: bool = False) -> str:
         try:
+            config = types.GenerateContentConfig()
+            if enable_search:
+                config.tools = [{"google_search": {}}]
             response = await self._client.aio.models.generate_content(
                 model=model,
                 contents=messages,
-                config=types.GenerateContentConfig(
-                    tools=[{"google_search": {}}]
-                )
+                config=config,
             )
             return response.text or ""
         except Exception as exc:
@@ -154,7 +161,7 @@ class GeminiClient:
         logger = logging.getLogger(__name__)
 
         try:
-            target_model = 'gemini-3-pro-image-preview'
+            target_model = settings.GEMINI_MODEL_IMAGE
             result = await self._client.aio.models.generate_content(
                 model=target_model,
                 contents=prompt,
