@@ -91,6 +91,9 @@ async def handle_group_message(
     if not await _is_group_trigger(message):
         return
 
+    if not group_policy_service.claim_message(group_id=message.chat.id, message_id=message.message_id):
+        return
+
     lang = _lang(db_user)
     prompt = message.text or ""
     decision = group_policy_service.evaluate(group_id=message.chat.id, user_id=db_user.id, prompt=prompt, lang=lang)

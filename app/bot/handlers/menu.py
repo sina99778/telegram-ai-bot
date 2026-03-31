@@ -228,6 +228,9 @@ async def handle_group_ai_command(
     if not command.args:
         return await message.reply(t(lang, "group.command_help"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
 
+    if not group_policy_service.claim_message(group_id=message.chat.id, message_id=message.message_id):
+        return
+
     decision = group_policy_service.evaluate(
         group_id=message.chat.id,
         user_id=db_user.id,
