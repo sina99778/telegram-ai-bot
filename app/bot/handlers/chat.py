@@ -172,6 +172,10 @@ async def handle_group_message(
     logger.info("Group pipeline: dedup passed chat_id=%s message_id=%s", message.chat.id, message.message_id)
 
     lang = _lang(db_user)
+    anomaly = await AbuseGuardService.check_group_request(group_id=message.chat.id, lang=lang)
+    if not anomaly.allowed:
+        logger.info("Group pipeline: blocked by anomaly containment chat_id=%s message_id=%s", message.chat.id, message.message_id)
+        return await message.reply(anomaly.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
     prompt = message.text or ""
     decision = group_policy_service.evaluate(group_id=message.chat.id, user_id=db_user.id, prompt=prompt, lang=lang)
     if not decision.allowed:

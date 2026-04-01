@@ -41,6 +41,8 @@ Production-focused Telegram bot built with FastAPI, aiogram, SQLAlchemy, Redis/A
 - Private chat, `/search`, `/image`, callbacks, and admin mutations have cooldown / burst protections
 - Abuse throttling is Redis-backed so cooldowns and temporary blocks survive restarts and work across multiple app instances
 - Repeated expensive failures can trigger a short temporary block to reduce suspicious retry storms
+- Lightweight anomaly rules detect sustained user/group spikes, expensive command bursts, callback spam, and failure storms
+- Anomaly containment can escalate into temporary user/group or feature-specific holds with TTL-based automatic recovery
 - Prompt and query lengths are capped before expensive provider calls
 - Logs include user/chat/feature/status metadata for billing, search, image, admin actions, and group execution without logging secrets
 - Broadcasts run in batches with failure abort protection and an explicit stop control
@@ -122,6 +124,16 @@ Important keys:
 - `ABUSE_FAILURE_WINDOW_SECONDS=600`
 - `ABUSE_FAILURE_THRESHOLD=5`
 - `ABUSE_TEMP_BLOCK_SECONDS=600`
+- `USER_ANOMALY_WINDOW_SECONDS=300`
+- `USER_ANOMALY_REQUEST_THRESHOLD=30`
+- `GROUP_ANOMALY_WINDOW_SECONDS=300`
+- `GROUP_ANOMALY_REQUEST_THRESHOLD=40`
+- `EXPENSIVE_COMMAND_BURST_WINDOW_SECONDS=180`
+- `EXPENSIVE_COMMAND_BURST_THRESHOLD=4`
+- `CALLBACK_SPAM_WINDOW_SECONDS=60`
+- `CALLBACK_SPAM_THRESHOLD=25`
+- `ANOMALY_CONTAIN_SECONDS=1800`
+- `FEATURE_CONTAIN_SECONDS=900`
 - `WEBHOOK_MAX_BODY_BYTES=262144`
 - `NOWPAYMENTS_WEBHOOK_MAX_BODY_BYTES=131072`
 - `FORCED_JOIN_REQUIRED=false`

@@ -392,10 +392,26 @@ class AdminService:
             if user_id in image_users_map
         ]
 
+        active_anomalies = await AbuseGuardService.list_active_anomalies(limit=15)
+        feature_anomaly_counts: dict[str, int] = {}
+        contained_users: list[dict[str, Any]] = []
+        contained_groups: list[dict[str, Any]] = []
+        for item in active_anomalies:
+            feature_anomaly_counts[item["feature"]] = feature_anomaly_counts.get(item["feature"], 0) + 1
+            if item["scope_type"] == "user":
+                contained_users.append(item)
+            elif item["scope_type"] == "group":
+                contained_groups.append(item)
+
         return {
             "top_users": top_users,
             "top_groups": top_groups,
             "top_images": top_images,
             "temp_blocks": await AbuseGuardService.list_temp_blocks(limit=10),
             "recent_failures": await AbuseGuardService.list_recent_failures(limit=10),
+            "active_anomalies": active_anomalies,
+            "contained_users": contained_users[:10],
+            "contained_groups": contained_groups[:10],
+            "recent_spikes": active_anomalies[:10],
+            "feature_anomaly_counts": feature_anomaly_counts,
         }

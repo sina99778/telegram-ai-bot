@@ -140,6 +140,16 @@ def _format_stats(stats: dict) -> str:
 def _format_abuse_overview(lang: str, overview: dict) -> str:
     lines = [t(lang, "admin.abuse_title"), ""]
 
+    lines.append(t(lang, "admin.abuse_active_anomalies"))
+    if overview["active_anomalies"]:
+        for item in overview["active_anomalies"][:5]:
+            lines.append(
+                f"- {item['scope_type']} <code>{item['scope_id']}</code> / {item['feature']} · <code>{item['count']}</code> · {item['ttl']}s"
+            )
+    else:
+        lines.append("- <code>none</code>")
+    lines.append("")
+
     lines.append(t(lang, "admin.abuse_top_users"))
     if overview["top_users"]:
         for item in overview["top_users"]:
@@ -168,6 +178,38 @@ def _format_abuse_overview(lang: str, overview: dict) -> str:
     if overview["temp_blocks"]:
         for item in overview["temp_blocks"]:
             lines.append(f"- {item['subject']} <code>{item['subject_id']}</code> · {item['ttl']}s")
+    else:
+        lines.append("- <code>none</code>")
+    lines.append("")
+
+    lines.append(t(lang, "admin.abuse_contained_users"))
+    if overview["contained_users"]:
+        for item in overview["contained_users"][:5]:
+            lines.append(f"- <code>{item['scope_id']}</code> / {item['feature']} · {item['ttl']}s")
+    else:
+        lines.append("- <code>none</code>")
+    lines.append("")
+
+    lines.append(t(lang, "admin.abuse_contained_groups"))
+    if overview["contained_groups"]:
+        for item in overview["contained_groups"][:5]:
+            lines.append(f"- <code>{item['scope_id']}</code> / {item['feature']} · {item['ttl']}s")
+    else:
+        lines.append("- <code>none</code>")
+    lines.append("")
+
+    lines.append(t(lang, "admin.abuse_feature_counts"))
+    if overview["feature_anomaly_counts"]:
+        for feature, count in sorted(overview["feature_anomaly_counts"].items(), key=lambda item: item[1], reverse=True):
+            lines.append(f"- {feature}: <code>{count}</code>")
+    else:
+        lines.append("- <code>none</code>")
+    lines.append("")
+
+    lines.append(t(lang, "admin.abuse_recent_spikes"))
+    if overview["recent_spikes"]:
+        for item in overview["recent_spikes"][:5]:
+            lines.append(f"- {item['scope_type']} <code>{item['scope_id']}</code> / {item['feature']} · <code>{item['count']}</code>")
     else:
         lines.append("- <code>none</code>")
     lines.append("")

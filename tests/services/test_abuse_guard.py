@@ -90,6 +90,9 @@ class FakeRedis:
     async def exists(self, key):
         return 1 if key in self.strings else 0
 
+    async def get(self, key):
+        return self.strings.get(key)
+
     async def delete(self, *keys):
         removed = 0
         for key in keys:
@@ -144,3 +147,14 @@ async def test_repeated_failures_trigger_temp_block():
 
     decision = await AbuseGuardService.check_image(user_id=user_id, lang="en")
     assert decision.allowed is False
+
+
+@pytest.mark.asyncio
+async def test_group_request_anomaly_creates_active_flag():
+    group_id = 789
+    for _ in range(40):
+        decision = await AbuseGuardService.check_group_request(group_id=group_id, lang="en")
+    assert decision.allowed is True
+
+    anomalies = await AbuseGuardService.list_active_anomalies()
+    assert any(item["scope_type"] == "group" and item["scope_id"] == group_id for item in anomalies)

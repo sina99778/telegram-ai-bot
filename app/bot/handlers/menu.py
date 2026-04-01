@@ -17,6 +17,7 @@ from app.core.i18n import t
 from app.db.models import User
 from app.db.repositories.chat_repo import ChatRepository
 from app.bot.handlers.chat import finalize_group_response
+from app.services.security.abuse_guard import AbuseGuardService
 from app.services.chat.group_policy import GroupPolicyService
 from app.services.chat.orchestrator import ChatOrchestrator
 import logging
@@ -236,6 +237,11 @@ async def handle_group_ai_command(
         logger.info("Group pipeline: duplicate skipped chat_id=%s message_id=%s", message.chat.id, message.message_id)
         return
     logger.info("Group pipeline: dedup passed chat_id=%s message_id=%s", message.chat.id, message.message_id)
+
+    anomaly = await AbuseGuardService.check_group_request(group_id=message.chat.id, lang=lang)
+    if not anomaly.allowed:
+        logger.info("Group pipeline: blocked by anomaly containment chat_id=%s message_id=%s", message.chat.id, message.message_id)
+        return await message.reply(anomaly.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
 
     decision = group_policy_service.evaluate(
         group_id=message.chat.id,
