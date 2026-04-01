@@ -57,6 +57,23 @@ Production-focused Telegram bot built with FastAPI, aiogram, SQLAlchemy, Redis/A
 - Retention cleanup keeps only the most recent `BACKUP_RETENTION_COUNT` local backup files
 - Raw `.env` and other secret files are not included by default
 
+### Restore Guide
+
+Start with a staging or maintenance window first, then restore from a dump like this:
+
+```bash
+gunzip -c backup_2026-04-01_03-00.sql.gz | psql -h <host> -p <port> -U <user> -d <database>
+```
+
+Always verify the target database before restoring, because the dump is created with `--clean --if-exists`.
+
+## Help UX
+
+- Private chat help is available from `📘 Guide` and `/help`
+- Group help is available from `/help` or `/group_help`
+- `/search` is the only live web-search entry point
+- `/image` explains the free daily image limit for free users and VIP-credit billing for premium usage
+
 ## Search & Image Policy
 
 - `/search` is the only live-search entry point

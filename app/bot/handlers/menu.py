@@ -46,19 +46,10 @@ def _user_lang(user: User | None) -> str:
     return user.language if user and user.language else "fa"
 
 
-def _profile_text(user: User) -> str:
-    lang = _user_lang(user)
-    vip_until = user.active_vip_until
-    vip_status = (
-        t(lang, "profile.vip.active_until", date=vip_until.strftime("%Y-%m-%d"))
-        if user.has_active_vip and vip_until
-        else (t(lang, "profile.vip.active") if user.has_active_vip else t(lang, "profile.vip.inactive"))
-    )
-
-
 def _private_help_text(lang: str, *, is_admin: bool) -> str:
     lines = [
         t(lang, "help.private.title"),
+        t(lang, "help.private.subtitle"),
         "",
         t(lang, "help.private.chat"),
         t(lang, "help.private.search"),
@@ -78,29 +69,14 @@ def _group_help_text(lang: str) -> str:
     return "\n".join(
         [
             t(lang, "help.group.title"),
+            t(lang, "help.group.subtitle"),
             "",
             t(lang, "help.group.trigger"),
+            t(lang, "help.group.ai"),
             t(lang, "help.group.search"),
             t(lang, "help.group.limit"),
             t(lang, "help.group.cooldown"),
             t(lang, "help.group.private_only"),
-        ]
-    )
-    current_model = str(user.preferred_text_model).upper() if user.preferred_text_model else "FLASH"
-    memory = t(lang, "profile.memory.keep") if user.keep_chat_history else t(lang, "profile.memory.clear")
-    display_name = user.first_name or user.username or "unknown"
-    return "\n".join(
-        [
-            t(lang, "profile.title"),
-            "",
-            t(lang, "profile.name", value=display_name),
-            t(lang, "profile.id", value=user.telegram_id),
-            "",
-            t(lang, "profile.normal_credits", value=user.normal_credits),
-            t(lang, "profile.vip_credits", value=user.vip_credits),
-            t(lang, "profile.vip_status", value=vip_status),
-            t(lang, "profile.model", value=current_model),
-            t(lang, "profile.memory", value=memory),
         ]
     )
 
