@@ -8,6 +8,8 @@ All values are loaded from environment variables (or a ``.env`` file).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -81,6 +83,15 @@ class Settings(BaseSettings):
     BROADCAST_BATCH_PAUSE_SECONDS: float = 1.5
     BROADCAST_FAILURE_THRESHOLD: int = 50
     BROADCAST_MAX_RECIPIENTS: int = 5000
+    BACKUP_ENABLED: bool = False
+    BACKUP_SCHEDULE_TIME: str = "03:00"
+    BACKUP_TIMEZONE: str = "UTC"
+    BACKUP_RETENTION_COUNT: int = 7
+    BACKUP_DIRECTORY: str = "./backups"
+    BACKUP_RECIPIENT_TELEGRAM_ID: int = 0
+    BACKUP_PGDUMP_PATH: str = "pg_dump"
+    BACKUP_CHECK_INTERVAL_SECONDS: int = 60
+    BACKUP_LOCK_SECONDS: int = 3600
     SYSTEM_PROMPT: str = "You are a helpful AI assistant."
 
     # ── PostgreSQL ────────────────────────────
@@ -88,6 +99,7 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "postgres"
     POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
 
     # ── Admin ─────────────────────────────────
     ADMIN_IDS: str = ""  # Comma-separated Telegram user IDs, e.g. "123456,789012"
@@ -106,9 +118,13 @@ class Settings(BaseSettings):
         """Build the asyncpg connection string from individual components."""
         return (
             f"postgresql+asyncpg://{self.POSTGRES_USER}:"
-            f"{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:5432/"
+            f"{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/"
             f"{self.POSTGRES_DB}"
         )
+
+    @property
+    def backup_directory_path(self) -> Path:
+        return Path(self.BACKUP_DIRECTORY).expanduser()
 
     # ── Pydantic configuration ────────────────
     model_config = SettingsConfigDict(

@@ -10,6 +10,7 @@ Run locally::
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -29,6 +30,7 @@ from app.core.enums import FeatureName
 from app.db.session import engine, AsyncSessionLocal
 from app.db.models import Base, FeatureConfig
 from app.db.repositories.chat_repo import ChatRepository
+from app.services.backup.service import DailyBackupService
 from app.services.purchase.catalog import PurchaseKind, get_product, parse_order_id
 from app.core.i18n import t
 from datetime import datetime, timedelta, timezone
@@ -43,6 +45,7 @@ logging.basicConfig(
 
 # ── Shared references (populated during lifespan) ──
 bot: Bot | None = None
+backup_scheduler_task: asyncio.Task | None = None
 dp = get_dispatcher()
 
 # ── Startup validation ───────────────────────
@@ -140,7 +143,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
       • Close the bot's HTTP session.
       • Dispose of the SQLAlchemy async engine (release connection pool).
     """
-    global bot
+    global bot, backup_scheduler_task
 
     # ── Validate env vars ─────────────────────
     missing = _validate_settings()
@@ -185,9 +188,34 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         # Continue startup so /health is reachable for diagnostics.
 
+    if settings.BACKUP_ENABLED:
+        backup_recipient = DailyBackupService.resolve_recipient_id()
+        if backup_recipient is None:
+            logger.warning("Daily backup is enabled but no backup recipient is configured; scheduler not started")
+        else:
+            backup_scheduler_task = asyncio.create_task(DailyBackupService.run_scheduler(bot))
+            logger.info(
+                "Daily backup scheduler launched time=%s timezone=%s retention=%s recipient=%s",
+                settings.BACKUP_SCHEDULE_TIME,
+                settings.BACKUP_TIMEZONE,
+                settings.BACKUP_RETENTION_COUNT,
+                backup_recipient,
+            )
+
     yield  # ← application is running
 
     # ── Shutdown ──────────────────────────────
+    if backup_scheduler_task:
+        backup_scheduler_task.cancel()
+        try:
+            await backup_scheduler_task
+        except asyncio.CancelledError:
+            logger.info("Daily backup scheduler stopped")
+        except Exception:
+            logger.warning("Could not stop daily backup scheduler cleanly", exc_info=True)
+        finally:
+            backup_scheduler_task = None
+
     if bot:
         try:
             await bot.delete_webhook(drop_pending_updates=True)

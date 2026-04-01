@@ -48,6 +48,15 @@ Production-focused Telegram bot built with FastAPI, aiogram, SQLAlchemy, Redis/A
 - Broadcasts run in batches with failure abort protection and an explicit stop control
 - Forced-join checks are configuration-driven instead of hardcoded and log operational failures clearly
 
+## Daily Owner Backup
+
+- Daily PostgreSQL backups can run automatically in the app process
+- Backups are compressed to `.sql.gz` and sent only to `BACKUP_RECIPIENT_TELEGRAM_ID`
+- If no dedicated backup recipient is configured, the first configured admin in `ADMIN_IDS` is used
+- Backups use Redis lock/day markers to avoid duplicate sends across multiple instances
+- Retention cleanup keeps only the most recent `BACKUP_RETENTION_COUNT` local backup files
+- Raw `.env` and other secret files are not included by default
+
 ## Search & Image Policy
 
 - `/search` is the only live-search entry point
@@ -142,9 +151,19 @@ Important keys:
 - `BROADCAST_BATCH_PAUSE_SECONDS=1.5`
 - `BROADCAST_FAILURE_THRESHOLD=50`
 - `BROADCAST_MAX_RECIPIENTS=5000`
+- `BACKUP_ENABLED=false`
+- `BACKUP_SCHEDULE_TIME=03:00`
+- `BACKUP_TIMEZONE=Europe/Berlin`
+- `BACKUP_RETENTION_COUNT=7`
+- `BACKUP_DIRECTORY=./backups`
+- `BACKUP_RECIPIENT_TELEGRAM_ID=123456789`
+- `BACKUP_PGDUMP_PATH=pg_dump`
+- `BACKUP_CHECK_INTERVAL_SECONDS=60`
+- `BACKUP_LOCK_SECONDS=3600`
 - `ADMIN_IDS=123456789,987654321`
 - `NOWPAYMENTS_API_KEY=...`
 - `NOWPAYMENTS_IPN_SECRET=...`
+- `POSTGRES_PORT=5432`
 
 ## Migrations
 
