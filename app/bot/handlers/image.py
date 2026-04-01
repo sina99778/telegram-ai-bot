@@ -4,9 +4,11 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyKeyboardRemove
 
+from app.core.config import settings
 from app.core.i18n import t
 from app.db.models import User
 from app.services.chat.image_orchestrator import ImageOrchestrator
+from app.services.security.abuse_guard import AbuseGuardService
 
 image_router = Router()
 
@@ -22,16 +24,25 @@ async def handle_image_command(message: Message, command: CommandObject, db_user
         return await message.reply(t(lang, "image.prompt_required"), parse_mode="HTML")
 
     prompt = command.args
+    length_check = AbuseGuardService.enforce_prompt_length(prompt=prompt, limit=settings.IMAGE_MAX_PROMPT_LENGTH, lang=lang)
+    if not length_check.allowed:
+        return await message.reply(length_check.reason, parse_mode="HTML")
+    throttle = AbuseGuardService.check_image(user_id=db_user.id, lang=lang)
+    if not throttle.allowed:
+        return await message.reply(throttle.reason, parse_mode="HTML")
+
     safe_prompt = html.escape(prompt)
     processing_msg = await message.reply(t(lang, "image.generating"), parse_mode="HTML")
 
     try:
         result = await image_orchestrator.process_image_request(user_id=db_user.id, prompt=prompt)
     except Exception:
+        AbuseGuardService.record_failure(subject="image", subject_id=db_user.id)
         await processing_msg.edit_text(t(lang, "image.billing_temporary_issue"), parse_mode="HTML")
         return
 
     if not result.success:
+        AbuseGuardService.record_failure(subject="image", subject_id=db_user.id)
         topup_kb = None
         if result.error_code in {"insufficient_vip", "billing_error", "free_quota_exhausted"}:
             topup_kb = InlineKeyboardMarkup(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import uuid
 from dataclasses import dataclass
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums import FeatureName, LedgerEntryType, PromoCodeKind, WalletType
 from app.db.models import CreditLedger, FeatureConfig, PaymentTransaction, PromoCode, User, UserPromo
 from app.services.billing.billing_service import BillingService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -42,6 +45,13 @@ class AdminService:
             raise ValueError("Credit amount must be positive.")
 
         user = await self.get_user_details(target_telegram_id)
+        logger.info(
+            "Admin credit grant requested admin_telegram_id=%s target_telegram_id=%s wallet=%s amount=%s",
+            admin_telegram_id,
+            target_telegram_id,
+            wallet_type.value,
+            amount,
+        )
         return await self.billing.add_credits(
             user_id=user.id,
             amount=amount,
@@ -54,6 +64,12 @@ class AdminService:
 
     async def grant_vip_to_user(self, admin_telegram_id: int, target_telegram_id: int, days: int) -> datetime:
         user = await self.get_user_details(target_telegram_id)
+        logger.info(
+            "Admin VIP grant requested admin_telegram_id=%s target_telegram_id=%s days=%s",
+            admin_telegram_id,
+            target_telegram_id,
+            days,
+        )
         return await self.billing.grant_vip_access(
             user_id=user.id,
             days=days,
@@ -67,6 +83,7 @@ class AdminService:
         user.is_banned = banned
         await self.session.commit()
         await self.session.refresh(user)
+        logger.info("Admin ban status changed target_telegram_id=%s banned=%s", target_telegram_id, banned)
         return user
 
     async def update_feature_price(self, feature_name: FeatureName, new_cost: int) -> bool:
@@ -192,6 +209,13 @@ class AdminService:
         self.session.add(promo)
         await self.session.commit()
         await self.session.refresh(promo)
+        logger.info(
+            "Admin promo created admin_telegram_id=%s code=%s kind=%s max_uses=%s",
+            admin_telegram_id,
+            promo.code,
+            promo.kind.value,
+            promo.max_uses,
+        )
         return promo
 
     async def list_promo_codes(self, active_only: bool = True, limit: int = 20) -> list[PromoCode]:
@@ -208,6 +232,7 @@ class AdminService:
         promo.is_active = False
         await self.session.commit()
         await self.session.refresh(promo)
+        logger.info("Admin promo disabled promo_id=%s code=%s", promo_id, promo.code)
         return promo
 
     async def get_promo_usage(self, promo_id: int) -> dict[str, Any]:

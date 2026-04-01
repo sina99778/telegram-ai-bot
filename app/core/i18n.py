@@ -200,6 +200,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "packs.vip_1800": "🏆 Pro VIP Pack • 1800 credits • $14.99",
         "packs.access_30d": "🔓 VIP Access • 30 days • $2.99",
         "packs.access_90d": "🌟 VIP Access • 90 days • $7.99",
+        "abuse.private_chat_rate_limited": "You're sending messages a bit too quickly. Please wait a few seconds and try again.",
+        "abuse.search_rate_limited": "Please wait about {seconds} seconds before running another live search.",
+        "abuse.image_rate_limited": "Please wait about {seconds} seconds before generating another image.",
+        "abuse.callback_rate_limited": "A quick second - that was a little too fast.",
+        "abuse.admin_rate_limited": "Please wait about {seconds} seconds before repeating that admin action.",
+        "abuse.prompt_too_long": "That request is too long for this bot right now. Please keep it under {limit} characters.",
+        "abuse.temp_blocked": "I'm pausing requests from this account for about {seconds} seconds because of repeated failures. Please try again shortly.",
     },
     "fa": {
         "buttons.chat": "💬 چت",
@@ -394,6 +401,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "packs.vip_1800": "🏆 پکیج VIP پرو • 1800 اعتبار • $14.99",
         "packs.access_30d": "🔓 دسترسی VIP • 30 روز • $2.99",
         "packs.access_90d": "🌟 دسترسی VIP • 90 روز • $7.99",
+        "abuse.private_chat_rate_limited": "پیام‌ها کمی زیادی پشت‌سرهم ارسال شده‌اند. لطفاً چند ثانیه صبر کنید و دوباره تلاش کنید.",
+        "abuse.search_rate_limited": "لطفاً حدود {seconds} ثانیه صبر کنید و بعد دوباره جستجوی زنده انجام دهید.",
+        "abuse.image_rate_limited": "لطفاً حدود {seconds} ثانیه صبر کنید و بعد دوباره تصویر بسازید.",
+        "abuse.callback_rate_limited": "یک لحظه صبر کنید - این کار کمی زیادی سریع تکرار شد.",
+        "abuse.admin_rate_limited": "لطفاً حدود {seconds} ثانیه صبر کنید و بعد دوباره این عملیات مدیریتی را انجام دهید.",
+        "abuse.prompt_too_long": "این درخواست برای ربات فعلاً زیادی طولانی است. لطفاً آن را زیر {limit} کاراکتر نگه دارید.",
+        "abuse.temp_blocked": "به‌خاطر چند خطای پشت‌سرهم، درخواست‌های این حساب موقتاً برای حدود {seconds} ثانیه متوقف شده‌اند. کمی بعد دوباره امتحان کنید.",
     },
 }
 

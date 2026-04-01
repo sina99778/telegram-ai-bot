@@ -122,12 +122,26 @@ class BillingService:
     ) -> int:
         if amount <= 0:
             raise ValueError("Deduction amount must be positive.")
+        logger.info(
+            "Billing deduct requested user_id=%s wallet=%s amount=%s reference_type=%s",
+            user_id,
+            wallet_type.value,
+            amount,
+            reference_type,
+        )
 
         await self._ensure_reference_is_unique(user_id, reference_type, reference_id)
         user = await self._get_user_for_update(user_id)
 
         balance_before = self._get_wallet_balance(user, wallet_type)
         if balance_before < amount:
+            logger.warning(
+                "Billing deduct blocked insufficient funds user_id=%s wallet=%s required=%s available=%s",
+                user_id,
+                wallet_type.value,
+                amount,
+                balance_before,
+            )
             raise InsufficientCreditsError(required=amount, available=balance_before)
 
         balance_after = balance_before - amount
@@ -154,6 +168,15 @@ class BillingService:
             await self.session.rollback()
             raise DuplicateTransactionError(f"Transaction {reference_id} already processed concurrently.") from exc
 
+        logger.info(
+            "Billing deduct committed user_id=%s wallet=%s amount=%s balance_after=%s reference_type=%s",
+            user_id,
+            wallet_type.value,
+            amount,
+            self._get_wallet_balance(user, wallet_type),
+            reference_type,
+        )
+
         return self._get_wallet_balance(user, wallet_type)
 
     async def add_credits(
@@ -168,6 +191,14 @@ class BillingService:
     ) -> int:
         if amount <= 0:
             raise ValueError("Addition amount must be positive.")
+        logger.info(
+            "Billing add requested user_id=%s wallet=%s amount=%s entry_type=%s reference_type=%s",
+            user_id,
+            wallet_type.value,
+            amount,
+            entry_type.value,
+            reference_type,
+        )
 
         await self._ensure_reference_is_unique(user_id, reference_type, reference_id)
         user = await self._get_user_for_update(user_id)
@@ -199,6 +230,15 @@ class BillingService:
             await self.session.rollback()
             raise DuplicateTransactionError(f"Transaction {reference_id} already processed concurrently.") from exc
 
+        logger.info(
+            "Billing add committed user_id=%s wallet=%s amount=%s balance_after=%s entry_type=%s",
+            user_id,
+            wallet_type.value,
+            amount,
+            self._get_wallet_balance(user, wallet_type),
+            entry_type.value,
+        )
+
         return self._get_wallet_balance(user, wallet_type)
 
     async def refund_credits(
@@ -220,6 +260,13 @@ class BillingService:
             raise ValueError(f"Original transaction {original_reference_id} is not a usage transaction.")
 
         refund_ref_id = f"refund_{original_reference_id}"
+        logger.info(
+            "Billing refund requested user_id=%s wallet=%s amount=%s original_reference_id=%s",
+            user_id,
+            (wallet_type or original_ledger.wallet_type).value,
+            amount,
+            original_reference_id,
+        )
         return await self.add_credits(
             user_id=user_id,
             amount=amount,
@@ -240,6 +287,7 @@ class BillingService:
     ) -> datetime:
         if days <= 0:
             raise ValueError("VIP days must be positive.")
+        logger.info("Billing VIP grant requested user_id=%s days=%s reference_type=%s", user_id, days, reference_type)
 
         await self._ensure_reference_is_unique(user_id, reference_type, reference_id)
         user = await self._get_user_for_update(user_id)
@@ -276,5 +324,7 @@ class BillingService:
         except IntegrityError as exc:
             await self.session.rollback()
             raise DuplicateTransactionError(f"Transaction {reference_id} already processed concurrently.") from exc
+
+        logger.info("Billing VIP grant committed user_id=%s expires_at=%s", user_id, new_expiry.isoformat())
 
         return new_expiry

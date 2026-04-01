@@ -133,8 +133,22 @@ class ChatOrchestrator:
         if not user:
             return ChatResult(text=t("en", "chat.user_not_found"), success=False, error_message="user_not_found")
         lang = user.language or "fa"
+        logger.info(
+            "Chat request user_id=%s requested_feature=%s allow_vip=%s prompt_length=%s",
+            user_id,
+            feature_name.value,
+            allow_vip,
+            len(prompt),
+        )
 
         policy = await self._resolve_policy(user, feature_name, allow_vip=allow_vip)
+        logger.info(
+            "Chat policy resolved user_id=%s feature=%s wallet=%s cost=%s",
+            user_id,
+            policy.feature_name.value,
+            policy.wallet_type.value,
+            policy.cost,
+        )
         if policy.notice and not policy.depleted_vip_fallback and policy.wallet_type == WalletType.VIP:
             return ChatResult(
                 text=policy.notice,

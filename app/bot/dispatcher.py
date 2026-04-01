@@ -9,6 +9,7 @@ from app.bot.handlers.menu import menu_router
 from app.bot.handlers.callbacks import callback_router
 from app.bot.handlers.image import image_router
 from app.bot.handlers.search import search_router
+from app.bot.middlewares.callback_throttle import CallbackThrottleMiddleware
 from app.bot.middlewares.db import DbSessionMiddleware
 from app.bot.middlewares.forced_join import CheckUserStatusMiddleware
 
@@ -17,6 +18,7 @@ def get_dispatcher() -> Dispatcher:
 
     dp.update.outer_middleware(DbSessionMiddleware())
     dp.message.outer_middleware(CheckUserStatusMiddleware())
+    dp.callback_query.outer_middleware(CallbackThrottleMiddleware())
 
     # Order matters! Specific routers first, general catch-all (chat_router) last.
     dp.include_router(admin_router)

@@ -10,6 +10,9 @@ Run locally::
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator
@@ -45,6 +48,23 @@ dp = get_dispatcher()
 # ── Startup validation ───────────────────────
 _CRITICAL_SETTINGS = ("BOT_TOKEN", "WEBHOOK_URL", "WEBHOOK_SECRET", "GEMINI_API_KEY",
                        "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_HOST")
+
+
+def _verify_nowpayments_signature(raw_body: bytes, signature: str | None) -> bool:
+    if not settings.NOWPAYMENTS_IPN_SECRET:
+        return True
+    if not signature:
+        return False
+    try:
+        normalized = json.dumps(json.loads(raw_body.decode("utf-8")), separators=(",", ":"), sort_keys=True)
+    except Exception:
+        return False
+    expected = hmac.new(
+        settings.NOWPAYMENTS_IPN_SECRET.encode("utf-8"),
+        normalized.encode("utf-8"),
+        hashlib.sha512,
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
 
 
 async def _ensure_feature_configs() -> None:
@@ -129,7 +149,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         raise SystemExit(1)
 
     # ── Startup ───────────────────────────────
-    logger.info("Initializing bot with token ending in ...%s", settings.BOT_TOKEN[-6:])
+    logger.info("Initializing bot with configured Telegram token")
     bot = Bot(
         token=settings.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
@@ -220,8 +240,18 @@ async def telegram_webhook(
         )
 
     # ── Parse & dispatch the update ───────────
-    payload: dict[str, Any] = await request.json()
+    raw_body = await request.body()
+    if len(raw_body) > settings.WEBHOOK_MAX_BODY_BYTES:
+        logger.warning("Webhook request rejected: body too large bytes=%s", len(raw_body))
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Payload too large")
+
+    try:
+        payload: dict[str, Any] = json.loads(raw_body)
+    except json.JSONDecodeError:
+        logger.warning("Webhook request rejected: invalid JSON")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
     update = Update.model_validate(payload, context={"bot": bot})
+    logger.info("Telegram webhook accepted update_id=%s", getattr(update, "update_id", None))
 
     # Feed the update into aiogram's dispatcher pipeline.
     await dp.feed_update(bot=bot, update=update)
@@ -241,13 +271,32 @@ async def health_check() -> dict[str, str]:
 #  NowPayments IPN webhook
 # ──────────────────────────────────────────────
 @app.post("/nowpayments-webhook")
-async def nowpayments_webhook(request: Request) -> dict[str, str]:
+async def nowpayments_webhook(
+    request: Request,
+    x_nowpayments_sig: str | None = Header(default=None),
+) -> dict[str, str]:
     """Receives IPN from NowPayments when a payment is successful."""
-    payload = await request.json()
-    logger.info(f"Received NowPayments Webhook: {payload}")
+    raw_body = await request.body()
+    if len(raw_body) > settings.NOWPAYMENTS_WEBHOOK_MAX_BODY_BYTES:
+        logger.warning("NowPayments webhook rejected: body too large bytes=%s", len(raw_body))
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Payload too large")
+    if not _verify_nowpayments_signature(raw_body, x_nowpayments_sig):
+        logger.warning("NowPayments webhook rejected: invalid signature")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
+    try:
+        payload = json.loads(raw_body)
+    except json.JSONDecodeError:
+        logger.warning("NowPayments webhook rejected: invalid JSON")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
 
     payment_status = payload.get("payment_status")
     order_id = payload.get("order_id") # This is our telegram_id
+    logger.info(
+        "NowPayments webhook accepted status=%s order_id=%s payment_id=%s",
+        payment_status,
+        order_id,
+        payload.get("payment_id"),
+    )
 
     if payment_status == "finished" and order_id:
         try:
@@ -341,9 +390,9 @@ async def nowpayments_webhook(request: Request) -> dict[str, str]:
                             parse_mode="HTML"
                         )
                     except Exception as e:
-                        logger.error(f"Could not send VIP confirmation to {telegram_id}: {e}")
+                        logger.error("Could not send purchase confirmation to telegram_id=%s: %s", telegram_id, e)
                         
         except Exception as e:
-            logger.error(f"Error processing NowPayments IPN: {e}", exc_info=True)
+            logger.error("Error processing NowPayments IPN order_id=%s: %s", order_id, e, exc_info=True)
 
     return {"status": "ok"}

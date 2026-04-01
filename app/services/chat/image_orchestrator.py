@@ -56,6 +56,7 @@ class ImageOrchestrator:
         lang = user.language if user and user.language else "fa"
         reference_id = f"img_{uuid.uuid4().hex}"
         premium_user = self._is_premium_image_user(user)
+        logger.info("Image request user_id=%s premium=%s", user_id, premium_user)
 
         try:
             config = await self._get_feature_config()
@@ -74,6 +75,7 @@ class ImageOrchestrator:
         if not premium_user:
             free_status = await self.quota_service.get_free_image_status_for_user(user.id)
             if free_status.exhausted:
+                logger.warning("Free image quota exhausted user_id=%s used=%s limit=%s", user_id, free_status.used, free_status.limit)
                 return ImageResult(
                     image_bytes=None,
                     success=False,
@@ -95,6 +97,7 @@ class ImageOrchestrator:
                 )
             except InsufficientCreditsError:
                 await self.session.rollback()
+                logger.warning("Image request blocked insufficient VIP credits user_id=%s cost=%s", user_id, cost)
                 return ImageResult(
                     image_bytes=None,
                     success=False,
@@ -154,6 +157,9 @@ class ImageOrchestrator:
             updated_status = await self.quota_service.consume_free_image_for_user(user.id)
             quota_limit = updated_status.limit
             quota_used = updated_status.used
+            logger.info("Free image success user_id=%s quota_used=%s/%s", user_id, quota_used, quota_limit)
+        else:
+            logger.info("Premium image success user_id=%s wallet=vip cost=%s", user_id, cost)
 
         return ImageResult(
             image_bytes=image_bytes,

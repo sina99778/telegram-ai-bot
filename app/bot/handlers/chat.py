@@ -12,6 +12,7 @@ from app.core.i18n import t
 from app.db.models import User
 from app.services.chat.group_policy import GroupPolicyService
 from app.services.chat.orchestrator import ChatOrchestrator
+from app.services.security.abuse_guard import AbuseGuardService
 
 chat_router = Router()
 logger = logging.getLogger(__name__)
@@ -111,6 +112,16 @@ def _lang(user: User | None) -> str:
 @chat_router.message(F.text & ~F.text.startswith("/") & (F.chat.type == "private"))
 async def handle_user_message(message: Message, db_user: User, chat_orchestrator: ChatOrchestrator):
     lang = _lang(db_user)
+    prompt = message.text or ""
+    prompt_check = AbuseGuardService.enforce_prompt_length(prompt=prompt, limit=settings.PRIVATE_MAX_PROMPT_LENGTH, lang=lang)
+    if not prompt_check.allowed:
+        return await message.reply(prompt_check.reason, parse_mode="HTML")
+
+    throttle = AbuseGuardService.check_private_chat(user_id=db_user.id, lang=lang)
+    if not throttle.allowed:
+        return await message.reply(throttle.reason, parse_mode="HTML")
+
+    logger.info("Private chat accepted user_id=%s chat_id=%s", db_user.id, message.chat.id)
     processing_msg = await message.reply(t(lang, "chat.thinking"), parse_mode="HTML")
 
     raw_mode = db_user.preferred_text_model or getattr(db_user, "subscription_plan", None) or "flash"
@@ -124,12 +135,13 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
 
     result = await chat_orchestrator.process_message(
         user_id=db_user.id,
-        prompt=message.text,
+        prompt=prompt,
         feature_name=feature_name,
     )
 
     try:
         if not result.success:
+            AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
             await _safe_edit(processing_msg, result.text or result.error_message or t(lang, "errors.delivery_failed"))
             return
 
@@ -139,6 +151,7 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
             await processing_msg.delete()
             await send_chunked_message(message, result.text)
     except Exception:
+        AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
         await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
 
 

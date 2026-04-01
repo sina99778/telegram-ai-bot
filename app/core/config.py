@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     
     # ── Payments ──────────────────────────────
     NOWPAYMENTS_API_KEY: str = ""
+    NOWPAYMENTS_IPN_SECRET: str = ""
 
     # ── Redis (Background ARQ) ────────────────
     REDIS_URL: str = "redis://redis:6379/0"
@@ -45,11 +46,25 @@ class Settings(BaseSettings):
     SEARCH_DAILY_VIP_LIMIT: int = 25
     SEARCH_DAILY_GROUP_LIMIT: int = 7
     FREE_DAILY_IMAGE_LIMIT: int = 5
+    PRIVATE_MAX_PROMPT_LENGTH: int = 4000
+    SEARCH_MAX_QUERY_LENGTH: int = 500
+    IMAGE_MAX_PROMPT_LENGTH: int = 1000
     GROUP_DAILY_GROUP_CAP: int = 150
     GROUP_DAILY_USER_CAP: int = 12
     GROUP_USER_COOLDOWN_SECONDS: int = 15
     GROUP_RESPONSE_TIMEOUT_SECONDS: int = 45
     GROUP_MAX_PROMPT_LENGTH: int = 1000
+    PRIVATE_MESSAGE_BURST_LIMIT: int = 6
+    PRIVATE_MESSAGE_BURST_WINDOW_SECONDS: int = 30
+    SEARCH_COMMAND_COOLDOWN_SECONDS: int = 10
+    IMAGE_COMMAND_COOLDOWN_SECONDS: int = 20
+    CALLBACK_COOLDOWN_SECONDS: int = 1
+    ADMIN_ACTION_COOLDOWN_SECONDS: int = 2
+    ABUSE_FAILURE_WINDOW_SECONDS: int = 600
+    ABUSE_FAILURE_THRESHOLD: int = 5
+    ABUSE_TEMP_BLOCK_SECONDS: int = 600
+    WEBHOOK_MAX_BODY_BYTES: int = 262144
+    NOWPAYMENTS_WEBHOOK_MAX_BODY_BYTES: int = 131072
     SYSTEM_PROMPT: str = "You are a helpful AI assistant."
 
     # ── PostgreSQL ────────────────────────────

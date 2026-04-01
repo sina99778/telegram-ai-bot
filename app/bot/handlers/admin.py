@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -28,8 +29,10 @@ from app.core.i18n import t
 from app.db.models import FeatureConfig, User
 from app.services.admin.admin_service import AdminService
 from app.services.billing.billing_service import BillingService
+from app.services.security.abuse_guard import AbuseGuardService
 
 admin_router = Router(name="admin")
+logger = logging.getLogger(__name__)
 
 
 def _lang(user: User | None) -> str:
@@ -81,6 +84,17 @@ def _admin_action_error(lang: str) -> str:
 
 def _admin_saved(lang: str) -> str:
     return t(lang, "admin.action_saved")
+
+
+async def _guard_admin_mutation(*, admin_id: int, lang: str, action: str, callback: CallbackQuery | None = None, message: Message | None = None) -> bool:
+    decision = AbuseGuardService.check_admin_action(admin_id=admin_id, action=action, lang=lang)
+    if decision.allowed:
+        return True
+    if callback:
+        await callback.answer(decision.reason, show_alert=True)
+    elif message:
+        await message.answer(decision.reason)
+    return False
 
 
 def _parse_page_search(parts: list[str]) -> tuple[int, str | None]:
@@ -248,6 +262,8 @@ async def process_add_credit_amount(message: Message, session: AsyncSession, sta
         return
     admin_user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
     lang = _lang(admin_user)
+    if not await _guard_admin_mutation(admin_id=message.from_user.id, lang=lang, action="credit_grant", message=message):
+        return
     if not message.text or not message.text.isdigit():
         return await message.answer(t(lang, "admin.enter_positive_amount"))
 
@@ -267,8 +283,8 @@ async def process_add_credit_amount(message: Message, session: AsyncSession, sta
         )
         user = await service.get_user_details(target_tg_id)
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Admin action failed: {e}", exc_info=True)
+        logger.error("Admin credit action failed admin_id=%s target_tg_id=%s: %s", message.from_user.id, target_tg_id, e, exc_info=True)
+        AbuseGuardService.record_failure(subject="admin_credit_grant", subject_id=message.from_user.id)
         await session.rollback()
         await state.clear()
         return await message.answer(_admin_action_error(lang), reply_markup=get_back_to_admin_kb(lang, back=back_cb))
@@ -306,6 +322,8 @@ async def process_vip_days(message: Message, session: AsyncSession, state: FSMCo
         return
     admin_user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
     lang = _lang(admin_user)
+    if not await _guard_admin_mutation(admin_id=message.from_user.id, lang=lang, action="vip_grant", message=message):
+        return
     if not message.text or not message.text.isdigit():
         return await message.answer(t(lang, "admin.enter_positive_days"))
 
@@ -319,8 +337,8 @@ async def process_vip_days(message: Message, session: AsyncSession, state: FSMCo
         await service.grant_vip_to_user(message.from_user.id, target_tg_id, int(message.text))
         user = await service.get_user_details(target_tg_id)
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Admin action failed: {e}", exc_info=True)
+        logger.error("Admin VIP action failed admin_id=%s target_tg_id=%s: %s", message.from_user.id, target_tg_id, e, exc_info=True)
+        AbuseGuardService.record_failure(subject="admin_vip_grant", subject_id=message.from_user.id)
         await session.rollback()
         await state.clear()
         return await message.answer(_admin_action_error(lang), reply_markup=get_back_to_admin_kb(lang, back=back_cb))
@@ -436,6 +454,10 @@ async def process_code_max_uses_per_user(message: Message, session: AsyncSession
 async def cb_admin_codes_generate(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     if not await _is_admin(callback.from_user.id, session):
         return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    if not await _guard_admin_mutation(admin_id=callback.from_user.id, lang=lang, action="code_create", callback=callback):
+        return
     mode = callback.data.split(":")[-1]
     if mode == "auto":
         await _finalize_code_creation(callback.message, session, state, manual_code=None, admin_telegram_id=callback.from_user.id)
@@ -550,6 +572,9 @@ async def cb_admin_codes_view(callback: CallbackQuery, session: AsyncSession):
 async def cb_admin_codes_disable(callback: CallbackQuery, session: AsyncSession):
     if not await _is_admin(callback.from_user.id, session):
         return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    if not await _guard_admin_mutation(admin_id=callback.from_user.id, lang=_lang(user), action="code_disable", callback=callback):
+        return
     code_id = int(callback.data.split(":")[-1])
     promo = await _admin_service(session).disable_promo_code(code_id)
     await callback.message.edit_text(
@@ -594,6 +619,10 @@ async def cb_admin_broadcast(callback: CallbackQuery, session: AsyncSession, sta
 async def process_broadcast_message(message: Message, session: AsyncSession, state: FSMContext):
     if not await _is_admin(message.from_user.id, session):
         return
+    admin_user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
+    lang = _lang(admin_user)
+    if not await _guard_admin_mutation(admin_id=message.from_user.id, lang=lang, action="broadcast", message=message):
+        return
     stmt = select(User.telegram_id).where(User.telegram_id.is_not(None))
     user_ids = (await session.execute(stmt)).scalars().all()
     success_count = 0
@@ -604,6 +633,7 @@ async def process_broadcast_message(message: Message, session: AsyncSession, sta
             success_count += 1
         except Exception:
             fail_count += 1
+    logger.info("Broadcast finished admin_id=%s success=%s failed=%s", message.from_user.id, success_count, fail_count)
     await state.clear()
     await message.answer(
         "<b>Broadcast Finished</b>\n\n"

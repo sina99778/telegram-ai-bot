@@ -48,7 +48,9 @@ class SearchService:
     async def search_for_user(self, *, user: User, query: str) -> SearchResult:
         lang = user.language or "fa"
         status = await self.quota_service.get_search_status_for_user(user)
+        logger.info("Search request user_id=%s scope=user used=%s limit=%s", user.id, status.used, status.limit)
         if status.exhausted:
+            logger.warning("Search quota exhausted user_id=%s limit=%s", user.id, status.limit)
             return SearchResult(
                 success=False,
                 text=t(lang, "search.quota_exhausted_user", limit=status.limit),
@@ -70,6 +72,7 @@ class SearchService:
             )
 
         updated_status = await self.quota_service.consume_search_for_user(user)
+        logger.info("Search success user_id=%s quota_used=%s/%s", user.id, updated_status.used, updated_status.limit)
         return SearchResult(
             success=True,
             text=text,
@@ -81,7 +84,9 @@ class SearchService:
     async def search_for_group(self, *, user: User, group_id: int, query: str) -> SearchResult:
         lang = user.language or "fa"
         status = await self.quota_service.get_search_status_for_group(group_id)
+        logger.info("Search request user_id=%s scope=group group_id=%s used=%s limit=%s", user.id, group_id, status.used, status.limit)
         if status.exhausted:
+            logger.warning("Group search quota exhausted group_id=%s limit=%s", group_id, status.limit)
             return SearchResult(
                 success=False,
                 text=t(lang, "search.quota_exhausted_group", limit=status.limit),
@@ -103,6 +108,7 @@ class SearchService:
             )
 
         updated_status = await self.quota_service.consume_search_for_group(group_id)
+        logger.info("Group search success group_id=%s quota_used=%s/%s", group_id, updated_status.used, updated_status.limit)
         return SearchResult(
             success=True,
             text=text,

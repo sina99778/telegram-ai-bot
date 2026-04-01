@@ -23,6 +23,7 @@ Production-focused Telegram bot built with FastAPI, aiogram, SQLAlchemy, Redis/A
 - `ImageOrchestrator` handles image billing/deduction/refund with user-safe messaging
 - `SearchService` is a separate grounded-search path so normal chat and live search stay clearly separated
 - `QuotaService` tracks `/search` quotas and free image daily usage
+- `AbuseGuardService` adds burst control, temporary cooloffs after repeated failures, and callback throttling
 - `ChatRepository` handles user/conversation persistence and daily baseline logic
 
 ## Group Rules
@@ -32,6 +33,15 @@ Production-focused Telegram bot built with FastAPI, aiogram, SQLAlchemy, Redis/A
 - Group responses are limited to mention/reply/`/ai` triggers
 - Group `/search` works only through the explicit command and has its own daily group quota
 - Group caps/cooldowns/prompt limits are configurable from env
+
+## Abuse Prevention Hardening
+
+- Telegram webhook requests are body-size limited and still require `WEBHOOK_SECRET`
+- NowPayments IPN requests are body-size limited and can be authenticated with `NOWPAYMENTS_IPN_SECRET`
+- Private chat, `/search`, `/image`, callbacks, and admin mutations have cooldown / burst protections
+- Repeated expensive failures can trigger a short temporary block to reduce suspicious retry storms
+- Prompt and query lengths are capped before expensive provider calls
+- Logs include user/chat/feature/status metadata for billing, search, image, admin actions, and group execution without logging secrets
 
 ## Search & Image Policy
 
@@ -92,12 +102,28 @@ Important keys:
 - `SEARCH_DAILY_VIP_LIMIT=25`
 - `SEARCH_DAILY_GROUP_LIMIT=7`
 - `FREE_DAILY_IMAGE_LIMIT=5`
+- `PRIVATE_MAX_PROMPT_LENGTH=4000`
+- `SEARCH_MAX_QUERY_LENGTH=500`
+- `IMAGE_MAX_PROMPT_LENGTH=1000`
 - `GROUP_DAILY_GROUP_CAP=150`
 - `GROUP_DAILY_USER_CAP=12`
 - `GROUP_USER_COOLDOWN_SECONDS=15`
+- `GROUP_RESPONSE_TIMEOUT_SECONDS=45`
 - `GROUP_MAX_PROMPT_LENGTH=1000`
+- `PRIVATE_MESSAGE_BURST_LIMIT=6`
+- `PRIVATE_MESSAGE_BURST_WINDOW_SECONDS=30`
+- `SEARCH_COMMAND_COOLDOWN_SECONDS=10`
+- `IMAGE_COMMAND_COOLDOWN_SECONDS=20`
+- `CALLBACK_COOLDOWN_SECONDS=1`
+- `ADMIN_ACTION_COOLDOWN_SECONDS=2`
+- `ABUSE_FAILURE_WINDOW_SECONDS=600`
+- `ABUSE_FAILURE_THRESHOLD=5`
+- `ABUSE_TEMP_BLOCK_SECONDS=600`
+- `WEBHOOK_MAX_BODY_BYTES=262144`
+- `NOWPAYMENTS_WEBHOOK_MAX_BODY_BYTES=131072`
 - `ADMIN_IDS=123456789,987654321`
 - `NOWPAYMENTS_API_KEY=...`
+- `NOWPAYMENTS_IPN_SECRET=...`
 
 ## Migrations
 
