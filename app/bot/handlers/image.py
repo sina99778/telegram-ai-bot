@@ -27,7 +27,7 @@ async def handle_image_command(message: Message, command: CommandObject, db_user
     length_check = AbuseGuardService.enforce_prompt_length(prompt=prompt, limit=settings.IMAGE_MAX_PROMPT_LENGTH, lang=lang)
     if not length_check.allowed:
         return await message.reply(length_check.reason, parse_mode="HTML")
-    throttle = AbuseGuardService.check_image(user_id=db_user.id, lang=lang)
+    throttle = await AbuseGuardService.check_image(user_id=db_user.id, lang=lang)
     if not throttle.allowed:
         return await message.reply(throttle.reason, parse_mode="HTML")
 
@@ -37,12 +37,12 @@ async def handle_image_command(message: Message, command: CommandObject, db_user
     try:
         result = await image_orchestrator.process_image_request(user_id=db_user.id, prompt=prompt)
     except Exception:
-        AbuseGuardService.record_failure(subject="image", subject_id=db_user.id)
+        await AbuseGuardService.record_failure(subject="image", subject_id=db_user.id)
         await processing_msg.edit_text(t(lang, "image.billing_temporary_issue"), parse_mode="HTML")
         return
 
     if not result.success:
-        AbuseGuardService.record_failure(subject="image", subject_id=db_user.id)
+        await AbuseGuardService.record_failure(subject="image", subject_id=db_user.id)
         topup_kb = None
         if result.error_code in {"insufficient_vip", "billing_error", "free_quota_exhausted"}:
             topup_kb = InlineKeyboardMarkup(

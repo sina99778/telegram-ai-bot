@@ -117,7 +117,7 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
     if not prompt_check.allowed:
         return await message.reply(prompt_check.reason, parse_mode="HTML")
 
-    throttle = AbuseGuardService.check_private_chat(user_id=db_user.id, lang=lang)
+    throttle = await AbuseGuardService.check_private_chat(user_id=db_user.id, lang=lang)
     if not throttle.allowed:
         return await message.reply(throttle.reason, parse_mode="HTML")
 
@@ -141,7 +141,7 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
 
     try:
         if not result.success:
-            AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+            await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
             await _safe_edit(processing_msg, result.text or result.error_message or t(lang, "errors.delivery_failed"))
             return
 
@@ -151,7 +151,7 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
             await processing_msg.delete()
             await send_chunked_message(message, result.text)
     except Exception:
-        AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
         await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
 
 

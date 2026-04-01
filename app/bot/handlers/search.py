@@ -34,7 +34,7 @@ async def handle_private_search(
     if not length_check.allowed:
         await message.reply(length_check.reason, parse_mode="HTML")
         return
-    throttle = AbuseGuardService.check_search(scope_id=db_user.id, is_group=False, lang=lang)
+    throttle = await AbuseGuardService.check_search(scope_id=db_user.id, is_group=False, lang=lang)
     if not throttle.allowed:
         await message.reply(throttle.reason, parse_mode="HTML")
         return
@@ -42,7 +42,7 @@ async def handle_private_search(
     processing_msg = await message.reply(t(lang, "search.processing"), parse_mode="HTML")
     result = await search_service.search_for_user(user=db_user, query=query)
     if not result.success:
-        AbuseGuardService.record_failure(subject="user_search", subject_id=db_user.id)
+        await AbuseGuardService.record_failure(subject="user_search", subject_id=db_user.id)
     await processing_msg.edit_text(result.text, parse_mode="HTML")
 
 
@@ -67,7 +67,7 @@ async def handle_group_search(
     if not group_policy_service.claim_message(group_id=message.chat.id, message_id=message.message_id):
         return
 
-    throttle = AbuseGuardService.check_search(scope_id=message.chat.id, is_group=True, lang=lang)
+    throttle = await AbuseGuardService.check_search(scope_id=message.chat.id, is_group=True, lang=lang)
     if not throttle.allowed:
         await message.reply(throttle.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
         return
@@ -82,5 +82,5 @@ async def handle_group_search(
     if result.success:
         group_policy_service.record_cooldown(group_id=message.chat.id, user_id=db_user.id)
     else:
-        AbuseGuardService.record_failure(subject="group_search", subject_id=message.chat.id)
+        await AbuseGuardService.record_failure(subject="group_search", subject_id=message.chat.id)
     await processing_msg.edit_text(result.text, parse_mode="HTML")

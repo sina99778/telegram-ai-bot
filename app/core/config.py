@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     ABUSE_TEMP_BLOCK_SECONDS: int = 600
     WEBHOOK_MAX_BODY_BYTES: int = 262144
     NOWPAYMENTS_WEBHOOK_MAX_BODY_BYTES: int = 131072
+    FORCED_JOIN_REQUIRED: bool = False
+    FORCED_JOIN_CHANNEL: str = ""
+    BROADCAST_BATCH_SIZE: int = 25
+    BROADCAST_BATCH_PAUSE_SECONDS: float = 1.5
+    BROADCAST_FAILURE_THRESHOLD: int = 50
+    BROADCAST_MAX_RECIPIENTS: int = 5000
     SYSTEM_PROMPT: str = "You are a helpful AI assistant."
 
     # ── PostgreSQL ────────────────────────────

@@ -7,12 +7,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import FeatureName, LedgerEntryType, PromoCodeKind, WalletType
-from app.db.models import CreditLedger, FeatureConfig, PaymentTransaction, PromoCode, User, UserPromo
+from app.db.models import CreditLedger, FeatureConfig, FeatureUsage, PaymentTransaction, PromoCode, User, UserPromo
 from app.services.billing.billing_service import BillingService
+from app.services.security.abuse_guard import AbuseGuardService
 
 logger = logging.getLogger(__name__)
 
@@ -307,3 +308,94 @@ class AdminService:
         await self.session.commit()
         await self.session.refresh(promo)
         return promo
+
+    async def get_abuse_overview(self) -> dict[str, Any]:
+        ledger_counts = await self.session.execute(
+            select(CreditLedger.user_id, func.count(CreditLedger.id))
+            .where(CreditLedger.reference_type.in_(["chat_message", "image_generation"]))
+            .group_by(CreditLedger.user_id)
+        )
+        usage_counts = await self.session.execute(
+            select(FeatureUsage.scope_id, FeatureUsage.feature, func.sum(FeatureUsage.used_count))
+            .where(FeatureUsage.scope_type == "user")
+            .group_by(FeatureUsage.scope_id, FeatureUsage.feature)
+        )
+
+        user_totals: dict[int, int] = {}
+        for user_id, count in ledger_counts.all():
+            user_totals[user_id] = user_totals.get(user_id, 0) + int(count or 0)
+        for scope_id, _feature, used in usage_counts.all():
+            user_totals[int(scope_id)] = user_totals.get(int(scope_id), 0) + int(used or 0)
+
+        top_user_ids = [user_id for user_id, _count in sorted(user_totals.items(), key=lambda item: item[1], reverse=True)[:5]]
+        users_map = {}
+        if top_user_ids:
+            users = (
+                await self.session.scalars(select(User).where(User.id.in_(top_user_ids)))
+            ).all()
+            users_map = {user.id: user for user in users}
+        top_users = [
+            {
+                "telegram_id": users_map[user_id].telegram_id,
+                "name": users_map[user_id].username or users_map[user_id].first_name or "unknown",
+                "count": count,
+            }
+            for user_id, count in sorted(user_totals.items(), key=lambda item: item[1], reverse=True)[:5]
+            if user_id in users_map
+        ]
+
+        top_groups_result = await self.session.execute(
+            select(FeatureUsage.scope_id, func.sum(FeatureUsage.used_count).label("used"))
+            .where(
+                FeatureUsage.scope_type == "group",
+                FeatureUsage.feature == "search_command",
+            )
+            .group_by(FeatureUsage.scope_id)
+            .order_by(desc("used"))
+            .limit(5)
+        )
+        top_groups = [{"group_id": int(group_id), "count": int(used or 0)} for group_id, used in top_groups_result.all()]
+
+        free_image_result = await self.session.execute(
+            select(FeatureUsage.scope_id, func.sum(FeatureUsage.used_count))
+            .where(
+                FeatureUsage.scope_type == "user",
+                FeatureUsage.feature == "free_image_generation",
+            )
+            .group_by(FeatureUsage.scope_id)
+        )
+        premium_image_result = await self.session.execute(
+            select(CreditLedger.user_id, func.count(CreditLedger.id))
+            .where(CreditLedger.reference_type == "image_generation")
+            .group_by(CreditLedger.user_id)
+        )
+        image_totals: dict[int, int] = {}
+        for scope_id, used in free_image_result.all():
+            image_totals[int(scope_id)] = image_totals.get(int(scope_id), 0) + int(used or 0)
+        for user_id, count in premium_image_result.all():
+            image_totals[int(user_id)] = image_totals.get(int(user_id), 0) + int(count or 0)
+
+        top_image_user_ids = [user_id for user_id, _count in sorted(image_totals.items(), key=lambda item: item[1], reverse=True)[:5]]
+        image_users_map = {}
+        if top_image_user_ids:
+            image_users = (
+                await self.session.scalars(select(User).where(User.id.in_(top_image_user_ids)))
+            ).all()
+            image_users_map = {user.id: user for user in image_users}
+        top_images = [
+            {
+                "telegram_id": image_users_map[user_id].telegram_id,
+                "name": image_users_map[user_id].username or image_users_map[user_id].first_name or "unknown",
+                "count": count,
+            }
+            for user_id, count in sorted(image_totals.items(), key=lambda item: item[1], reverse=True)[:5]
+            if user_id in image_users_map
+        ]
+
+        return {
+            "top_users": top_users,
+            "top_groups": top_groups,
+            "top_images": top_images,
+            "temp_blocks": await AbuseGuardService.list_temp_blocks(limit=10),
+            "recent_failures": await AbuseGuardService.list_recent_failures(limit=10),
+        }

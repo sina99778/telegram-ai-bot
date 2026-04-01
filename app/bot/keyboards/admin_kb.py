@@ -16,11 +16,14 @@ def get_admin_main_kb(lang: str) -> object:
                 InlineKeyboardButton(text=t(lang, "buttons.admin_users"), callback_data="admin:users:page:1"),
             ],
             [
+                InlineKeyboardButton(text=t(lang, "buttons.admin_abuse"), callback_data="admin:abuse"),
                 InlineKeyboardButton(text=t(lang, "buttons.admin_codes"), callback_data="admin:codes"),
-                InlineKeyboardButton(text=t(lang, "buttons.admin_broadcast"), callback_data="admin:broadcast"),
             ],
             [
+                InlineKeyboardButton(text=t(lang, "buttons.admin_broadcast"), callback_data="admin:broadcast"),
                 InlineKeyboardButton(text=t(lang, "buttons.admin_pricing"), callback_data="admin:pricing"),
+            ],
+            [
                 InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"),
             ],
         ]
@@ -152,5 +155,14 @@ def get_code_detail_kb(code_id: int, lang: str) -> object:
                 InlineKeyboardButton(text=t(lang, "buttons.back"), callback_data="admin:codes:list"),
                 InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"),
             ],
+        ]
+    )
+
+
+def get_broadcast_control_kb(lang: str) -> object:
+    return markup(
+        [
+            [InlineKeyboardButton(text=t(lang, "buttons.stop_broadcast"), callback_data="admin:broadcast:stop")],
+            [InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main")],
         ]
     )

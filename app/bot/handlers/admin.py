@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,7 @@ from app.bot.keyboards.admin_kb import (
     get_admin_main_kb,
     get_admin_users_kb,
     get_back_to_admin_kb,
+    get_broadcast_control_kb,
     get_code_detail_kb,
     get_code_generation_kb,
     get_code_kind_kb,
@@ -24,12 +26,14 @@ from app.bot.keyboards.admin_kb import (
     get_user_manage_kb,
 )
 from app.core.access import is_configured_admin
+from app.core.config import settings
 from app.core.enums import PromoCodeKind, WalletType
 from app.core.i18n import t
 from app.db.models import FeatureConfig, User
 from app.services.admin.admin_service import AdminService
 from app.services.billing.billing_service import BillingService
 from app.services.security.abuse_guard import AbuseGuardService
+from app.services.security.broadcast_control import BroadcastControlService
 
 admin_router = Router(name="admin")
 logger = logging.getLogger(__name__)
@@ -87,7 +91,7 @@ def _admin_saved(lang: str) -> str:
 
 
 async def _guard_admin_mutation(*, admin_id: int, lang: str, action: str, callback: CallbackQuery | None = None, message: Message | None = None) -> bool:
-    decision = AbuseGuardService.check_admin_action(admin_id=admin_id, action=action, lang=lang)
+    decision = await AbuseGuardService.check_admin_action(admin_id=admin_id, action=action, lang=lang)
     if decision.allowed:
         return True
     if callback:
@@ -131,6 +135,50 @@ def _format_stats(stats: dict) -> str:
         f"Completed payments: <code>{stats['total_payments_completed']}</code>\n"
         f"Failed payments: <code>{stats['total_payments_failed']}</code>"
     )
+
+
+def _format_abuse_overview(lang: str, overview: dict) -> str:
+    lines = [t(lang, "admin.abuse_title"), ""]
+
+    lines.append(t(lang, "admin.abuse_top_users"))
+    if overview["top_users"]:
+        for item in overview["top_users"]:
+            lines.append(f"- <code>{item['telegram_id']}</code> {item['name']} · <code>{item['count']}</code>")
+    else:
+        lines.append("- <code>none</code>")
+    lines.append("")
+
+    lines.append(t(lang, "admin.abuse_top_groups"))
+    if overview["top_groups"]:
+        for item in overview["top_groups"]:
+            lines.append(f"- <code>{item['group_id']}</code> · <code>{item['count']}</code>")
+    else:
+        lines.append("- <code>none</code>")
+    lines.append("")
+
+    lines.append(t(lang, "admin.abuse_top_images"))
+    if overview["top_images"]:
+        for item in overview["top_images"]:
+            lines.append(f"- <code>{item['telegram_id']}</code> {item['name']} · <code>{item['count']}</code>")
+    else:
+        lines.append("- <code>none</code>")
+    lines.append("")
+
+    lines.append(t(lang, "admin.abuse_temp_blocks"))
+    if overview["temp_blocks"]:
+        for item in overview["temp_blocks"]:
+            lines.append(f"- {item['subject']} <code>{item['subject_id']}</code> · {item['ttl']}s")
+    else:
+        lines.append("- <code>none</code>")
+    lines.append("")
+
+    lines.append(t(lang, "admin.abuse_failures"))
+    if overview["recent_failures"]:
+        for item in overview["recent_failures"]:
+            lines.append(f"- {item['subject']} <code>{item['subject_id']}</code> · <code>{item['count']}</code>")
+    else:
+        lines.append("- <code>none</code>")
+    return "\n".join(lines)
 
 
 async def _render_user_page(
@@ -180,6 +228,21 @@ async def cb_admin_stats(callback: CallbackQuery, session: AsyncSession):
     user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
     lang = _lang(user)
     await callback.message.edit_text(_format_stats(stats), parse_mode="HTML", reply_markup=get_back_to_admin_kb(lang))
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin:abuse")
+async def cb_admin_abuse(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    overview = await _admin_service(session).get_abuse_overview()
+    await callback.message.edit_text(
+        _format_abuse_overview(lang, overview),
+        parse_mode="HTML",
+        reply_markup=get_back_to_admin_kb(lang),
+    )
     await callback.answer()
 
 
@@ -284,7 +347,7 @@ async def process_add_credit_amount(message: Message, session: AsyncSession, sta
         user = await service.get_user_details(target_tg_id)
     except Exception as e:
         logger.error("Admin credit action failed admin_id=%s target_tg_id=%s: %s", message.from_user.id, target_tg_id, e, exc_info=True)
-        AbuseGuardService.record_failure(subject="admin_credit_grant", subject_id=message.from_user.id)
+        await AbuseGuardService.record_failure(subject="admin_credit_grant", subject_id=message.from_user.id)
         await session.rollback()
         await state.clear()
         return await message.answer(_admin_action_error(lang), reply_markup=get_back_to_admin_kb(lang, back=back_cb))
@@ -338,7 +401,7 @@ async def process_vip_days(message: Message, session: AsyncSession, state: FSMCo
         user = await service.get_user_details(target_tg_id)
     except Exception as e:
         logger.error("Admin VIP action failed admin_id=%s target_tg_id=%s: %s", message.from_user.id, target_tg_id, e, exc_info=True)
-        AbuseGuardService.record_failure(subject="admin_vip_grant", subject_id=message.from_user.id)
+        await AbuseGuardService.record_failure(subject="admin_vip_grant", subject_id=message.from_user.id)
         await session.rollback()
         await state.clear()
         return await message.answer(_admin_action_error(lang), reply_markup=get_back_to_admin_kb(lang, back=back_cb))
@@ -623,25 +686,89 @@ async def process_broadcast_message(message: Message, session: AsyncSession, sta
     lang = _lang(admin_user)
     if not await _guard_admin_mutation(admin_id=message.from_user.id, lang=lang, action="broadcast", message=message):
         return
-    stmt = select(User.telegram_id).where(User.telegram_id.is_not(None))
-    user_ids = (await session.execute(stmt)).scalars().all()
+    started = await BroadcastControlService.start(message.from_user.id)
+    if not started:
+        return await message.answer(t(lang, "admin.broadcast_already_running"))
+
+    stmt = select(User.telegram_id).where(User.telegram_id.is_not(None)).limit(settings.BROADCAST_MAX_RECIPIENTS)
+    user_ids = list((await session.execute(stmt)).scalars().all())
     success_count = 0
     fail_count = 0
-    for uid in user_ids:
-        try:
-            await message.send_copy(chat_id=uid)
-            success_count += 1
-        except Exception:
-            fail_count += 1
+    processed = 0
+    logger.info("Broadcast started admin_id=%s total=%s", message.from_user.id, len(user_ids))
+    progress_message = await message.answer(
+        t(lang, "admin.broadcast_started"),
+        parse_mode="HTML",
+        reply_markup=get_broadcast_control_kb(lang),
+    )
+    try:
+        for idx in range(0, len(user_ids), settings.BROADCAST_BATCH_SIZE):
+            if await BroadcastControlService.should_stop(message.from_user.id):
+                logger.warning("Broadcast stopped by admin admin_id=%s processed=%s", message.from_user.id, processed)
+                await progress_message.edit_text(
+                    t(lang, "admin.broadcast_stopped"),
+                    parse_mode="HTML",
+                    reply_markup=get_back_to_admin_kb(lang),
+                )
+                await state.clear()
+                return
+
+            batch = user_ids[idx: idx + settings.BROADCAST_BATCH_SIZE]
+            for uid in batch:
+                try:
+                    await message.send_copy(chat_id=uid)
+                    success_count += 1
+                except Exception:
+                    fail_count += 1
+                processed += 1
+                if fail_count >= settings.BROADCAST_FAILURE_THRESHOLD:
+                    logger.error(
+                        "Broadcast aborted by failure threshold admin_id=%s processed=%s failed=%s",
+                        message.from_user.id,
+                        processed,
+                        fail_count,
+                    )
+                    await progress_message.edit_text(
+                        t(lang, "admin.broadcast_aborted_failures"),
+                        parse_mode="HTML",
+                        reply_markup=get_back_to_admin_kb(lang),
+                    )
+                    await state.clear()
+                    return
+
+            logger.info(
+                "Broadcast batch progress admin_id=%s processed=%s total=%s success=%s failed=%s",
+                message.from_user.id,
+                processed,
+                len(user_ids),
+                success_count,
+                fail_count,
+            )
+            await progress_message.edit_text(
+                t(lang, "admin.broadcast_progress", processed=processed, total=len(user_ids), success=success_count, failed=fail_count),
+                parse_mode="HTML",
+                reply_markup=get_broadcast_control_kb(lang),
+            )
+            await asyncio.sleep(settings.BROADCAST_BATCH_PAUSE_SECONDS)
+    finally:
+        await BroadcastControlService.finish(message.from_user.id)
+
     logger.info("Broadcast finished admin_id=%s success=%s failed=%s", message.from_user.id, success_count, fail_count)
     await state.clear()
-    await message.answer(
-        "<b>Broadcast Finished</b>\n\n"
-        f"Success: <code>{success_count}</code>\n"
-        f"Failed: <code>{fail_count}</code>",
+    await progress_message.edit_text(
+        t(lang, "admin.broadcast_progress", processed=processed, total=len(user_ids), success=success_count, failed=fail_count),
         parse_mode="HTML",
-        reply_markup=get_back_to_admin_kb("fa"),
+        reply_markup=get_back_to_admin_kb(lang),
     )
+
+
+@admin_router.callback_query(F.data == "admin:broadcast:stop")
+async def cb_admin_broadcast_stop(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    await BroadcastControlService.stop(callback.from_user.id)
+    await callback.answer(t(_lang(user), "admin.broadcast_stopped"), show_alert=False)
 
 
 @admin_router.callback_query(F.data == "admin:pricing")

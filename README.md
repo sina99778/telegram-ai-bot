@@ -39,9 +39,12 @@ Production-focused Telegram bot built with FastAPI, aiogram, SQLAlchemy, Redis/A
 - Telegram webhook requests are body-size limited and still require `WEBHOOK_SECRET`
 - NowPayments IPN requests are body-size limited and can be authenticated with `NOWPAYMENTS_IPN_SECRET`
 - Private chat, `/search`, `/image`, callbacks, and admin mutations have cooldown / burst protections
+- Abuse throttling is Redis-backed so cooldowns and temporary blocks survive restarts and work across multiple app instances
 - Repeated expensive failures can trigger a short temporary block to reduce suspicious retry storms
 - Prompt and query lengths are capped before expensive provider calls
 - Logs include user/chat/feature/status metadata for billing, search, image, admin actions, and group execution without logging secrets
+- Broadcasts run in batches with failure abort protection and an explicit stop control
+- Forced-join checks are configuration-driven instead of hardcoded and log operational failures clearly
 
 ## Search & Image Policy
 
@@ -121,6 +124,12 @@ Important keys:
 - `ABUSE_TEMP_BLOCK_SECONDS=600`
 - `WEBHOOK_MAX_BODY_BYTES=262144`
 - `NOWPAYMENTS_WEBHOOK_MAX_BODY_BYTES=131072`
+- `FORCED_JOIN_REQUIRED=false`
+- `FORCED_JOIN_CHANNEL=@yourchannel`
+- `BROADCAST_BATCH_SIZE=25`
+- `BROADCAST_BATCH_PAUSE_SECONDS=1.5`
+- `BROADCAST_FAILURE_THRESHOLD=50`
+- `BROADCAST_MAX_RECIPIENTS=5000`
 - `ADMIN_IDS=123456789,987654321`
 - `NOWPAYMENTS_API_KEY=...`
 - `NOWPAYMENTS_IPN_SECRET=...`

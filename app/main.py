@@ -55,6 +55,7 @@ def _verify_nowpayments_signature(raw_body: bytes, signature: str | None) -> boo
         return True
     if not signature:
         return False
+    signature = signature.strip()
     try:
         normalized = json.dumps(json.loads(raw_body.decode("utf-8")), separators=(",", ":"), sort_keys=True)
     except Exception:
@@ -280,14 +281,26 @@ async def nowpayments_webhook(
     if len(raw_body) > settings.NOWPAYMENTS_WEBHOOK_MAX_BODY_BYTES:
         logger.warning("NowPayments webhook rejected: body too large bytes=%s", len(raw_body))
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Payload too large")
-    if not _verify_nowpayments_signature(raw_body, x_nowpayments_sig):
-        logger.warning("NowPayments webhook rejected: invalid signature")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
     try:
         payload = json.loads(raw_body)
     except json.JSONDecodeError:
         logger.warning("NowPayments webhook rejected: invalid JSON")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
+    signature = x_nowpayments_sig or request.headers.get("x-nowpayments-sig") or request.headers.get("X-Nowpayments-Sig")
+    if signature is None and settings.NOWPAYMENTS_IPN_SECRET:
+        logger.warning(
+            "NowPayments webhook missing signature header payment_id=%s order_id=%s",
+            payload.get("payment_id"),
+            payload.get("order_id"),
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing signature")
+    if not _verify_nowpayments_signature(raw_body, signature):
+        logger.warning(
+            "NowPayments webhook rejected: invalid signature payment_id=%s order_id=%s",
+            payload.get("payment_id"),
+            payload.get("order_id"),
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
 
     payment_status = payload.get("payment_status")
     order_id = payload.get("order_id") # This is our telegram_id
