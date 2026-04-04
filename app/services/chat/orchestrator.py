@@ -18,6 +18,7 @@ from app.services.ai.router import ModelRouter
 from app.services.billing.billing_service import BillingService
 from app.services.chat.memory import MemoryManager
 from app.services.queue.queue_service import QueueService
+from app.services.ai.antigravity import SafetyBlockedError
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +213,30 @@ class ChatOrchestrator:
                 history=history,
                 persona=conversation.persona,
                 language=conversation.language_preference,
+            )
+        except SafetyBlockedError as exc:
+            logger.warning(
+                "AI safety block for user_id=%s category=%s ref=%s",
+                user_id, exc.category, reference_id,
+            )
+            await self.session.rollback()
+            try:
+                await self.billing.refund_credits(
+                    user_id=user_id,
+                    original_reference_id=reference_id,
+                    amount=cost,
+                    description="Refund: Content blocked by safety filter",
+                    wallet_type=policy.wallet_type,
+                )
+            except Exception as refund_exc:
+                logger.error("Safety-block refund failure for %s: %s", reference_id, refund_exc, exc_info=True)
+                await self.session.rollback()
+            return ChatResult(
+                text=t(lang, "abuse.content_blocked"),
+                success=False,
+                error_message="safety_blocked",
+                feature_name=policy.feature_name,
+                wallet_type=policy.wallet_type,
             )
         except Exception as exc:
             logger.error("AI generation failed: %s", exc, exc_info=True)

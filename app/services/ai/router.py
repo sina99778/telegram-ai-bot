@@ -70,6 +70,11 @@ class ModelRouter:
                 enable_search=enable_search,
             )
         except Exception as e:
+            # NEVER retry safety-blocked requests on a fallback model
+            from app.services.ai.antigravity import SafetyBlockedError
+            if isinstance(e, SafetyBlockedError):
+                raise
+
             # Policy-aware Fallback Logic Evaluation
             if config.fallback_model_name:
                 logger.warning(f"Primary model {target_model} failed. Executing fallback policy to {config.fallback_model_name}")

@@ -13,6 +13,7 @@ from app.db.models import User
 from app.services.chat.group_policy import GroupPolicyService
 from app.services.chat.orchestrator import ChatOrchestrator
 from app.services.security.abuse_guard import AbuseGuardService
+from app.services.security.content_filter import ContentFilterService
 
 chat_router = Router()
 logger = logging.getLogger(__name__)
@@ -117,6 +118,11 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
     if not prompt_check.allowed:
         return await message.reply(prompt_check.reason, parse_mode="HTML")
 
+    content_check = ContentFilterService.check_text_prompt(prompt)
+    if not content_check.allowed:
+        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+        return await message.reply(t(lang, "abuse.content_blocked"), parse_mode="HTML")
+
     throttle = await AbuseGuardService.check_private_chat(user_id=db_user.id, lang=lang)
     if not throttle.allowed:
         return await message.reply(throttle.reason, parse_mode="HTML")
@@ -181,6 +187,13 @@ async def handle_group_message(
     if not decision.allowed:
         logger.info("Group pipeline: blocked by policy chat_id=%s message_id=%s", message.chat.id, message.message_id)
         return await message.reply(decision.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+
+    content_check = ContentFilterService.check_text_prompt(prompt)
+    if not content_check.allowed:
+        await AbuseGuardService.record_failure(subject="group_request", subject_id=message.chat.id)
+        logger.warning("Group pipeline: content filter blocked chat_id=%s user_id=%s category=%s", message.chat.id, db_user.id, content_check.category)
+        return await message.reply(t(lang, "abuse.content_blocked"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+
     logger.info("Group pipeline: cooldown/policy passed chat_id=%s message_id=%s", message.chat.id, message.message_id)
 
     processing_msg = await message.reply(t(lang, "group.thinking"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())

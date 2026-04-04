@@ -56,7 +56,7 @@ class AIException(Exception):
 _RETRYABLE_EXCEPTIONS = (
     ConnectionError,
     TimeoutError,
-    Exception,  # Narrow this down once you know exact SDK error types
+    OSError,
 )
 
 
@@ -66,18 +66,33 @@ def _is_retryable(exc: BaseException) -> bool:
     Catches:
       • Network-level errors (ConnectionError, TimeoutError)
       • HTTP 429 (Too Many Requests) and 503 (Service Unavailable)
+
+    Explicitly EXCLUDED (never retry these):
+      • SafetyBlockedError — policy violation, retrying makes it worse
+      • HTTP 400 (Bad Request) — malformed or blocked prompt
+      • HTTP 403 (Forbidden) — access denied / policy violation
     """
+    from app.services.ai.antigravity import SafetyBlockedError
+
+    # NEVER retry safety/policy violations
+    if isinstance(exc, SafetyBlockedError):
+        return False
+
+    # Check for HTTP status codes — never retry 400/403
+    status_code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    if status_code in (400, 403):
+        return False
+    exc_message = str(exc).lower()
+    if any(keyword in exc_message for keyword in ("safety", "blocked", "policy", "prohibited")):
+        return False
+
     # Network-level errors are always retryable
     if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
         return True
 
-    # Check for HTTP status codes embedded in the exception
-    status_code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    # Transient server errors are retryable
     if status_code in (429, 503):
         return True
-
-    # google-genai may wrap gRPC / httpx errors with a message
-    exc_message = str(exc).lower()
     if any(keyword in exc_message for keyword in ("429", "503", "resource exhausted", "service unavailable")):
         return True
 

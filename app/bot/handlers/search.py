@@ -10,6 +10,7 @@ from app.db.models import User
 from app.services.chat.group_policy import GroupPolicyService
 from app.services.security.abuse_guard import AbuseGuardService
 from app.services.search.search_service import SearchService
+from app.services.security.content_filter import ContentFilterService
 
 search_router = Router(name="search")
 
@@ -33,6 +34,11 @@ async def handle_private_search(
     length_check = AbuseGuardService.enforce_prompt_length(prompt=query, limit=settings.SEARCH_MAX_QUERY_LENGTH, lang=lang)
     if not length_check.allowed:
         await message.reply(length_check.reason, parse_mode="HTML")
+        return
+    content_check = ContentFilterService.check_text_prompt(query)
+    if not content_check.allowed:
+        await AbuseGuardService.record_failure(subject="user_search", subject_id=db_user.id)
+        await message.reply(t(lang, "abuse.content_blocked"), parse_mode="HTML")
         return
     throttle = await AbuseGuardService.check_search(scope_id=db_user.id, is_group=False, lang=lang)
     if not throttle.allowed:
@@ -62,6 +68,11 @@ async def handle_group_search(
     length_check = AbuseGuardService.enforce_prompt_length(prompt=query, limit=settings.SEARCH_MAX_QUERY_LENGTH, lang=lang)
     if not length_check.allowed:
         await message.reply(length_check.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+        return
+    content_check = ContentFilterService.check_text_prompt(query)
+    if not content_check.allowed:
+        await AbuseGuardService.record_failure(subject="group_search", subject_id=message.chat.id)
+        await message.reply(t(lang, "abuse.content_blocked"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
         return
 
     if not group_policy_service.claim_message(group_id=message.chat.id, message_id=message.message_id):

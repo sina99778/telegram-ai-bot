@@ -9,6 +9,7 @@ from app.core.i18n import t
 from app.db.models import User
 from app.services.chat.image_orchestrator import ImageOrchestrator
 from app.services.security.abuse_guard import AbuseGuardService
+from app.services.security.content_filter import ContentFilterService
 
 image_router = Router()
 
@@ -27,6 +28,12 @@ async def handle_image_command(message: Message, command: CommandObject, db_user
     length_check = AbuseGuardService.enforce_prompt_length(prompt=prompt, limit=settings.IMAGE_MAX_PROMPT_LENGTH, lang=lang)
     if not length_check.allowed:
         return await message.reply(length_check.reason, parse_mode="HTML")
+
+    content_check = ContentFilterService.check_image_prompt(prompt)
+    if not content_check.allowed:
+        await AbuseGuardService.record_failure(subject="image", subject_id=db_user.id)
+        return await message.reply(t(lang, "abuse.image_content_blocked"), parse_mode="HTML")
+
     throttle = await AbuseGuardService.check_image(user_id=db_user.id, lang=lang)
     if not throttle.allowed:
         return await message.reply(throttle.reason, parse_mode="HTML")

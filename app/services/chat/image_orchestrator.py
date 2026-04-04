@@ -16,6 +16,7 @@ from app.db.models import FeatureConfig, User
 from app.services.ai.router import ModelRouter
 from app.services.billing.billing_service import BillingService
 from app.services.usage.quota_service import QuotaService
+from app.services.ai.antigravity import SafetyBlockedError
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,10 @@ class ImageOrchestrator:
             logger.warning("Image generation timeout for reference_id=%s", reference_id)
             image_bytes = None
             error_message = t(lang, "image.timeout_refunded")
+        except SafetyBlockedError as exc:
+            logger.warning("Image safety block for user_id=%s category=%s ref=%s", user_id, exc.category, reference_id)
+            image_bytes = None
+            error_message = t(lang, "abuse.image_content_blocked")
         except Exception as exc:
             logger.error("Image generation failure: %s", exc, exc_info=True)
             image_bytes = None

@@ -7,6 +7,76 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+class SafetyBlockedError(Exception):
+    """Raised when Gemini blocks the request/response due to safety filters."""
+
+    def __init__(self, category: str = "unknown", message: str = "Content blocked by safety filters."):
+        self.category = category
+        super().__init__(message)
+
+
+# ── Strict safety settings — block anything flagged LOW or above ──
+SAFETY_SETTINGS = [
+    types.SafetySetting(
+        category="HARM_CATEGORY_HATE_SPEECH",
+        threshold="BLOCK_LOW_AND_ABOVE",
+    ),
+    types.SafetySetting(
+        category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+        threshold="BLOCK_LOW_AND_ABOVE",
+    ),
+    types.SafetySetting(
+        category="HARM_CATEGORY_DANGEROUS_CONTENT",
+        threshold="BLOCK_LOW_AND_ABOVE",
+    ),
+    types.SafetySetting(
+        category="HARM_CATEGORY_HARASSMENT",
+        threshold="BLOCK_LOW_AND_ABOVE",
+    ),
+    types.SafetySetting(
+        category="HARM_CATEGORY_CIVIC_INTEGRITY",
+        threshold="BLOCK_LOW_AND_ABOVE",
+    ),
+]
+
+
+def _check_response_safety(response) -> None:
+    """Check the Gemini response for safety blocks and raise SafetyBlockedError if found."""
+    # Check prompt-level block
+    if hasattr(response, "prompt_feedback") and response.prompt_feedback:
+        block_reason = getattr(response.prompt_feedback, "block_reason", None)
+        if block_reason and str(block_reason) not in ("", "BLOCK_REASON_UNSPECIFIED"):
+            logger.warning("Gemini prompt blocked: block_reason=%s", block_reason)
+            raise SafetyBlockedError(
+                category=str(block_reason),
+                message="Your prompt was blocked by content safety filters.",
+            )
+
+    # Check candidate-level finish_reason
+    if response.candidates:
+        for candidate in response.candidates:
+            finish_reason = getattr(candidate, "finish_reason", None)
+            if finish_reason and str(finish_reason).upper() in ("SAFETY", "BLOCKED"):
+                # Try to extract which safety category triggered
+                safety_ratings = getattr(candidate, "safety_ratings", []) or []
+                categories = []
+                for rating in safety_ratings:
+                    blocked = getattr(rating, "blocked", False)
+                    if blocked:
+                        categories.append(str(getattr(rating, "category", "unknown")))
+                cat_str = ", ".join(categories) if categories else "unknown"
+                logger.warning(
+                    "Gemini response blocked: finish_reason=%s categories=%s",
+                    finish_reason,
+                    cat_str,
+                )
+                raise SafetyBlockedError(
+                    category=cat_str,
+                    message="The AI response was blocked by content safety filters.",
+                )
+
+
 class AntigravityProvider(BaseAIProvider):
     provider_name = "antigravity"
 
@@ -15,22 +85,24 @@ class AntigravityProvider(BaseAIProvider):
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
 
     async def generate_text(
-        self, 
-        model_name: str, 
-        messages: List[AIMessage], 
-        system_instruction: Optional[str] = None, 
+        self,
+        model_name: str,
+        messages: List[AIMessage],
+        system_instruction: Optional[str] = None,
         max_tokens: Optional[int] = None,
         **kwargs
     ) -> AIResponse:
         if not self.client:
             raise RuntimeError("GEMINI_API_KEY is missing in .env")
-            
+
         contents = []
         for msg in messages:
             role = "user" if msg.role.lower() == "user" else "model"
             contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
 
-        config = types.GenerateContentConfig()
+        config = types.GenerateContentConfig(
+            safety_settings=SAFETY_SETTINGS,
+        )
         if system_instruction:
             config.system_instruction = system_instruction
         if max_tokens:
@@ -42,17 +114,23 @@ class AntigravityProvider(BaseAIProvider):
             response = await self.client.aio.models.generate_content(
                 model=model_name,
                 contents=contents,
-                config=config
+                config=config,
             )
+
+            # Check for safety blocks BEFORE accessing .text
+            _check_response_safety(response)
+
             return AIResponse(
                 text=response.text or "No response from AI.",
                 model_name=model_name,
                 tokens_used=0,
-                finish_reason="stop",
-                raw_metadata={}
+                finish_reason=str(getattr(response.candidates[0], "finish_reason", "stop")) if response.candidates else "stop",
+                raw_metadata={},
             )
+        except SafetyBlockedError:
+            raise  # Don't wrap safety errors
         except Exception as e:
-            logger.error(f"Gemini API Error: {e}", exc_info=True)
+            logger.error("Gemini API Error: %s", e, exc_info=True)
             raise RuntimeError(f"AI Generation failed: {e}")
 
     async def generate_image(self, model_name: str, prompt: str, **kwargs) -> bytes:
@@ -62,13 +140,22 @@ class AntigravityProvider(BaseAIProvider):
             result = await self.client.aio.models.generate_content(
                 model=model_name,
                 contents=prompt,
+                config=types.GenerateContentConfig(
+                    safety_settings=SAFETY_SETTINGS,
+                ),
             )
+
+            # Check for safety blocks
+            _check_response_safety(result)
+
             for candidate in result.candidates:
                 if candidate.content and candidate.content.parts:
                     for part in candidate.content.parts:
                         if part.inline_data and part.inline_data.data:
                             return part.inline_data.data
             raise RuntimeError("No image data returned")
+        except SafetyBlockedError:
+            raise  # Don't wrap safety errors
         except Exception as e:
-            logger.error(f"Image Error: {e}", exc_info=True)
+            logger.error("Image Error: %s", e, exc_info=True)
             raise RuntimeError("Image generation failed.")
