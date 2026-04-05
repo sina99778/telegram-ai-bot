@@ -13,6 +13,7 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -50,6 +51,15 @@ class ChatRepository:
         """Return the ``User`` matching *telegram_id*, creating one if
         it does not already exist.
 
+        Uses PostgreSQL ``INSERT ... ON CONFLICT DO UPDATE`` to make the
+        entire operation a single atomic round-trip — eliminating the
+        race-condition window that a SELECT→INSERT pattern exposes under
+        high concurrency.
+
+        On conflict (user already exists) only ``username`` and
+        ``first_name`` are updated; default credits and other fields are
+        preserved from the original INSERT.
+
         Parameters
         ----------
         telegram_id:
@@ -64,25 +74,7 @@ class ChatRepository:
         User
             The existing or newly-created user instance.
         """
-        stmt = select(User).where(User.telegram_id == telegram_id)
-        user: User | None = await self._session.scalar(stmt)
-
-        if user is not None:
-            # Optionally update mutable profile fields
-            changed = False
-            if username is not None and user.username != username:
-                user.username = username
-                changed = True
-            if first_name is not None and user.first_name != first_name:
-                user.first_name = first_name
-                changed = True
-            if changed:
-                await self._session.commit()
-                await self._session.refresh(user)
-                logger.info("Updated profile for user %d", telegram_id)
-            return user
-
-        user = User(
+        insert_values = dict(
             telegram_id=telegram_id,
             username=username,
             first_name=first_name,
@@ -90,11 +82,29 @@ class ChatRepository:
             credit_balance=settings.DEFAULT_DAILY_NORMAL_CREDITS,
             language="",
         )
-        self._session.add(user)
-        await self._session.commit()
-        await self._session.refresh(user)
 
-        logger.info("Created new user  ·  telegram_id=%d", telegram_id)
+        stmt = (
+            pg_insert(User)
+            .values(**insert_values)
+            .on_conflict_do_update(
+                index_elements=[User.telegram_id],
+                set_=dict(
+                    username=pg_insert(User).excluded.username,
+                    first_name=pg_insert(User).excluded.first_name,
+                ),
+            )
+            .returning(User)
+        )
+
+        result = await self._session.execute(stmt)
+        user = result.scalar_one()
+        await self._session.commit()
+
+        logger.info(
+            "Upserted user  ·  telegram_id=%d  ·  user_id=%d",
+            telegram_id,
+            user.id,
+        )
         return user
 
     # ──────────────────────────────────────────

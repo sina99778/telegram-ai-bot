@@ -12,6 +12,10 @@ class TokenEstimator:
     def estimate_tokens(self, text: str) -> int:
         return int(len(text.split()) * 1.3)
 
+    def estimate_messages(self, messages: List[AIMessage]) -> int:
+        """Return the total estimated tokens across a list of AI messages."""
+        return sum(self.estimate_tokens(m.content) for m in messages)
+
 class MemoryManager:
     def __init__(self, session: AsyncSession, tokenizer: Optional[TokenEstimator] = None):
         self.session = session

@@ -16,7 +16,8 @@ from app.core.i18n import t
 from app.db.models import Conversation, Message, User
 from app.services.ai.router import ModelRouter
 from app.services.billing.billing_service import BillingService
-from app.services.chat.memory import MemoryManager
+from app.services.ai.provider import AIMessage
+from app.services.chat.memory import MemoryManager, TokenEstimator
 from app.services.queue.queue_service import QueueService
 from app.services.ai.antigravity import SafetyBlockedError
 
@@ -59,6 +60,7 @@ class ChatOrchestrator:
         self.router = router
         self.memory = memory
         self.queue_service = queue_service
+        self._tokenizer = TokenEstimator()
 
     async def _get_or_create_active_conversation(self, user_id: int, mode_str: str) -> Conversation:
         user = await self.session.get(User, user_id)
@@ -86,6 +88,64 @@ class ChatOrchestrator:
         elif conversation.language_preference != preferred_language:
             conversation.language_preference = preferred_language
         return conversation
+
+    def _apply_sliding_window(
+        self,
+        history: list[AIMessage],
+        prompt: str,
+    ) -> list[AIMessage]:
+        """Enforce ``PRIVATE_MAX_PROMPT_LENGTH`` as a hard token ceiling.
+
+        If the total estimated tokens of *history* + *prompt* exceed the
+        configured maximum, the **oldest non-system** messages are
+        dropped one-by-one until the payload fits.
+
+        System messages (e.g. conversation summaries injected by
+        :class:`MemoryManager`) are always preserved so the model
+        retains long-term context even under aggressive trimming.
+        """
+        max_tokens = settings.PRIVATE_MAX_PROMPT_LENGTH
+        prompt_tokens = self._tokenizer.estimate_tokens(prompt)
+        history_tokens = self._tokenizer.estimate_messages(history)
+        total_tokens = prompt_tokens + history_tokens
+
+        if total_tokens <= max_tokens:
+            return history
+
+        # Separate system messages (index 0 summary) from droppable ones
+        system_msgs = [m for m in history if m.role == "system"]
+        droppable = [m for m in history if m.role != "system"]
+        system_tokens = self._tokenizer.estimate_messages(system_msgs)
+
+        budget = max_tokens - prompt_tokens - system_tokens
+        if budget <= 0:
+            logger.warning(
+                "Sliding window: prompt + system messages already exceed "
+                "PRIVATE_MAX_PROMPT_LENGTH (%d). Dropping all history.",
+                max_tokens,
+            )
+            return system_msgs
+
+        # Drop oldest messages first (they're at the front of the list)
+        kept: list[AIMessage] = []
+        kept_tokens = 0
+        for msg in reversed(droppable):
+            msg_tokens = self._tokenizer.estimate_tokens(msg.content)
+            if kept_tokens + msg_tokens > budget:
+                break
+            kept.insert(0, msg)
+            kept_tokens += msg_tokens
+
+        dropped = len(droppable) - len(kept)
+        logger.warning(
+            "Sliding window trimmed %d messages  ·  total_before=%d  "
+            "total_after=%d  ·  max=%d",
+            dropped,
+            total_tokens,
+            prompt_tokens + system_tokens + kept_tokens,
+            max_tokens,
+        )
+        return system_msgs + kept
 
     async def _resolve_policy(self, user: User, requested_feature: FeatureName, allow_vip: bool = True) -> RoutedChatPolicy:
         lang = user.language or "fa"
@@ -207,6 +267,13 @@ class ChatOrchestrator:
         try:
             conversation = await self._get_or_create_active_conversation(user_id, mode_str)
             history = await self.memory.get_conversation_history(conversation.id)
+
+            # ── Sliding Window Hard Limit ─────────────────────────────
+            # If the summarization queue is lagging, the history may
+            # exceed PRIVATE_MAX_PROMPT_LENGTH.  Drop the oldest non-
+            # system messages to stay within the provider envelope.
+            history = self._apply_sliding_window(history, prompt)
+
             response = await self.router.route_text_request_with_config(
                 config=config,
                 prompt=prompt,

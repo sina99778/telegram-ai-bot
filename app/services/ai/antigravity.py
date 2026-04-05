@@ -1,5 +1,14 @@
 import logging
 from typing import List, Dict, Optional, Any
+
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
+
 from app.services.ai.provider import BaseAIProvider, AIMessage, AIResponse
 from google import genai
 from google.genai import types
@@ -84,6 +93,26 @@ class AntigravityProvider(BaseAIProvider):
         self.api_key = settings.GEMINI_API_KEY
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
 
+    # ── Resilient low-level API call with exponential backoff ─────
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        retry=retry_if_exception_type(Exception),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def _call_gemini(self, *, model_name: str, contents, config):
+        """Execute a single Gemini API call with automatic retry on
+        transient failures (429, 503, network timeouts, etc.).
+
+        Retries up to 3 attempts with 1s → 2s → 4s exponential backoff.
+        """
+        return await self.client.aio.models.generate_content(
+            model=model_name,
+            contents=contents,
+            config=config,
+        )
+
     async def generate_text(
         self,
         model_name: str,
@@ -111,8 +140,8 @@ class AntigravityProvider(BaseAIProvider):
             config.tools = [{"google_search": {}}]
 
         try:
-            response = await self.client.aio.models.generate_content(
-                model=model_name,
+            response = await self._call_gemini(
+                model_name=model_name,
                 contents=contents,
                 config=config,
             )
@@ -130,15 +159,15 @@ class AntigravityProvider(BaseAIProvider):
         except SafetyBlockedError:
             raise  # Don't wrap safety errors
         except Exception as e:
-            logger.error("Gemini API Error: %s", e, exc_info=True)
+            logger.error("Gemini API Error (after retries): %s", e, exc_info=True)
             raise RuntimeError(f"AI Generation failed: {e}")
 
     async def generate_image(self, model_name: str, prompt: str, **kwargs) -> bytes:
         if not self.client:
             raise RuntimeError("GEMINI_API_KEY is missing")
         try:
-            result = await self.client.aio.models.generate_content(
-                model=model_name,
+            result = await self._call_gemini(
+                model_name=model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     safety_settings=SAFETY_SETTINGS,
@@ -157,5 +186,5 @@ class AntigravityProvider(BaseAIProvider):
         except SafetyBlockedError:
             raise  # Don't wrap safety errors
         except Exception as e:
-            logger.error("Image Error: %s", e, exc_info=True)
+            logger.error("Image Error (after retries): %s", e, exc_info=True)
             raise RuntimeError("Image generation failed.")

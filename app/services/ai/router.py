@@ -77,7 +77,13 @@ class ModelRouter:
 
             # Policy-aware Fallback Logic Evaluation
             if config.fallback_model_name:
-                logger.warning(f"Primary model {target_model} failed. Executing fallback policy to {config.fallback_model_name}")
+                logger.error(
+                    "Primary model %s failed with error: %s — falling back to %s",
+                    target_model,
+                    e,
+                    config.fallback_model_name,
+                    exc_info=True,
+                )
                 response = await provider.generate_text(
                     model_name=config.fallback_model_name,
                     messages=messages,
@@ -86,7 +92,7 @@ class ModelRouter:
                     enable_search=enable_search,
                 )
             else:
-                logger.error(f"Routing completely failed on model {target_model} with no fallbacks.", exc_info=True)
+                logger.error("Routing completely failed on model %s with no fallbacks.", target_model, exc_info=True)
                 raise e
 
         # 6. Formatting Sanitization
