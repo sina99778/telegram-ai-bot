@@ -21,9 +21,28 @@ from app.services.security.abuse_guard import AbuseGuardService
 from app.services.chat.group_policy import GroupPolicyService
 from app.services.chat.orchestrator import ChatOrchestrator
 import logging
+from typing import Callable, Dict, Any, Awaitable
+
+from aiogram import BaseMiddleware, F, Router
 
 menu_router = Router(name="menu")
 logger = logging.getLogger(__name__)
+
+
+class MenuSpamMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
+        event: Message,
+        data: Dict[str, Any],
+    ) -> Any:
+        guard = await AbuseGuardService.check_menu_button(user_id=event.from_user.id, lang="en")
+        if not guard.allowed:
+            # Silently drop the spam
+            return None
+        return await handler(event, data)
+
+menu_router.message.middleware(MenuSpamMiddleware())
 
 
 def _labels(key: str) -> set[str]:

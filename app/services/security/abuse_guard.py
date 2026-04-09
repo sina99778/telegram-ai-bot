@@ -334,6 +334,21 @@ class AbuseGuardService:
             return cls._backend_error_decision(lang)
 
     @classmethod
+    async def check_menu_button(cls, *, user_id: int, lang: str) -> GuardDecision:
+        """Silently limit menu button spamming (e.g. tapping 'help' 10 times)."""
+        try:
+            return await cls._hit_window(
+                subject="menu_button",
+                subject_id=user_id,
+                limit=1,
+                window_seconds=3, # 3 seconds cooldown between menu button taps
+                lang=lang,
+                reason_key="abuse.callback_rate_limited", # ignored by handler
+            )
+        except Exception:
+            return GuardDecision(allowed=True, reason="")
+
+    @classmethod
     async def check_admin_action(cls, *, admin_id: int, action: str, lang: str) -> GuardDecision:
         try:
             return await cls._hit_window(
