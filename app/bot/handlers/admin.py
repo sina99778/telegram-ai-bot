@@ -6,6 +6,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -724,83 +725,42 @@ async def cb_admin_broadcast(callback: CallbackQuery, session: AsyncSession, sta
 async def process_broadcast_message(message: Message, session: AsyncSession, state: FSMContext):
     if not await _is_admin(message.from_user.id, session):
         return
-    admin_user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
-    lang = _lang(admin_user)
-    if not await _guard_admin_mutation(admin_id=message.from_user.id, lang=lang, action="broadcast", message=message):
-        return
-    started = await BroadcastControlService.start(message.from_user.id)
-    if not started:
-        return await message.answer(t(lang, "admin.broadcast_already_running"))
-
-    stmt = select(User.telegram_id).where(User.telegram_id.is_not(None)).limit(settings.BROADCAST_MAX_RECIPIENTS)
-    user_ids = list((await session.execute(stmt)).scalars().all())
+        
+    stmt = select(User.telegram_id).where(User.telegram_id.is_not(None))
+    user_ids = (await session.execute(stmt)).scalars().all()
+    
     success_count = 0
     fail_count = 0
-    processed = 0
-    logger.info("Broadcast started admin_id=%s total=%s", message.from_user.id, len(user_ids))
-    progress_message = await message.answer(
-        t(lang, "admin.broadcast_started"),
+    
+    status_msg = await message.answer(
+        f"⏳ <b>Broadcast Started</b>\nSending to {len(user_ids)} users...",
         parse_mode="HTML",
-        reply_markup=get_broadcast_control_kb(lang),
     )
-    try:
-        for idx in range(0, len(user_ids), settings.BROADCAST_BATCH_SIZE):
-            if await BroadcastControlService.should_stop(message.from_user.id):
-                logger.warning("Broadcast stopped by admin admin_id=%s processed=%s", message.from_user.id, processed)
-                await progress_message.edit_text(
-                    t(lang, "admin.broadcast_stopped"),
-                    parse_mode="HTML",
-                    reply_markup=get_back_to_admin_kb(lang),
-                )
-                await state.clear()
-                return
-
-            batch = user_ids[idx: idx + settings.BROADCAST_BATCH_SIZE]
-            for uid in batch:
-                try:
-                    await message.send_copy(chat_id=uid)
-                    success_count += 1
-                except Exception:
-                    fail_count += 1
-                processed += 1
-                if fail_count >= settings.BROADCAST_FAILURE_THRESHOLD:
-                    logger.error(
-                        "Broadcast aborted by failure threshold admin_id=%s processed=%s failed=%s",
-                        message.from_user.id,
-                        processed,
-                        fail_count,
-                    )
-                    await progress_message.edit_text(
-                        t(lang, "admin.broadcast_aborted_failures"),
-                        parse_mode="HTML",
-                        reply_markup=get_back_to_admin_kb(lang),
-                    )
-                    await state.clear()
-                    return
-
-            logger.info(
-                "Broadcast batch progress admin_id=%s processed=%s total=%s success=%s failed=%s",
-                message.from_user.id,
-                processed,
-                len(user_ids),
-                success_count,
-                fail_count,
-            )
-            await progress_message.edit_text(
-                t(lang, "admin.broadcast_progress", processed=processed, total=len(user_ids), success=success_count, failed=fail_count),
-                parse_mode="HTML",
-                reply_markup=get_broadcast_control_kb(lang),
-            )
-            await asyncio.sleep(settings.BROADCAST_BATCH_PAUSE_SECONDS)
-    finally:
-        await BroadcastControlService.finish(message.from_user.id)
-
-    logger.info("Broadcast finished admin_id=%s success=%s failed=%s", message.from_user.id, success_count, fail_count)
+    
+    for uid in user_ids:
+        try:
+            await message.send_copy(chat_id=uid)
+            success_count += 1
+            await asyncio.sleep(0.05)
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            try:
+                await message.send_copy(chat_id=uid)
+                success_count += 1
+            except Exception:
+                fail_count += 1
+        except (TelegramForbiddenError, TelegramBadRequest):
+            fail_count += 1
+        except Exception:
+            fail_count += 1
+            
     await state.clear()
-    await progress_message.edit_text(
-        t(lang, "admin.broadcast_progress", processed=processed, total=len(user_ids), success=success_count, failed=fail_count),
+    await status_msg.edit_text(
+        "<b>Broadcast Finished</b> ✅\n\n"
+        f"Success: <code>{success_count}</code>\n"
+        f"Failed (Blocked/Deleted): <code>{fail_count}</code>",
         parse_mode="HTML",
-        reply_markup=get_back_to_admin_kb(lang),
+        reply_markup=get_back_to_admin_kb("fa"),
     )
 
 
