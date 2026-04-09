@@ -39,7 +39,7 @@ CODES_BTNS = _labels("buttons.codes")
 ADMIN_BTNS = _labels("buttons.admin")
 LANG_BTNS = _labels("buttons.language")
 SEARCH_BTNS = _labels("buttons.search")
-TOOLS_BTNS = _labels("buttons.chat") | _labels("buttons.image")
+TOOLS_BTNS = _labels("buttons.chat") | _labels("buttons.image") | _labels("buttons.image_edit")
 
 
 def _user_lang(user: User | None) -> str:
@@ -181,6 +181,9 @@ async def menu_tools(message: Message, chat_repo: ChatRepository) -> None:
     lang = _user_lang(user)
     if message.text in _labels("buttons.chat"):
         await message.answer(t(lang, "tools.chat_hint"))
+        return
+    if message.text in _labels("buttons.image_edit"):
+        await message.answer(t(lang, "image.edit_usage"), parse_mode="HTML")
         return
     if user and (user.has_active_vip or user.is_premium or user.vip_credits > 0):
         await message.answer(
