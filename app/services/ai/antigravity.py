@@ -188,3 +188,36 @@ class AntigravityProvider(BaseAIProvider):
         except Exception as e:
             logger.error("Image Error (after retries): %s", e, exc_info=True)
             raise RuntimeError("Image generation failed.")
+
+    async def edit_image(self, model_name: str, prompt: str, image_bytes: bytes, **kwargs) -> bytes:
+        """Edit an existing image using a multimodal text+image prompt."""
+        if not self.client:
+            raise RuntimeError("GEMINI_API_KEY is missing")
+        try:
+            # Build multimodal content: text instruction + source image
+            image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+            text_part = types.Part.from_text(text=prompt)
+
+            result = await self._call_gemini(
+                model_name=model_name,
+                contents=[text_part, image_part],
+                config=types.GenerateContentConfig(
+                    response_modalities=["Image"],
+                    safety_settings=SAFETY_SETTINGS,
+                ),
+            )
+
+            # Check for safety blocks
+            _check_response_safety(result)
+
+            for candidate in result.candidates:
+                if candidate.content and candidate.content.parts:
+                    for part in candidate.content.parts:
+                        if part.inline_data and part.inline_data.data:
+                            return part.inline_data.data
+            raise RuntimeError("No edited image data returned")
+        except SafetyBlockedError:
+            raise
+        except Exception as e:
+            logger.error("Image edit error (after retries): %s", e, exc_info=True)
+            raise RuntimeError("Image editing failed.")

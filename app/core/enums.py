@@ -23,6 +23,7 @@ class FeatureName(str, Enum):
     FLASH_TEXT = "FLASH_TEXT"
     PRO_TEXT = "PRO_TEXT"
     IMAGE_GEN = "IMAGE_GEN"
+    IMAGE_EDIT = "IMAGE_EDIT"
     VOICE_GEN = "VOICE_GEN"
 
 class PromoCodeKind(str, Enum):

@@ -39,3 +39,8 @@ class BaseAIProvider(ABC):
     async def generate_image(self, model_name: str, prompt: str, **kwargs) -> bytes:
         """Generates an image from an AI Provider."""
         pass
+
+    @abstractmethod
+    async def edit_image(self, model_name: str, prompt: str, image_bytes: bytes, **kwargs) -> bytes:
+        """Edits an existing image using a text instruction."""
+        pass

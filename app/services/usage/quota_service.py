@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,7 @@ class QuotaStatus:
 class QuotaService:
     SEARCH_COMMAND = "search_command"
     FREE_IMAGE_GENERATION = "free_image_generation"
+    FREE_IMAGE_EDIT = "free_image_edit"
     SCOPE_USER = "user"
     SCOPE_GROUP = "group"
 
@@ -36,6 +37,12 @@ class QuotaService:
     @staticmethod
     def _today() -> date:
         return datetime.now(timezone.utc).date()
+
+    @staticmethod
+    def _week_start() -> date:
+        """Return the Monday of the current week (UTC) for weekly quotas."""
+        today = datetime.now(timezone.utc).date()
+        return today - timedelta(days=today.weekday())
 
     async def _get_usage_row(
         self,
@@ -103,6 +110,16 @@ class QuotaService:
         )
         return QuotaStatus(limit=settings.FREE_DAILY_IMAGE_LIMIT, used=usage.used_count if usage else 0)
 
+    async def get_free_image_edit_status_for_user(self, user_id: int) -> QuotaStatus:
+        """Weekly quota for free image editing — resets every Monday."""
+        usage = await self._get_usage_row(
+            scope_type=self.SCOPE_USER,
+            scope_id=user_id,
+            feature=self.FREE_IMAGE_EDIT,
+            reset_date=self._week_start(),
+        )
+        return QuotaStatus(limit=settings.FREE_WEEKLY_IMAGE_EDIT_LIMIT, used=usage.used_count if usage else 0)
+
     async def consume_search_for_user(self, user: User) -> QuotaStatus:
         status = await self.get_search_status_for_user(user)
         if status.exhausted:
@@ -147,3 +164,20 @@ class QuotaService:
         usage.used_count += 1
         await self.session.commit()
         return QuotaStatus(limit=status.limit, used=usage.used_count)
+
+    async def consume_free_image_edit_for_user(self, user_id: int) -> QuotaStatus:
+        """Consume one free image edit from the weekly quota."""
+        status = await self.get_free_image_edit_status_for_user(user_id)
+        if status.exhausted:
+            return status
+        usage = await self._get_usage_row(
+            scope_type=self.SCOPE_USER,
+            scope_id=user_id,
+            feature=self.FREE_IMAGE_EDIT,
+            reset_date=self._week_start(),
+            create=True,
+        )
+        usage.used_count += 1
+        await self.session.commit()
+        return QuotaStatus(limit=status.limit, used=usage.used_count)
+

@@ -172,3 +172,135 @@ class ImageOrchestrator:
             quota_limit=quota_limit,
             quota_used=quota_used,
         )
+
+    async def process_image_edit_request(self, user_id: int, prompt: str, image_bytes: bytes) -> ImageResult:
+        """Process an image editing request with billing and weekly quota for free users."""
+        user = await self.session.get(User, user_id)
+        if not user:
+            return ImageResult(image_bytes=None, success=False, error_message=t("en", "errors.user_not_found"), error_code="user_not_found")
+        lang = user.language if user and user.language else "fa"
+        reference_id = f"imgedit_{uuid.uuid4().hex}"
+        premium_user = self._is_premium_image_user(user)
+        logger.info("Image edit request user_id=%s premium=%s", user_id, premium_user)
+
+        try:
+            stmt = select(FeatureConfig).where(FeatureConfig.name == FeatureName.IMAGE_EDIT)
+            config = await self.session.scalar(stmt)
+            if not config or not config.is_active:
+                raise ValueError("Image edit feature unavailable")
+            cost = int(config.credit_cost or 0)
+            if cost <= 0:
+                raise ValueError("Invalid image edit cost config")
+        except Exception as exc:
+            logger.error("Image edit config error: %s", exc, exc_info=True)
+            return ImageResult(
+                image_bytes=None,
+                success=False,
+                error_message=t(lang, "image.edit_unavailable"),
+                error_code="feature_unavailable",
+            )
+
+        # ── Free user: weekly quota ──
+        if not premium_user:
+            free_status = await self.quota_service.get_free_image_edit_status_for_user(user.id)
+            if free_status.exhausted:
+                logger.warning("Free image edit quota exhausted user_id=%s used=%s limit=%s", user_id, free_status.used, free_status.limit)
+                return ImageResult(
+                    image_bytes=None,
+                    success=False,
+                    error_message=t(lang, "image.edit_free_quota_exhausted", limit=free_status.limit),
+                    error_code="free_quota_exhausted",
+                    quota_limit=free_status.limit,
+                    quota_used=free_status.used,
+                )
+
+        # ── Premium user: deduct VIP credits ──
+        if premium_user:
+            try:
+                await self.billing.deduct_credits(
+                    user_id=user_id,
+                    amount=cost,
+                    reference_type="image_edit",
+                    reference_id=reference_id,
+                    description="AI Image Editing",
+                    wallet_type=WalletType.VIP,
+                )
+            except InsufficientCreditsError:
+                await self.session.rollback()
+                return ImageResult(
+                    image_bytes=None,
+                    success=False,
+                    error_message=t(lang, "image.edit_insufficient_vip", cost=cost),
+                    error_code="insufficient_vip",
+                )
+            except Exception as exc:
+                logger.error("Image edit billing error: %s", exc, exc_info=True)
+                await self.session.rollback()
+                return ImageResult(
+                    image_bytes=None,
+                    success=False,
+                    error_message=t(lang, "image.billing_temporary_issue"),
+                    error_code="billing_error",
+                )
+
+        # ── Execute image edit via provider ──
+        error_message = ""
+        try:
+            edited_bytes = await asyncio.wait_for(
+                self.router.route_image_edit_request(
+                    feature_name=FeatureName.IMAGE_EDIT,
+                    prompt=prompt,
+                    image_bytes=image_bytes,
+                ),
+                timeout=90.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Image edit timeout for reference_id=%s", reference_id)
+            edited_bytes = None
+            error_message = t(lang, "image.timeout_refunded")
+        except SafetyBlockedError as exc:
+            logger.warning("Image edit safety block user_id=%s category=%s ref=%s", user_id, exc.category, reference_id)
+            edited_bytes = None
+            error_message = t(lang, "abuse.image_content_blocked")
+        except Exception as exc:
+            logger.error("Image edit failure: %s", exc, exc_info=True)
+            edited_bytes = None
+            error_message = t(lang, "image.failed_refunded")
+
+        if not edited_bytes:
+            if premium_user:
+                try:
+                    await self.billing.refund_credits(
+                        user_id=user_id,
+                        original_reference_id=reference_id,
+                        amount=cost,
+                        description="Refund: Image editing failed",
+                        wallet_type=WalletType.VIP,
+                    )
+                except Exception as exc:
+                    logger.error("Image edit refund failure for %s: %s", reference_id, exc, exc_info=True)
+                    await self.session.rollback()
+            return ImageResult(
+                image_bytes=None,
+                success=False,
+                error_message=error_message,
+                error_code="generation_failed",
+            )
+
+        # ── Success: consume quota or log ──
+        quota_limit = None
+        quota_used = None
+        if not premium_user:
+            updated_status = await self.quota_service.consume_free_image_edit_for_user(user.id)
+            quota_limit = updated_status.limit
+            quota_used = updated_status.used
+            logger.info("Free image edit success user_id=%s quota_used=%s/%s", user_id, quota_used, quota_limit)
+        else:
+            logger.info("Premium image edit success user_id=%s wallet=vip cost=%s", user_id, cost)
+
+        return ImageResult(
+            image_bytes=edited_bytes,
+            success=True,
+            quota_limit=quota_limit,
+            quota_used=quota_used,
+        )

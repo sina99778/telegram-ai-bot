@@ -108,3 +108,13 @@ class ModelRouter:
             raise ValueError(f"Provider '{config.provider}' is not registered.")
             
         return await provider.generate_image(model_name=config.model_name, prompt=prompt)
+
+    async def route_image_edit_request(self, feature_name: FeatureName, prompt: str, image_bytes: bytes) -> bytes:
+        """Handles Image Editing requests — sends source image + instruction to provider."""
+        config = await self._get_feature_config(feature_name)
+
+        provider = self.providers.get(config.provider)
+        if not provider:
+            raise ValueError(f"Provider '{config.provider}' is not registered.")
+
+        return await provider.edit_image(model_name=config.model_name, prompt=prompt, image_bytes=image_bytes)
