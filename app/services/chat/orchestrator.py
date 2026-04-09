@@ -363,7 +363,10 @@ class ChatOrchestrator:
                 conversation.last_summary_job_id = result.job_id
                 await self.session.commit()
 
-        text = response.text
+        text = response.text.strip() if response.text else ""
+        if not text:
+            text = t(lang, "chat.empty_response")
+
         if policy.notice and policy.depleted_vip_fallback:
             text = f"{policy.notice}\n\n{text}"
 

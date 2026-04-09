@@ -150,7 +150,7 @@ class AntigravityProvider(BaseAIProvider):
             _check_response_safety(response)
 
             return AIResponse(
-                text=response.text or "No response from AI.",
+                text=response.text or "",
                 model_name=model_name,
                 tokens_used=0,
                 finish_reason=str(getattr(response.candidates[0], "finish_reason", "stop")) if response.candidates else "stop",
