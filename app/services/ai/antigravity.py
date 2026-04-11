@@ -67,15 +67,17 @@ def _check_response_safety(response) -> None:
     if response.candidates:
         for candidate in response.candidates:
             finish_reason = getattr(candidate, "finish_reason", None)
-            if finish_reason and str(finish_reason).upper() in ("SAFETY", "BLOCKED"):
-                # Try to extract which safety category triggered
-                safety_ratings = getattr(candidate, "safety_ratings", []) or []
-                categories = []
-                for rating in safety_ratings:
-                    blocked = getattr(rating, "blocked", False)
-                    if blocked:
-                        categories.append(str(getattr(rating, "category", "unknown")))
-                cat_str = ", ".join(categories) if categories else "unknown"
+            if finish_reason:
+                fr_str = str(getattr(finish_reason, "name", finish_reason)).upper()
+                if "SAFETY" in fr_str or "BLOCKED" in fr_str:
+                    # Try to extract which safety category triggered
+                    safety_ratings = getattr(candidate, "safety_ratings", []) or []
+                    categories = []
+                    for rating in safety_ratings:
+                        blocked = getattr(rating, "blocked", False)
+                        if blocked:
+                            categories.append(str(getattr(rating, "category", "unknown")))
+                    cat_str = ", ".join(categories) if categories else "unknown"
                 logger.warning(
                     "Gemini response blocked: finish_reason=%s categories=%s",
                     finish_reason,
