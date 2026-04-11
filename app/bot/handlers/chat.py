@@ -139,11 +139,20 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
     }
     feature_name = feature_mapping.get(preferred_mode, FeatureName.FLASH_TEXT)
 
-    result = await chat_orchestrator.process_message(
-        user_id=db_user.id,
-        prompt=prompt,
-        feature_name=feature_name,
-    )
+    try:
+        result = await asyncio.wait_for(
+            chat_orchestrator.process_message(
+                user_id=db_user.id,
+                prompt=prompt,
+                feature_name=feature_name,
+            ),
+            timeout=settings.AI_REQUEST_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Private chat: AI timeout user_id=%s chat_id=%s", db_user.id, message.chat.id)
+        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+        await _safe_edit(processing_msg, t(lang, "errors.ai_timeout"))
+        return
 
     try:
         if not result.success:

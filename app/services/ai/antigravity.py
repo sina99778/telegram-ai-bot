@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import List, Dict, Optional, Any
 
@@ -106,11 +107,16 @@ class AntigravityProvider(BaseAIProvider):
         transient failures (429, 503, network timeouts, etc.).
 
         Retries up to 3 attempts with 1s → 2s → 4s exponential backoff.
+        Each attempt is guarded by AI_REQUEST_TIMEOUT_SECONDS to prevent
+        hanging requests from holding database locks indefinitely.
         """
-        return await self.client.aio.models.generate_content(
-            model=model_name,
-            contents=contents,
-            config=config,
+        return await asyncio.wait_for(
+            self.client.aio.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=config,
+            ),
+            timeout=settings.AI_REQUEST_TIMEOUT_SECONDS,
         )
 
     async def generate_text(
