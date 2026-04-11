@@ -26,25 +26,11 @@ class SafetyBlockedError(Exception):
         super().__init__(message)
 
 
-# ── Balanced safety settings — prevents API key bans while avoiding false positives ──
-SAFETY_SETTINGS = [
-    types.SafetySetting(
-        category="HARM_CATEGORY_HATE_SPEECH",
-        threshold="BLOCK_NONE",
-    ),
-    types.SafetySetting(
-        category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-        threshold="BLOCK_NONE",
-    ),
-    types.SafetySetting(
-        category="HARM_CATEGORY_DANGEROUS_CONTENT",
-        threshold="BLOCK_NONE",
-    ),
-    types.SafetySetting(
-        category="HARM_CATEGORY_HARASSMENT",
-        threshold="BLOCK_NONE",
-    ),
-]
+# ── Default safety settings ──
+# We rely on the model's default thresholds (typically BLOCK_MEDIUM_AND_ABOVE)
+# since free-tier API keys will throw HTTP 400 Bad Request if we attempt to
+# relax thresholds explicitly (e.g., BLOCK_NONE or BLOCK_ONLY_HIGH).
+SAFETY_SETTINGS = None
 
 
 def _check_response_safety(response) -> None:
@@ -133,9 +119,7 @@ class AntigravityProvider(BaseAIProvider):
             role = "user" if msg.role.lower() == "user" else "model"
             contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
 
-        config = types.GenerateContentConfig(
-            safety_settings=SAFETY_SETTINGS,
-        )
+        config = types.GenerateContentConfig()
         if system_instruction:
             config.system_instruction = system_instruction
         if max_tokens:
