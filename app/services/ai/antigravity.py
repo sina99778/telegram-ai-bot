@@ -26,27 +26,27 @@ class SafetyBlockedError(Exception):
         super().__init__(message)
 
 
-# ── Strict safety settings — block anything flagged LOW or above ──
+# ── Balanced safety settings — prevents API key bans while avoiding false positives ──
 SAFETY_SETTINGS = [
     types.SafetySetting(
         category="HARM_CATEGORY_HATE_SPEECH",
-        threshold="BLOCK_NONE",
+        threshold="BLOCK_ONLY_HIGH",
     ),
     types.SafetySetting(
         category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-        threshold="BLOCK_NONE",
+        threshold="BLOCK_ONLY_HIGH",
     ),
     types.SafetySetting(
         category="HARM_CATEGORY_DANGEROUS_CONTENT",
-        threshold="BLOCK_NONE",
+        threshold="BLOCK_ONLY_HIGH",
     ),
     types.SafetySetting(
         category="HARM_CATEGORY_HARASSMENT",
-        threshold="BLOCK_NONE",
+        threshold="BLOCK_ONLY_HIGH",
     ),
     types.SafetySetting(
         category="HARM_CATEGORY_CIVIC_INTEGRITY",
-        threshold="BLOCK_NONE",
+        threshold="BLOCK_ONLY_HIGH",
     ),
 ]
 
