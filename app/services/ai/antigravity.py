@@ -30,23 +30,23 @@ class SafetyBlockedError(Exception):
 SAFETY_SETTINGS = [
     types.SafetySetting(
         category="HARM_CATEGORY_HATE_SPEECH",
-        threshold="BLOCK_LOW_AND_ABOVE",
+        threshold="BLOCK_NONE",
     ),
     types.SafetySetting(
         category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-        threshold="BLOCK_LOW_AND_ABOVE",
+        threshold="BLOCK_NONE",
     ),
     types.SafetySetting(
         category="HARM_CATEGORY_DANGEROUS_CONTENT",
-        threshold="BLOCK_LOW_AND_ABOVE",
+        threshold="BLOCK_NONE",
     ),
     types.SafetySetting(
         category="HARM_CATEGORY_HARASSMENT",
-        threshold="BLOCK_LOW_AND_ABOVE",
+        threshold="BLOCK_NONE",
     ),
     types.SafetySetting(
         category="HARM_CATEGORY_CIVIC_INTEGRITY",
-        threshold="BLOCK_LOW_AND_ABOVE",
+        threshold="BLOCK_NONE",
     ),
 ]
 
