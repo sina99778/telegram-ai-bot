@@ -60,15 +60,16 @@ def _check_response_safety(response) -> None:
                         if blocked:
                             categories.append(str(getattr(rating, "category", "unknown")))
                     cat_str = ", ".join(categories) if categories else "unknown"
-                logger.warning(
-                    "Gemini response blocked: finish_reason=%s categories=%s",
-                    finish_reason,
-                    cat_str,
-                )
-                raise SafetyBlockedError(
-                    category=cat_str,
-                    message="The AI response was blocked by content safety filters.",
-                )
+
+                    logger.warning(
+                        "Gemini response blocked: finish_reason=%s categories=%s",
+                        finish_reason,
+                        cat_str,
+                    )
+                    raise SafetyBlockedError(
+                        category=cat_str,
+                        message="The AI response was blocked by content safety filters.",
+                    )
 
 
 class AntigravityProvider(BaseAIProvider):
