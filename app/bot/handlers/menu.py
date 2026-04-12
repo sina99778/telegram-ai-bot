@@ -78,6 +78,7 @@ def _private_help_text(lang: str, *, is_admin: bool) -> str:
         t(lang, "help.private.invite"),
         t(lang, "help.private.support"),
         t(lang, "help.private.language"),
+        t(lang, "help.private.antispam"),
     ]
     if is_admin:
         lines.append(t(lang, "help.private.admin"))
