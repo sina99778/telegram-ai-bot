@@ -37,12 +37,12 @@ class ModelRouter:
             raise ValueError(f"Feature '{feature_name.value}' is disabled or missing from configuration.")
         return config
 
-    async def route_text_request(self, feature_name: FeatureName, prompt: str, history: List[AIMessage], persona: str, language: str, *, enable_search: bool = False) -> AIResponse:
+    async def route_text_request(self, feature_name: FeatureName, prompt: str, history: List[AIMessage], persona: str, language: str, *, enable_search: bool = False, image_bytes: bytes | None = None) -> AIResponse:
         """Handles text requests enforcing FeatureConfig constraints and fallback policies."""
         config = await self._get_feature_config(feature_name)
-        return await self.route_text_request_with_config(config, prompt, history, persona, language, enable_search=enable_search)
+        return await self.route_text_request_with_config(config, prompt, history, persona, language, enable_search=enable_search, image_bytes=image_bytes)
 
-    async def route_text_request_with_config(self, config: FeatureConfig, prompt: str, history: List[AIMessage], persona: str, language: str, *, enable_search: bool = False) -> AIResponse:
+    async def route_text_request_with_config(self, config: FeatureConfig, prompt: str, history: List[AIMessage], persona: str, language: str, *, enable_search: bool = False, image_bytes: bytes | None = None) -> AIResponse:
         """Processes requests utilizing an explicit pre-resolved Configuration object."""
         # 2. Select Provider dynamically
         provider = self.providers.get(config.provider)
@@ -68,6 +68,7 @@ class ModelRouter:
                 system_instruction=system_instruction,
                 max_tokens=config.max_output_tokens,
                 enable_search=enable_search,
+                image_bytes=image_bytes,
             )
         except Exception as e:
             # NEVER retry safety-blocked requests on a fallback model
@@ -90,6 +91,7 @@ class ModelRouter:
                     system_instruction=system_instruction,
                     max_tokens=config.max_output_tokens,
                     enable_search=enable_search,
+                    image_bytes=image_bytes,
                 )
             else:
                 logger.error("Routing completely failed on model %s with no fallbacks.", target_model, exc_info=True)

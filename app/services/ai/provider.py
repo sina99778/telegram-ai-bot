@@ -1,11 +1,12 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class AIMessage:
     role: str  # e.g., 'user', 'model', 'system'
     content: str
+    image_bytes: Optional[bytes] = field(default=None, repr=False)
     
 @dataclass
 class AIResponse:
@@ -30,9 +31,14 @@ class BaseAIProvider(ABC):
         messages: List[AIMessage], 
         system_instruction: Optional[str] = None, 
         max_tokens: Optional[int] = None,
+        image_bytes: Optional[bytes] = None,
         **kwargs
     ) -> AIResponse:
-        """Generates text from an AI Provider, returning a structured AIResponse."""
+        """Generates text from an AI Provider, returning a structured AIResponse.
+        
+        If image_bytes is provided, the request becomes multimodal (vision):
+        the image is sent alongside the last user message for analysis.
+        """
         pass
 
     @abstractmethod

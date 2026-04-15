@@ -189,7 +189,7 @@ class ChatOrchestrator:
             cost=settings.NORMAL_MESSAGE_COST,
         )
 
-    async def process_message(self, user_id: int, prompt: str, feature_name: FeatureName, allow_vip: bool = True) -> ChatResult:
+    async def process_message(self, user_id: int, prompt: str, feature_name: FeatureName, allow_vip: bool = True, image_bytes: bytes | None = None) -> ChatResult:
         user = await self.session.get(User, user_id)
         if not user:
             return ChatResult(text=t("en", "chat.user_not_found"), success=False, error_message="user_not_found")
@@ -280,6 +280,7 @@ class ChatOrchestrator:
                 history=history,
                 persona=conversation.persona,
                 language=conversation.language_preference,
+                image_bytes=image_bytes,
             )
         except SafetyBlockedError as exc:
             logger.warning(

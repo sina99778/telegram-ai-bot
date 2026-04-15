@@ -110,15 +110,28 @@ class AntigravityProvider(BaseAIProvider):
         messages: List[AIMessage],
         system_instruction: Optional[str] = None,
         max_tokens: Optional[int] = None,
+        image_bytes: Optional[bytes] = None,
         **kwargs
     ) -> AIResponse:
         if not self.client:
             raise RuntimeError("GEMINI_API_KEY is missing in .env")
 
         contents = []
-        for msg in messages:
+        for i, msg in enumerate(messages):
             role = "user" if msg.role.lower() == "user" else "model"
-            contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
+            parts = []
+
+            # Check for inline image_bytes on the message itself
+            msg_image = getattr(msg, "image_bytes", None)
+            # For the LAST user message, also accept the top-level image_bytes param
+            is_last_user = (role == "user" and i == len(messages) - 1)
+            effective_image = msg_image or (image_bytes if is_last_user else None)
+
+            if effective_image:
+                parts.append(types.Part.from_bytes(data=effective_image, mime_type="image/jpeg"))
+
+            parts.append(types.Part.from_text(text=msg.content))
+            contents.append(types.Content(role=role, parts=parts))
 
         config = types.GenerateContentConfig()
         if system_instruction:

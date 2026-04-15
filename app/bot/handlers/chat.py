@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.types import Message, ReplyKeyboardRemove
 
 from app.core.config import settings
@@ -101,9 +102,11 @@ async def _is_group_trigger(message: Message) -> bool:
     if message.reply_to_message and message.reply_to_message.from_user:
         if message.reply_to_message.from_user.id == bot_info.id:
             return True
-    if not message.text:
+    # Check both text and caption (for photo messages)
+    text = message.text or message.caption or ""
+    if not text:
         return False
-    return f"@{bot_info.username}".lower() in message.text.lower()
+    return f"@{bot_info.username}".lower() in text.lower()
 
 
 def _lang(user: User | None) -> str:
@@ -215,6 +218,156 @@ async def handle_group_message(
             prompt=prompt,
             feature_name=FeatureName.FLASH_TEXT,
             allow_vip=False,
+        ),
+        lang=lang,
+    )
+    if delivered and result:
+        group_policy_service.record_usage(group_id=message.chat.id, user_id=db_user.id)
+
+
+# ── Photo (Vision) Handlers ──────────────────────────────────────
+
+
+async def _download_photo(message: Message, bot: Bot) -> bytes | None:
+    """Download the highest-resolution photo from a message."""
+    if not message.photo:
+        return None
+    photo = message.photo[-1]  # Highest resolution
+    try:
+        file_info = await bot.get_file(photo.file_id)
+        buf = io.BytesIO()
+        await bot.download_file(file_info.file_path, buf)
+        return buf.getvalue()
+    except Exception:
+        logger.error("Failed to download photo from message_id=%s", message.message_id, exc_info=True)
+        return None
+
+
+def _photo_prompt(message: Message, lang: str) -> str:
+    """Extract caption or use a default vision prompt."""
+    caption = (message.caption or "").strip()
+    # Strip leading slash commands from caption (e.g. /ai, /search)
+    if caption and caption.startswith("/"):
+        parts = caption.split(None, 1)
+        caption = parts[1] if len(parts) > 1 else ""
+    if caption:
+        return caption
+    # Default prompt based on user language
+    return t(lang, "chat.vision_default_prompt")
+
+
+@chat_router.message(F.photo & (F.chat.type == "private"))
+async def handle_user_photo(message: Message, db_user: User, chat_orchestrator: ChatOrchestrator, bot: Bot):
+    """Handle photo messages in private chat — run vision analysis."""
+    lang = _lang(db_user)
+
+    prompt = _photo_prompt(message, lang)
+    prompt_check = AbuseGuardService.enforce_prompt_length(prompt=prompt, limit=settings.PRIVATE_MAX_PROMPT_LENGTH, lang=lang)
+    if not prompt_check.allowed:
+        return await message.reply(prompt_check.reason, parse_mode="HTML")
+
+    content_check = ContentFilterService.check_text_prompt(prompt)
+    if not content_check.allowed:
+        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+        return await message.reply(t(lang, "abuse.content_blocked"), parse_mode="HTML")
+
+    throttle = await AbuseGuardService.check_private_chat(user_id=db_user.id, lang=lang)
+    if not throttle.allowed:
+        return await message.reply(throttle.reason, parse_mode="HTML")
+
+    image_data = await _download_photo(message, bot)
+    if not image_data:
+        return await message.reply(t(lang, "chat.vision_download_failed"), parse_mode="HTML")
+
+    logger.info("Vision request accepted user_id=%s chat_id=%s photo_size=%d", db_user.id, message.chat.id, len(image_data))
+    processing_msg = await message.reply(t(lang, "chat.vision_thinking"), parse_mode="HTML")
+
+    raw_mode = db_user.preferred_text_model or getattr(db_user, "subscription_plan", None) or "flash"
+    preferred_mode = raw_mode.lower()
+    feature_mapping = {
+        "premium": FeatureName.PRO_TEXT,
+        "pro": FeatureName.PRO_TEXT,
+        "flash": FeatureName.FLASH_TEXT,
+    }
+    feature_name = feature_mapping.get(preferred_mode, FeatureName.FLASH_TEXT)
+
+    try:
+        result = await asyncio.wait_for(
+            chat_orchestrator.process_message(
+                user_id=db_user.id,
+                prompt=prompt,
+                feature_name=feature_name,
+                image_bytes=image_data,
+            ),
+            timeout=settings.AI_REQUEST_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Vision: AI timeout user_id=%s chat_id=%s", db_user.id, message.chat.id)
+        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+        await _safe_edit(processing_msg, t(lang, "errors.ai_timeout"))
+        return
+
+    try:
+        if not result.success:
+            await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+            await _safe_edit(processing_msg, result.text or result.error_message or t(lang, "errors.delivery_failed"))
+            return
+
+        if len(result.text) <= 4050:
+            await _safe_edit(processing_msg, result.text)
+        else:
+            await processing_msg.delete()
+            await send_chunked_message(message, result.text)
+    except Exception:
+        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+        await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
+
+
+@chat_router.message(F.photo & F.chat.type.in_({"group", "supergroup"}))
+async def handle_group_photo(
+    message: Message,
+    db_user: User,
+    chat_orchestrator: ChatOrchestrator,
+    group_policy_service: GroupPolicyService,
+    bot: Bot,
+):
+    """Handle photo messages in groups — vision analysis when bot is triggered."""
+    if not await _is_group_trigger(message):
+        return
+    logger.info("Group vision: trigger accepted chat_id=%s message_id=%s", message.chat.id, message.message_id)
+
+    if not group_policy_service.claim_message(group_id=message.chat.id, message_id=message.message_id):
+        return
+
+    lang = _lang(db_user)
+    anomaly = await AbuseGuardService.check_group_request(group_id=message.chat.id, lang=lang)
+    if not anomaly.allowed:
+        return await message.reply(anomaly.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+
+    prompt = _photo_prompt(message, lang)
+    decision = group_policy_service.evaluate(group_id=message.chat.id, user_id=db_user.id, prompt=prompt, lang=lang)
+    if not decision.allowed:
+        return await message.reply(decision.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+
+    content_check = ContentFilterService.check_text_prompt(prompt)
+    if not content_check.allowed:
+        await AbuseGuardService.record_failure(subject="group_request", subject_id=message.chat.id)
+        return await message.reply(t(lang, "abuse.content_blocked"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+
+    image_data = await _download_photo(message, bot)
+    if not image_data:
+        return await message.reply(t(lang, "chat.vision_download_failed"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+
+    processing_msg = await message.reply(t(lang, "group.thinking"), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+    result, delivered = await finalize_group_response(
+        trigger_message=message,
+        processing_msg=processing_msg,
+        generation_coro=chat_orchestrator.process_message(
+            user_id=db_user.id,
+            prompt=prompt,
+            feature_name=FeatureName.FLASH_TEXT,
+            allow_vip=False,
+            image_bytes=image_data,
         ),
         lang=lang,
     )
