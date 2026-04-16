@@ -246,9 +246,12 @@ app = FastAPI(
 # ──────────────────────────────────────────────
 #  Webhook endpoint
 # ──────────────────────────────────────────────
+from fastapi import BackgroundTasks
+
 @app.post("/webhook")
 async def telegram_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
 ) -> dict[str, str]:
     """Receive Telegram updates via webhook.
@@ -283,7 +286,7 @@ async def telegram_webhook(
     logger.info("Telegram webhook accepted update_id=%s", getattr(update, "update_id", None))
 
     # Feed the update into aiogram's dispatcher pipeline.
-    await dp.feed_update(bot=bot, update=update)
+    background_tasks.add_task(dp.feed_update, bot=bot, update=update)
 
     return {"status": "ok"}
 
