@@ -95,6 +95,13 @@ async def _ensure_feature_configs() -> None:
                 "model_name": settings.GEMINI_MODEL_IMAGE,
                 "fallback_model_name": None,
             },
+            FeatureName.IMAGE_EDIT: {
+                "credit_cost": 10,
+                "description": "Image editing",
+                "provider": "antigravity",
+                "model_name": settings.GEMINI_MODEL_IMAGE,
+                "fallback_model_name": None,
+            },
         }
 
         for feature_name, values in defaults.items():
@@ -109,6 +116,8 @@ async def _ensure_feature_configs() -> None:
                 feature.model_name = settings.GEMINI_MODEL_NORMAL
             if feature_name == FeatureName.PRO_TEXT and feature.model_name != settings.GEMINI_MODEL_PRO:
                 feature.model_name = settings.GEMINI_MODEL_PRO
+            if feature_name == FeatureName.IMAGE_EDIT and feature.model_name != settings.GEMINI_MODEL_IMAGE:
+                feature.model_name = settings.GEMINI_MODEL_IMAGE
             if not feature.provider:
                 feature.provider = values["provider"]
             if feature.credit_cost is None:
@@ -407,6 +416,7 @@ async def nowpayments_webhook(
                             reference_id=f"np_{payment_id_str}",
                             description=f"Legacy VIP credits purchase ${price_amount}",
                             wallet_type=WalletType.VIP,
+                            auto_commit=False,
                         )
                         await billing.grant_vip_access(
                             user_id=user.id,
@@ -414,6 +424,7 @@ async def nowpayments_webhook(
                             reference_type="nowpayments_legacy_vip_access",
                             reference_id=f"np_access_{payment_id_str}",
                             description=f"Legacy VIP access purchase ${price_amount}",
+                            auto_commit=True,
                         )
 
                     lang = user.language if user.language else "en"
@@ -438,5 +449,6 @@ async def nowpayments_webhook(
                         
         except Exception as e:
             logger.error("Error processing NowPayments IPN order_id=%s: %s", order_id, e, exc_info=True)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal Server Error")
 
     return {"status": "ok"}

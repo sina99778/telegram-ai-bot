@@ -322,7 +322,7 @@ class ChatOrchestrator:
                 await self.session.rollback()
 
             return ChatResult(
-                text=t(lang, "errors.ai_failed_refunded") + f"\n\n⚠️ DEBUG ERROR: {str(exc)}",
+                text=t(lang, "errors.ai_failed_refunded"),
                 success=False,
                 error_message=str(exc),
                 feature_name=policy.feature_name,

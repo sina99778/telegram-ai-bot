@@ -119,6 +119,7 @@ class BillingService:
         reference_id: str,
         description: str,
         wallet_type: WalletType = WalletType.NORMAL,
+        auto_commit: bool = True,
     ) -> int:
         if amount <= 0:
             raise ValueError("Deduction amount must be positive.")
@@ -162,8 +163,9 @@ class BillingService:
 
         try:
             await self.session.flush()
-            await self.session.commit()
-            await self.session.refresh(user)
+            if auto_commit:
+                await self.session.commit()
+                await self.session.refresh(user)
         except IntegrityError as exc:
             await self.session.rollback()
             raise DuplicateTransactionError(f"Transaction {reference_id} already processed concurrently.") from exc
@@ -188,6 +190,7 @@ class BillingService:
         reference_id: str,
         description: str,
         wallet_type: WalletType = WalletType.NORMAL,
+        auto_commit: bool = True,
     ) -> int:
         if amount <= 0:
             raise ValueError("Addition amount must be positive.")
@@ -224,8 +227,9 @@ class BillingService:
 
         try:
             await self.session.flush()
-            await self.session.commit()
-            await self.session.refresh(user)
+            if auto_commit:
+                await self.session.commit()
+                await self.session.refresh(user)
         except IntegrityError as exc:
             await self.session.rollback()
             raise DuplicateTransactionError(f"Transaction {reference_id} already processed concurrently.") from exc
@@ -248,6 +252,7 @@ class BillingService:
         amount: int,
         description: str,
         wallet_type: WalletType | None = None,
+        auto_commit: bool = True,
     ) -> int:
         stmt = select(CreditLedger).where(
             CreditLedger.user_id == user_id,
@@ -275,6 +280,7 @@ class BillingService:
             reference_id=refund_ref_id,
             description=description or f"Refund for {original_reference_id}",
             wallet_type=wallet_type or original_ledger.wallet_type,
+            auto_commit=auto_commit,
         )
 
     async def grant_vip_access(
@@ -284,6 +290,7 @@ class BillingService:
         reference_type: str,
         reference_id: str,
         description: str,
+        auto_commit: bool = True,
     ) -> datetime:
         if days <= 0:
             raise ValueError("VIP days must be positive.")
@@ -319,8 +326,9 @@ class BillingService:
 
         try:
             await self.session.flush()
-            await self.session.commit()
-            await self.session.refresh(user)
+            if auto_commit:
+                await self.session.commit()
+                await self.session.refresh(user)
         except IntegrityError as exc:
             await self.session.rollback()
             raise DuplicateTransactionError(f"Transaction {reference_id} already processed concurrently.") from exc

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -52,6 +53,7 @@ class QuotaService:
         feature: str,
         reset_date: date,
         create: bool = False,
+        for_update: bool = False,
     ) -> FeatureUsage | None:
         stmt = select(FeatureUsage).where(
             FeatureUsage.scope_type == scope_type,
@@ -59,20 +61,36 @@ class QuotaService:
             FeatureUsage.feature == feature,
             FeatureUsage.reset_date == reset_date,
         )
+        if for_update:
+            stmt = stmt.with_for_update()
+            
         usage = await self.session.scalar(stmt)
         if usage or not create:
             return usage
 
-        usage = FeatureUsage(
-            scope_type=scope_type,
-            scope_id=scope_id,
-            feature=feature,
-            reset_date=reset_date,
-            used_count=0,
-        )
-        self.session.add(usage)
-        await self.session.flush()
-        return usage
+        try:
+            usage = FeatureUsage(
+                scope_type=scope_type,
+                scope_id=scope_id,
+                feature=feature,
+                reset_date=reset_date,
+                used_count=0,
+            )
+            self.session.add(usage)
+            await self.session.flush()
+            return usage
+        except IntegrityError:
+            await self.session.rollback()
+            # If creation fails due to race condition, re-fetch the newly created row
+            stmt_retry = select(FeatureUsage).where(
+                FeatureUsage.scope_type == scope_type,
+                FeatureUsage.scope_id == scope_id,
+                FeatureUsage.feature == feature,
+                FeatureUsage.reset_date == reset_date,
+            )
+            if for_update:
+                stmt_retry = stmt_retry.with_for_update()
+            return await self.session.scalar(stmt_retry)
 
     @staticmethod
     def search_limit_for_user(user: User) -> int:
@@ -160,6 +178,7 @@ class QuotaService:
             feature=self.FREE_IMAGE_GENERATION,
             reset_date=self._today(),
             create=True,
+            for_update=True,
         )
         usage.used_count += 1
         await self.session.commit()
@@ -176,6 +195,7 @@ class QuotaService:
             feature=self.FREE_IMAGE_EDIT,
             reset_date=self._week_start(),
             create=True,
+            for_update=True,
         )
         usage.used_count += 1
         await self.session.commit()
