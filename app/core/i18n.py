@@ -246,6 +246,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "admin.broadcast_stopped": "Broadcast was stopped.",
         "admin.broadcast_aborted_failures": "Broadcast was aborted because the failure threshold was reached.",
         "admin.broadcast_already_running": "A broadcast is already running for this admin session.",
+        "inline.switch_pm": "Start a chat to use inline requests",
+        "inline.ask_ai_title": "Ask AI",
     },
     "fa": {
         "buttons.chat": "💬 چت",
@@ -486,6 +488,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "admin.broadcast_stopped": "برودکست متوقف شد.",
         "admin.broadcast_aborted_failures": "برودکست به‌خاطر رسیدن به آستانه خطا متوقف شد.",
         "admin.broadcast_already_running": "برای این ادمین همین حالا یک برودکست در حال اجراست.",
+        "inline.switch_pm": "برای استفاده از ربات به صفحه چت من بیایید",
+        "inline.ask_ai_title": "پرسش از هوش مصنوعی",
     },
 }
 

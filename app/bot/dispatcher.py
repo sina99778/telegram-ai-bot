@@ -9,6 +9,7 @@ from app.bot.handlers.menu import menu_router
 from app.bot.handlers.callbacks import callback_router
 from app.bot.handlers.image import image_router
 from app.bot.handlers.search import search_router
+from app.bot.handlers.inline import inline_router
 from app.bot.middlewares.callback_throttle import CallbackThrottleMiddleware
 from app.bot.middlewares.db import DbSessionMiddleware
 from app.bot.middlewares.forced_join import CheckUserStatusMiddleware
@@ -28,6 +29,7 @@ def get_dispatcher() -> Dispatcher:
     dp.include_router(callback_router)  # Handles inline button clicks
     dp.include_router(image_router)     # Image generation commands
     dp.include_router(search_router)    # Explicit grounded search commands
+    dp.include_router(inline_router)    # Handles inline queries
     dp.include_router(chat_router)      # Sends whatever is left to Gemini
 
     return dp
