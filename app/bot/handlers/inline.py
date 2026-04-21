@@ -130,6 +130,13 @@ async def handle_chosen_inline_result(
     if not prompt:
         return
 
+    # DEBUG TRACER 1
+    try:
+        from app.core.config import settings
+        await chosen_result.bot.send_message(settings.admin_ids_list[0], f"DEBUG Stage 1: entered handler. Query: {prompt}")
+    except Exception:
+        pass
+
     # 1. Content fitler check
     content_check = ContentFilterService.check_text_prompt(prompt)
     if not content_check.allowed:
@@ -155,6 +162,13 @@ async def handle_chosen_inline_result(
     }
     feature_name = feature_mapping.get(preferred_mode, FeatureName.FLASH_TEXT)
 
+    # DEBUG TRACER 2
+    try:
+        from app.core.config import settings
+        await chosen_result.bot.send_message(settings.admin_ids_list[0], f"DEBUG Stage 2: starting AI process. Feature: {feature_name.value}")
+    except Exception:
+        pass
+
     # 3. AI Generation
     try:
         result = await asyncio.wait_for(
@@ -173,6 +187,14 @@ async def handle_chosen_inline_result(
         )
 
     # 4. Delivery
+    
+    # DEBUG TRACER 3
+    try:
+        from app.core.config import settings
+        await chosen_result.bot.send_message(settings.admin_ids_list[0], f"DEBUG Stage 3: AI process returned. Success: {result.success}, len(text): {len(result.text or '')}")
+    except Exception:
+        pass
+
     try:
         if not result.success:
             await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
