@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import html
 
 from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent, ChosenInlineResult
 
 from app.core.config import settings
@@ -46,6 +48,21 @@ async def _safe_edit_inline(
             text=final_text,
             parse_mode="HTML",
         )
+    except TelegramBadRequest as tbre:
+        if "can't parse entities" in str(tbre).lower():
+            # Fallback to escaped text
+            cleaned_response = html.escape(response_text)
+            fallback_text = f"🗣 <b>{html.escape(name or '')}:</b> {html.escape(prompt or '')}\n\n🤖 {cleaned_response}"
+            try:
+                await chosen_result.bot.edit_message_text(
+                    inline_message_id=chosen_result.inline_message_id,
+                    text=fallback_text[:4090] + "...",
+                    parse_mode="HTML",
+                )
+            except Exception as e2:
+                logger.warning("Fallback edit also failed inline_id=%s: %s", chosen_result.inline_message_id, e2)
+        else:
+            logger.warning("Telegram error editing inline message: %s", tbre)
     except Exception as exc:
         logger.warning(
             "Failed to edit inline message inline_message_id=%s: %s",
