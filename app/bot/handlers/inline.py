@@ -62,12 +62,7 @@ async def _safe_edit_inline(
             except Exception as e2:
                 logger.warning("Fallback edit also failed inline_id=%s: %s", chosen_result.inline_message_id, e2)
         else:
-            # TRY TO FALLBACK ON OTHER BAD REQUESTS (e.g. MESSAGE_ID_INVALID)
-            # Send message to admin for debugging
-            from app.core.config import settings
-            try:
-                await chosen_result.bot.send_message(settings.admin_ids_list[0], f"CRITICAL BAD REQUEST ERROR: {tbre} | ID={chosen_result.inline_message_id}")
-            except: pass
+            logger.warning("Telegram error editing inline message: %s", tbre)
     except Exception as exc:
         logger.warning(
             "Failed to edit inline message inline_message_id=%s: %s",
@@ -138,13 +133,6 @@ async def handle_chosen_inline_result(
     if not prompt:
         return
 
-    # DEBUG TRACER 1
-    try:
-        from app.core.config import settings
-        await chosen_result.bot.send_message(settings.admin_ids_list[0], f"DEBUG Stage 1: entered handler. Query: {prompt}")
-    except Exception:
-        pass
-
     # 1. Content fitler check
     content_check = ContentFilterService.check_text_prompt(prompt)
     if not content_check.allowed:
@@ -161,21 +149,7 @@ async def handle_chosen_inline_result(
 
     logger.info("Inline chat accepted user_id=%s inline_message_id=%s", db_user.id, chosen_result.inline_message_id)
 
-    raw_mode = db_user.preferred_text_model or getattr(db_user, "subscription_plan", None) or "flash"
-    preferred_mode = raw_mode.lower()
-    feature_mapping = {
-        "premium": FeatureName.PRO_TEXT,
-        "pro": FeatureName.PRO_TEXT,
-        "flash": FeatureName.FLASH_TEXT,
-    }
-    feature_name = feature_mapping.get(preferred_mode, FeatureName.FLASH_TEXT)
-
-    # DEBUG TRACER 2
-    try:
-        from app.core.config import settings
-        await chosen_result.bot.send_message(settings.admin_ids_list[0], f"DEBUG Stage 2: starting AI process. Feature: {feature_name.value}")
-    except Exception:
-        pass
+    feature_name = FeatureName.FLASH_TEXT
 
     # 3. AI Generation
     try:
@@ -184,6 +158,8 @@ async def handle_chosen_inline_result(
                 user_id=db_user.id,
                 prompt=prompt,
                 feature_name=feature_name,
+                allow_vip=False,
+                ignore_history=True,
             ),
             timeout=settings.AI_REQUEST_TIMEOUT_SECONDS,
         )
@@ -195,14 +171,6 @@ async def handle_chosen_inline_result(
         )
 
     # 4. Delivery
-    
-    # DEBUG TRACER 3
-    try:
-        from app.core.config import settings
-        await chosen_result.bot.send_message(settings.admin_ids_list[0], f"DEBUG Stage 3: AI process returned. Success: {result.success}, len(text): {len(result.text or '')}, inline_message_id: {chosen_result.inline_message_id}")
-    except Exception:
-        pass
-
     try:
         if not result.success:
             await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)

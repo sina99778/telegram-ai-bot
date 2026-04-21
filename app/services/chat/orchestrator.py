@@ -189,7 +189,7 @@ class ChatOrchestrator:
             cost=settings.NORMAL_MESSAGE_COST,
         )
 
-    async def process_message(self, user_id: int, prompt: str, feature_name: FeatureName, allow_vip: bool = True, image_bytes: bytes | None = None) -> ChatResult:
+    async def process_message(self, user_id: int, prompt: str, feature_name: FeatureName, allow_vip: bool = True, image_bytes: bytes | None = None, ignore_history: bool = False) -> ChatResult:
         user = await self.session.get(User, user_id)
         if not user:
             return ChatResult(text=t("en", "chat.user_not_found"), success=False, error_message="user_not_found")
@@ -266,13 +266,15 @@ class ChatOrchestrator:
 
         try:
             conversation = await self._get_or_create_active_conversation(user_id, mode_str)
-            history = await self.memory.get_conversation_history(conversation.id)
-
-            # ── Sliding Window Hard Limit ─────────────────────────────
-            # If the summarization queue is lagging, the history may
-            # exceed PRIVATE_MAX_PROMPT_LENGTH.  Drop the oldest non-
-            # system messages to stay within the provider envelope.
-            history = self._apply_sliding_window(history, prompt)
+            if ignore_history:
+                history = []
+            else:
+                history = await self.memory.get_conversation_history(conversation.id)
+                # ── Sliding Window Hard Limit ─────────────────────────────
+                # If the summarization queue is lagging, the history may
+                # exceed PRIVATE_MAX_PROMPT_LENGTH.  Drop the oldest non-
+                # system messages to stay within the provider envelope.
+                history = self._apply_sliding_window(history, prompt)
 
             response = await self.router.route_text_request_with_config(
                 config=config,
