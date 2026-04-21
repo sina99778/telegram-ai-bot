@@ -186,6 +186,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             url=settings.WEBHOOK_URL,
             secret_token=settings.WEBHOOK_SECRET,
             drop_pending_updates=True,
+            allowed_updates=dp.resolve_used_update_types(),
         )
         logger.info("Webhook registered  ·  url=%s", settings.WEBHOOK_URL)
     except Exception as wh_err:
