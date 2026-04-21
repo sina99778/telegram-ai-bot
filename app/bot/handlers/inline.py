@@ -6,7 +6,7 @@ import html
 
 from aiogram import Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent, ChosenInlineResult
+from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent, ChosenInlineResult, InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.core.config import settings
 from app.core.enums import FeatureName
@@ -45,7 +45,7 @@ async def _safe_edit_inline(
 
         await chosen_result.bot.edit_message_text(
             inline_message_id=chosen_result.inline_message_id,
-            text=final_text,
+            text=final_text[:4090] + "...",
             parse_mode="HTML",
         )
     except TelegramBadRequest as tbre:
@@ -62,7 +62,12 @@ async def _safe_edit_inline(
             except Exception as e2:
                 logger.warning("Fallback edit also failed inline_id=%s: %s", chosen_result.inline_message_id, e2)
         else:
-            logger.warning("Telegram error editing inline message: %s", tbre)
+            # TRY TO FALLBACK ON OTHER BAD REQUESTS (e.g. MESSAGE_ID_INVALID)
+            # Send message to admin for debugging
+            from app.core.config import settings
+            try:
+                await chosen_result.bot.send_message(settings.admin_ids_list[0], f"CRITICAL BAD REQUEST ERROR: {tbre} | ID={chosen_result.inline_message_id}")
+            except: pass
     except Exception as exc:
         logger.warning(
             "Failed to edit inline message inline_message_id=%s: %s",
@@ -115,6 +120,9 @@ async def handle_inline_query(query: InlineQuery, db_user: User):
             message_text=f"🗣 <b>{query.from_user.first_name}:</b> {prompt}\n\n🤖 <i>{t(lang, 'chat.thinking')}</i>",
             parse_mode="HTML",
         ),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="⏳ ...", callback_data="ignore")
+        ]])
     )
 
     await query.answer(results=[article], cache_time=0, is_personal=True)
@@ -191,7 +199,7 @@ async def handle_chosen_inline_result(
     # DEBUG TRACER 3
     try:
         from app.core.config import settings
-        await chosen_result.bot.send_message(settings.admin_ids_list[0], f"DEBUG Stage 3: AI process returned. Success: {result.success}, len(text): {len(result.text or '')}")
+        await chosen_result.bot.send_message(settings.admin_ids_list[0], f"DEBUG Stage 3: AI process returned. Success: {result.success}, len(text): {len(result.text or '')}, inline_message_id: {chosen_result.inline_message_id}")
     except Exception:
         pass
 
