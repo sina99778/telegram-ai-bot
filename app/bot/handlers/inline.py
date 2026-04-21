@@ -69,6 +69,15 @@ async def _safe_edit_inline(
             chosen_result.inline_message_id,
             exc,
         )
+        try:
+            # Bulletproof absolute fallback without any HTML
+            safe_fallback = f"{name or 'User'}: {prompt}\n\nAI: {response_text}"
+            await chosen_result.bot.edit_message_text(
+                inline_message_id=chosen_result.inline_message_id,
+                text=safe_fallback[:4000]
+            )
+        except Exception as absolute_exc:
+            logger.error("Absolute fallback edit failed! inline_id=%s: %s", chosen_result.inline_message_id, absolute_exc)
 
 
 @inline_router.inline_query()

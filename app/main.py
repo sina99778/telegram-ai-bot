@@ -295,6 +295,12 @@ async def telegram_webhook(
     update = Update.model_validate(payload, context={"bot": bot})
     logger.info("Telegram webhook accepted update_id=%s", getattr(update, "update_id", None))
 
+    if getattr(update, "chosen_inline_result", None) and settings.admin_ids_list:
+        try:
+            await bot.send_message(settings.admin_ids_list[0], f"DEBUG: chosen_inline_result received from Telegram! Query: {update.chosen_inline_result.query}")
+        except Exception:
+            pass
+
     # Feed the update into aiogram's dispatcher pipeline.
     background_tasks.add_task(dp.feed_update, bot=bot, update=update)
 
