@@ -351,30 +351,41 @@ class ChatRepository:
             return None
         
         now = datetime.now(timezone.utc)
-        # If last_credit_reset is None, or if the date has changed
-        if not user.last_credit_reset or user.last_credit_reset.date() < now.date():
-            # Free users receive a daily baseline in the normal wallet.
-            if user.normal_credits < settings.DEFAULT_DAILY_NORMAL_CREDITS:
-                deficit = settings.DEFAULT_DAILY_NORMAL_CREDITS - user.normal_credits
-                from app.services.billing.billing_service import BillingService
-                from app.core.enums import LedgerEntryType
-                from app.core.enums import WalletType
-                import time
-                billing = BillingService(self._session)
-                await billing.add_credits(
-                    user_id=user.id,
-                    amount=deficit,
-                    entry_type=LedgerEntryType.BONUS,
-                    reference_type="daily_reset",
-                    reference_id=f"daily_reset_{user.id}_{int(time.time())}",
-                    description="Daily login baseline top-up",
-                    wallet_type=WalletType.NORMAL,
-                )
+        if user.last_credit_reset and user.last_credit_reset.date() >= now.date():
+            return user
             
-            user.last_credit_reset = now
-            user.sync_credit_balance()
-            await self._session.commit()
-        return user
+        # Refetch with lock to prevent concurrent daily reward collection
+        stmt = select(User).where(User.id == user.id).with_for_update()
+        user_locked = await self._session.scalar(stmt)
+        if not user_locked:
+            return user
+            
+        if user_locked.last_credit_reset and user_locked.last_credit_reset.date() >= now.date():
+            return user_locked
+            
+        # Free users receive a daily baseline in the normal wallet.
+        if user_locked.normal_credits < settings.DEFAULT_DAILY_NORMAL_CREDITS:
+            deficit = settings.DEFAULT_DAILY_NORMAL_CREDITS - user_locked.normal_credits
+            from app.services.billing.billing_service import BillingService
+            from app.core.enums import LedgerEntryType
+            from app.core.enums import WalletType
+            import time
+            billing = BillingService(self._session)
+            await billing.add_credits(
+                user_id=user_locked.id,
+                amount=deficit,
+                entry_type=LedgerEntryType.BONUS,
+                reference_type="daily_reset",
+                reference_id=f"daily_reset_{user_locked.id}_{now.date().isoformat()}",
+                description="Daily login baseline top-up",
+                wallet_type=WalletType.NORMAL,
+                auto_commit=False,
+            )
+        
+        user_locked.last_credit_reset = now
+        user_locked.sync_credit_balance()
+        await self._session.commit()
+        return user_locked
 
     async def process_referral(self, invitee_id: int, referrer_id: int) -> bool:
         """Handle the referral logic: Reward referrer and invitee via BillingService."""

@@ -66,6 +66,8 @@ class DbSessionMiddleware(BaseMiddleware):
                 user = event.callback_query.from_user
             elif getattr(event, "inline_query", None):
                 user = event.inline_query.from_user
+            elif getattr(event, "chosen_inline_result", None):
+                user = event.chosen_inline_result.from_user
             elif getattr(event, "from_user", None):
                 user = event.from_user
 

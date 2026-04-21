@@ -448,6 +448,10 @@ async def nowpayments_webhook(
                         logger.error("Could not send purchase confirmation to telegram_id=%s: %s", telegram_id, e)
                         
         except Exception as e:
+            from app.core.exceptions import DuplicateTransactionError
+            if isinstance(e, DuplicateTransactionError):
+                logger.info("NowPayments IPN duplicate order_id=%s. Ignoring.", order_id)
+                return {"status": "ok"}
             logger.error("Error processing NowPayments IPN order_id=%s: %s", order_id, e, exc_info=True)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal Server Error")
 
