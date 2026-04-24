@@ -248,6 +248,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "admin.broadcast_already_running": "A broadcast is already running for this admin session.",
         "inline.switch_pm": "Start a chat to use inline requests",
         "inline.ask_ai_title": "Ask AI",
+        "inline.start_required": "⚠️ Please start the bot first by tapping the button below.",
+        "inline.daily_limit_reached": "You've used all {limit} inline requests for today. Come back tomorrow or use the bot in private chat.",
+        "abuse.inline_rate_limited": "⏳ You're sending inline requests too fast. Please wait a moment.",
     },
     "fa": {
         "buttons.chat": "💬 چت",
@@ -490,6 +493,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "admin.broadcast_already_running": "برای این ادمین همین حالا یک برودکست در حال اجراست.",
         "inline.switch_pm": "برای استفاده از ربات به صفحه چت من بیایید",
         "inline.ask_ai_title": "پرسش از هوش مصنوعی",
+        "inline.start_required": "⚠️ لطفاً ابتدا ربات را با کلیک روی دکمه زیر استارت بزنید.",
+        "inline.daily_limit_reached": "سقف {limit} درخواست اینلاین امروز شما تکمیل شده. فردا دوباره تلاش کنید یا از چت خصوصی استفاده کنید.",
+        "abuse.inline_rate_limited": "⏳ درخواست‌های اینلاین خیلی سریع ارسال می‌شوند. لطفاً کمی صبر کنید.",
     },
 }
 

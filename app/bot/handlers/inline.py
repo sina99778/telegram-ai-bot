@@ -15,6 +15,7 @@ from app.db.models import User
 from app.services.chat.orchestrator import ChatOrchestrator
 from app.services.security.abuse_guard import AbuseGuardService
 from app.services.security.content_filter import ContentFilterService
+from app.services.usage.quota_service import QuotaService
 
 inline_router = Router()
 logger = logging.getLogger(__name__)
@@ -22,6 +23,11 @@ logger = logging.getLogger(__name__)
 
 def _lang(user: User | None) -> str:
     return user.language if user and user.language else "fa"
+
+
+def _user_has_started(user: User) -> bool:
+    """Users who have never pressed /start have an empty language field."""
+    return bool(user.language)
 
 
 async def _safe_edit_inline(
@@ -94,8 +100,26 @@ async def handle_inline_query(query: InlineQuery, db_user: User):
             is_personal=True,
         )
 
+    # ── Gate 1: User must have /start-ed the bot ──────────────
+    if not _user_has_started(db_user):
+        article = InlineQueryResultArticle(
+            id="error_not_started",
+            title=t(lang, "inline.start_required"),
+            input_message_content=InputTextMessageContent(
+                message_text=t(lang, "inline.start_required"), parse_mode="HTML"
+            ),
+        )
+        return await query.answer(
+            results=[article],
+            switch_pm_text=t(lang, "inline.switch_pm"),
+            switch_pm_parameter="start",
+            cache_time=0,
+            is_personal=True,
+        )
+
+    # ── Gate 2: Enforce inline prompt length (shorter than private) ──
     prompt_check = AbuseGuardService.enforce_prompt_length(
-        prompt=prompt, limit=settings.PRIVATE_MAX_PROMPT_LENGTH, lang=lang
+        prompt=prompt, limit=settings.INLINE_MAX_PROMPT_LENGTH, lang=lang
     )
     if not prompt_check.allowed:
         article = InlineQueryResultArticle(
@@ -125,7 +149,7 @@ async def handle_inline_query(query: InlineQuery, db_user: User):
 
 @inline_router.chosen_inline_result()
 async def handle_chosen_inline_result(
-    chosen_result: ChosenInlineResult, db_user: User, chat_orchestrator: ChatOrchestrator
+    chosen_result: ChosenInlineResult, db_user: User, chat_orchestrator: ChatOrchestrator, quota_service: QuotaService
 ):
     lang = _lang(db_user)
     prompt = chosen_result.query.strip()
@@ -133,15 +157,34 @@ async def handle_chosen_inline_result(
     if not prompt:
         return
 
-    # 1. Content fitler check
+    # ── Gate 1: Must have /start-ed ───────────────────────────
+    if not _user_has_started(db_user):
+        return await _safe_edit_inline(
+            chosen_result,
+            t(lang, "inline.start_required"),
+            prompt=prompt,
+            name=chosen_result.from_user.first_name,
+        )
+
+    # ── Gate 2: Daily inline quota ────────────────────────────
+    inline_status = await quota_service.get_inline_status_for_user(db_user.id)
+    if inline_status.exhausted:
+        return await _safe_edit_inline(
+            chosen_result,
+            t(lang, "inline.daily_limit_reached", limit=settings.INLINE_DAILY_LIMIT),
+            prompt=prompt,
+            name=chosen_result.from_user.first_name,
+        )
+
+    # ── Gate 3: Content filter ────────────────────────────────
     content_check = ContentFilterService.check_text_prompt(prompt)
     if not content_check.allowed:
-        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+        await AbuseGuardService.record_failure(subject="inline_chat", subject_id=db_user.id)
         msg = t(lang, "abuse.content_blocked")
         return await _safe_edit_inline(chosen_result, msg, prompt=prompt, name=chosen_result.from_user.first_name)
 
-    # 2. Rate limit check
-    throttle = await AbuseGuardService.check_private_chat(user_id=db_user.id, lang=lang)
+    # ── Gate 4: Inline-specific burst rate limit ──────────────
+    throttle = await AbuseGuardService.check_inline(user_id=db_user.id, lang=lang)
     if not throttle.allowed:
         return await _safe_edit_inline(
             chosen_result, throttle.reason, prompt=prompt, name=chosen_result.from_user.first_name
@@ -151,7 +194,7 @@ async def handle_chosen_inline_result(
 
     feature_name = FeatureName.FLASH_TEXT
 
-    # 3. AI Generation
+    # ── AI Generation ─────────────────────────────────────────
     try:
         result = await asyncio.wait_for(
             chat_orchestrator.process_message(
@@ -165,25 +208,28 @@ async def handle_chosen_inline_result(
         )
     except asyncio.TimeoutError:
         logger.warning("Inline chat: AI timeout user_id=%s", db_user.id)
-        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+        await AbuseGuardService.record_failure(subject="inline_chat", subject_id=db_user.id)
         return await _safe_edit_inline(
             chosen_result, t(lang, "errors.ai_timeout"), prompt=prompt, name=chosen_result.from_user.first_name
         )
 
-    # 4. Delivery
+    # ── Delivery ──────────────────────────────────────────────
     try:
         if not result.success:
-            await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+            await AbuseGuardService.record_failure(subject="inline_chat", subject_id=db_user.id)
             error_text = result.text or result.error_message or t(lang, "errors.delivery_failed")
             return await _safe_edit_inline(
                 chosen_result, error_text, prompt=prompt, name=chosen_result.from_user.first_name
             )
 
+        # Track successful inline usage for daily quota
+        await quota_service.consume_inline_for_user(db_user.id)
+
         return await _safe_edit_inline(
             chosen_result, result.text, prompt=prompt, name=chosen_result.from_user.first_name
         )
     except Exception:
-        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+        await AbuseGuardService.record_failure(subject="inline_chat", subject_id=db_user.id)
         return await _safe_edit_inline(
             chosen_result, t(lang, "errors.delivery_failed"), prompt=prompt, name=chosen_result.from_user.first_name
         )

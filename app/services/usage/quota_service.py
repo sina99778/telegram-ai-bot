@@ -29,6 +29,7 @@ class QuotaService:
     SEARCH_COMMAND = "search_command"
     FREE_IMAGE_GENERATION = "free_image_generation"
     FREE_IMAGE_EDIT = "free_image_edit"
+    INLINE_CHAT = "inline_chat"
     SCOPE_USER = "user"
     SCOPE_GROUP = "group"
 
@@ -201,3 +202,29 @@ class QuotaService:
         await self.session.commit()
         return QuotaStatus(limit=status.limit, used=usage.used_count)
 
+    async def get_inline_status_for_user(self, user_id: int) -> QuotaStatus:
+        """Daily quota for inline chat queries."""
+        usage = await self._get_usage_row(
+            scope_type=self.SCOPE_USER,
+            scope_id=user_id,
+            feature=self.INLINE_CHAT,
+            reset_date=self._today(),
+        )
+        return QuotaStatus(limit=settings.INLINE_DAILY_LIMIT, used=usage.used_count if usage else 0)
+
+    async def consume_inline_for_user(self, user_id: int) -> QuotaStatus:
+        """Consume one inline chat request from the daily quota."""
+        status = await self.get_inline_status_for_user(user_id)
+        if status.exhausted:
+            return status
+        usage = await self._get_usage_row(
+            scope_type=self.SCOPE_USER,
+            scope_id=user_id,
+            feature=self.INLINE_CHAT,
+            reset_date=self._today(),
+            create=True,
+            for_update=True,
+        )
+        usage.used_count += 1
+        await self.session.commit()
+        return QuotaStatus(limit=status.limit, used=usage.used_count)

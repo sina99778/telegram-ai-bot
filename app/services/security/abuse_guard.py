@@ -228,6 +228,22 @@ class AbuseGuardService:
             return cls._backend_error_decision(lang)
 
     @classmethod
+    async def check_inline(cls, *, user_id: int, lang: str) -> GuardDecision:
+        """Inline-specific rate limiter — tighter than private chat."""
+        try:
+            return await cls._hit_window(
+                subject="inline_chat",
+                subject_id=user_id,
+                limit=settings.INLINE_BURST_LIMIT,
+                window_seconds=settings.INLINE_BURST_WINDOW_SECONDS,
+                lang=lang,
+                reason_key="abuse.inline_rate_limited",
+            )
+        except Exception:
+            logger.exception("Abuse guard failed for inline user_id=%s", user_id)
+            return cls._backend_error_decision(lang)
+
+    @classmethod
     async def check_group_request(cls, *, group_id: int, lang: str) -> GuardDecision:
         try:
             decision = await cls._check_temp_block(subject="group_request", subject_id=group_id, lang=lang)
