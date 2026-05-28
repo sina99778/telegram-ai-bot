@@ -194,3 +194,26 @@ alembic upgrade head
 python -m compileall app tests alembic
 python -m pytest -q
 ```
+
+## One-shot installer & doctor
+
+The repository ships with `install.sh`, a small bash wrapper around
+`docker compose`, `alembic`, and the Telegram API that turns first-time
+setup, in-place upgrades, and diagnosis into single commands. Run it
+from the project root:
+
+```bash
+./install.sh env-setup     # bootstrap .env from .env.example, auto-generate WEBHOOK_SECRET
+$EDITOR .env               # fill in BOT_TOKEN, WEBHOOK_URL, GEMINI_API_KEY, POSTGRES_*
+./install.sh install       # build images, start db/redis/web/worker, run migrations, register webhook
+./install.sh doctor        # 11-step read-only health check (containers, db, redis, migrations, webhook, …)
+./install.sh doctor --fix  # safe auto-remediation: regenerate secrets, recreate failed containers,
+                           # re-apply migrations, re-register the webhook, prune dangling images
+./install.sh update        # git pull + rebuild + migrate, idempotent and data-safe
+./install.sh logs worker   # tail any service: web | worker | db | redis
+./install.sh backup        # manual gzipped pg_dump into ./backups/
+./install.sh status        # compact container + Telegram-webhook summary
+```
+
+`doctor` is a no-side-effects diagnosis by default; `--fix` only applies
+non-destructive remediations (it never drops data or removes volumes).

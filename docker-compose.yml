@@ -67,6 +67,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      # ARQ has no HTTP endpoint — assert the python process is alive via pgrep.
+      test: ["CMD-SHELL", "pgrep -f 'arq app.workers.main' >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 # ──────────────────────────────────────────────
 #  Persistent volumes

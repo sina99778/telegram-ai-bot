@@ -9,8 +9,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install curl for Docker healthcheck probes
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# Install curl (web healthcheck) and procps (worker healthcheck via pgrep)
+RUN apt-get update && apt-get install -y --no-install-recommends curl procps \
  && rm -rf /var/lib/apt/lists/*
 
 # ── Install dependencies first (cached layer) ──

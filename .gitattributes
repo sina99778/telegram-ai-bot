@@ -1,0 +1,7 @@
+# Force LF on shell scripts and Dockerfiles so they run unchanged on Linux
+# even when the repo is cloned/edited from Windows.
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.py        text eol=lf
