@@ -195,25 +195,71 @@ python -m compileall app tests alembic
 python -m pytest -q
 ```
 
-## One-shot installer & doctor
+## One-shot installer, doctor & interactive menu
 
 The repository ships with `install.sh`, a small bash wrapper around
 `docker compose`, `alembic`, and the Telegram API that turns first-time
-setup, in-place upgrades, and diagnosis into single commands. Run it
-from the project root:
+setup, in-place upgrades, and diagnosis into single commands.
+
+### Interactive mode (default)
+
+Run the script with no arguments to drop into a TUI-style menu with a
+live status header (containers, webhook registration, .env readiness):
+
+```bash
+./install.sh
+```
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║              Telegram AI Bot — Manager                       ║
+║              git: master  e0ca77d                            ║
+╠══════════════════════════════════════════════════════════════╣
+║  stack:   ● db   ● redis   ● web   ● worker                  ║
+║  webhook: registered                                         ║
+║  .env:    ready                                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+  Setup
+   1) ⚙️  .env setup
+   2) 🚀  Install                       first-time: build, start, migrate
+  Maintenance
+   3) 🔄  Update                        git pull + rebuild + migrate
+   4) 🩺  Doctor                        11-step diagnosis (read-only)
+   5) 🛠  Doctor --fix                  diagnose + safe auto-remediation
+  Operations
+   6) ⚡  Daily operations >            start, stop, restart, logs, status
+   7) 💾  Backup & restore >
+   8) 🧰  Advanced >                    shells, migrate, prune, full reset
+
+   9) 📖  Show help
+   0) ❌  Exit
+```
+
+Sub-menus group the less-frequent actions (per-service log tailing,
+backup/restore, container shells, full reset with double confirmation,
+…) so the top level stays uncluttered.
+
+### Direct commands
+
+Every action also works headless, which is what `cron`, CI, and remote
+shells want:
 
 ```bash
 ./install.sh env-setup     # bootstrap .env from .env.example, auto-generate WEBHOOK_SECRET
 $EDITOR .env               # fill in BOT_TOKEN, WEBHOOK_URL, GEMINI_API_KEY, POSTGRES_*
 ./install.sh install       # build images, start db/redis/web/worker, run migrations, register webhook
-./install.sh doctor        # 11-step read-only health check (containers, db, redis, migrations, webhook, …)
+./install.sh doctor        # 11-step read-only health check
 ./install.sh doctor --fix  # safe auto-remediation: regenerate secrets, recreate failed containers,
                            # re-apply migrations, re-register the webhook, prune dangling images
 ./install.sh update        # git pull + rebuild + migrate, idempotent and data-safe
 ./install.sh logs worker   # tail any service: web | worker | db | redis
 ./install.sh backup        # manual gzipped pg_dump into ./backups/
 ./install.sh status        # compact container + Telegram-webhook summary
+./install.sh menu          # explicitly enter the TUI menu
 ```
 
 `doctor` is a no-side-effects diagnosis by default; `--fix` only applies
 non-destructive remediations (it never drops data or removes volumes).
+The only menu action that can destroy data is **Advanced → Full reset**,
+which requires typing the word `DELETE` to proceed.

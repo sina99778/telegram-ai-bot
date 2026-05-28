@@ -786,9 +786,397 @@ set_telegram_webhook() {
     fi
 }
 
+# ── Interactive menu ─────────────────────────────────────────────────────────
+#
+# When the script is run with no arguments (or with `menu`), we drop into a
+# polished, no-deps TUI built out of plain bash + ANSI. It shows the live
+# state of the stack at the top, presents categorized actions, and pauses
+# after each action so you can read the output before going back.
+#
+# CLI subcommands keep working (./install.sh doctor --fix, etc.) so this is
+# strictly additive — power users can stay on the command line.
+
+# Service indicator: ●  with color reflecting Docker state.
+#   green  = running + healthy
+#   yellow = running but unhealthy / starting
+#   red    = stopped or missing
+#   gray   = docker daemon unreachable (we can't tell)
+menu_service_dot() {
+    local svc="$1"
+    if ! docker info >/dev/null 2>&1; then
+        printf "%s●%s %s" "$DIM" "$NC" "$svc"
+        return
+    fi
+    local cid; cid="$(dc ps -q "$svc" 2>/dev/null || true)"
+    if [ -z "$cid" ]; then
+        printf "%s●%s %s" "$RED" "$NC" "$svc"
+        return
+    fi
+    local state health
+    state="$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || echo unknown)"
+    health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo none)"
+    if [ "$state" = "running" ] && { [ "$health" = "healthy" ] || [ "$health" = "none" ]; }; then
+        printf "%s●%s %s" "$GREEN" "$NC" "$svc"
+    elif [ "$state" = "running" ]; then
+        printf "%s●%s %s" "$YELLOW" "$NC" "$svc"
+    else
+        printf "%s●%s %s" "$RED" "$NC" "$svc"
+    fi
+}
+
+menu_webhook_indicator() {
+    local token; token="$(env_get BOT_TOKEN 2>/dev/null || true)"
+    if is_placeholder "$token"; then
+        printf "%s—%s no token" "$DIM" "$NC"
+        return
+    fi
+    local resp; resp="$(curl -s --max-time 3 "https://api.telegram.org/bot${token}/getWebhookInfo" 2>/dev/null || true)"
+    if [ -z "$resp" ]; then
+        printf "%s—%s unreachable" "$DIM" "$NC"
+        return
+    fi
+    local url; url="$(echo "$resp" | grep -oE '"url"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
+    if [ -n "$url" ]; then
+        printf "%sregistered%s" "$GREEN" "$NC"
+    else
+        printf "%snot set%s" "$RED" "$NC"
+    fi
+}
+
+menu_git_indicator() {
+    if [ -d "$PROJECT_ROOT/.git" ]; then
+        local branch sha
+        branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+        sha="$(git rev-parse --short HEAD 2>/dev/null || echo '?')"
+        printf "%s  %s" "$branch" "$sha"
+    else
+        printf "%s—%s" "$DIM" "$NC"
+    fi
+}
+
+menu_env_indicator() {
+    if [ ! -f "$ENV_FILE" ]; then
+        printf "%s.env missing%s" "$RED" "$NC"
+        return
+    fi
+    local missing=0
+    for k in "${REQUIRED_KEYS[@]}"; do
+        local v; v="$(env_get "$k" 2>/dev/null || true)"
+        if is_placeholder "$v"; then missing=$((missing + 1)); fi
+    done
+    if [ "$missing" -eq 0 ]; then
+        printf "%sready%s" "$GREEN" "$NC"
+    else
+        printf "%s%d key(s) missing%s" "$YELLOW" "$missing" "$NC"
+    fi
+}
+
+menu_clear_screen() {
+    # Only clear if stdout is a real terminal — otherwise just print a separator.
+    if [ -t 1 ]; then
+        printf "\033[2J\033[H"
+    else
+        printf "\n\n%s\n\n" "────────────────────────────────────────────────────────────"
+    fi
+}
+
+menu_header() {
+    local title="$1"
+    menu_clear_screen
+    printf "%s╔══════════════════════════════════════════════════════════════╗%s\n" "$BOLD" "$NC"
+    printf "%s║%s              Telegram AI Bot — %s%-30s%s%s║%s\n" \
+           "$BOLD" "$NC" "$BOLD" "$title" "$NC" "$BOLD" "$NC"
+    printf "%s║%s              git: %-43s %s║%s\n" \
+           "$BOLD" "$NC" "$(menu_git_indicator)" "$BOLD" "$NC"
+    printf "%s╠══════════════════════════════════════════════════════════════╣%s\n" "$BOLD" "$NC"
+    printf "%s║%s  stack:   %s   %s   %s   %s   %s║%s\n" \
+           "$BOLD" "$NC" \
+           "$(menu_service_dot db)" "$(menu_service_dot redis)" \
+           "$(menu_service_dot web)" "$(menu_service_dot worker)" \
+           "$BOLD" "$NC"
+    printf "%s║%s  webhook: %-50s %s║%s\n" \
+           "$BOLD" "$NC" "$(menu_webhook_indicator)" "$BOLD" "$NC"
+    printf "%s║%s  .env:    %-50s %s║%s\n" \
+           "$BOLD" "$NC" "$(menu_env_indicator)" "$BOLD" "$NC"
+    printf "%s╚══════════════════════════════════════════════════════════════╝%s\n" "$BOLD" "$NC"
+    echo
+}
+
+menu_item() {
+    # menu_item <number> <emoji> <label> [<hint>]
+    local num="$1" emoji="$2" label="$3" hint="${4:-}"
+    if [ -n "$hint" ]; then
+        printf "  %s%2s)%s %s  %-32s %s%s%s\n" "$BOLD" "$num" "$NC" "$emoji" "$label" "$DIM" "$hint" "$NC"
+    else
+        printf "  %s%2s)%s %s  %s\n" "$BOLD" "$num" "$NC" "$emoji" "$label"
+    fi
+}
+
+menu_pause() {
+    echo
+    printf "%sPress Enter to return to the menu…%s " "$DIM" "$NC"
+    # shellcheck disable=SC2034
+    read -r _ || true
+}
+
+menu_confirm() {
+    # Returns 0 if user types y/yes, 1 otherwise. Defaults to NO.
+    local prompt="${1:-Are you sure?}"
+    printf "%s%s [y/N]:%s " "$YELLOW" "$prompt" "$NC"
+    local reply
+    read -r reply || return 1
+    case "$reply" in
+        y|Y|yes|YES|Yes) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Run a cmd_X function (or arbitrary command) inside the menu shell. We
+# tolerate non-zero exit codes so a failing action doesn't kick the user
+# out of the menu — they read the output, hit Enter, and try again.
+menu_run() {
+    set +e
+    "$@"
+    local rc=$?
+    set -e
+    if [ "$rc" -ne 0 ]; then
+        echo
+        warn "Action exited with status $rc (returned to menu)."
+    fi
+    menu_pause
+}
+
+# ── Sub-menus ───────────────────────────────────────────────────────────────
+
+menu_daily_ops() {
+    while true; do
+        menu_header "Daily operations"
+        menu_item 1 "▶ " "Start"           "docker compose up -d"
+        menu_item 2 "■ " "Stop"            "docker compose down (volumes preserved)"
+        menu_item 3 "↻ " "Restart"         "docker compose restart"
+        menu_item 4 "📊" "Status"          "containers + Telegram webhook"
+        menu_item 5 "📜" "Tail web logs"
+        menu_item 6 "📜" "Tail worker logs"
+        menu_item 7 "📜" "Tail db logs"
+        menu_item 8 "📜" "Tail redis logs"
+        echo
+        menu_item 0 "←" "Back"
+        echo
+        printf "%sChoose:%s " "$BOLD" "$NC"
+        local ch; read -r ch || return 0
+        case "$ch" in
+            1) menu_run cmd_start ;;
+            2) menu_run cmd_stop ;;
+            3) menu_run cmd_restart ;;
+            4) menu_run cmd_status ;;
+            5) menu_run cmd_logs web ;;
+            6) menu_run cmd_logs worker ;;
+            7) menu_run cmd_logs db ;;
+            8) menu_run cmd_logs redis ;;
+            0|q|Q) return 0 ;;
+            *) warn "Unknown choice: $ch"; sleep 1 ;;
+        esac
+    done
+}
+
+menu_backup_ops() {
+    while true; do
+        menu_header "Backup & restore"
+        menu_item 1 "💾" "Take a manual backup now" "gzipped pg_dump → ./backups/"
+        menu_item 2 "📋" "List existing backups"
+        menu_item 3 "🔄" "Restore from a backup"   "interactive — pick a file"
+        echo
+        menu_item 0 "←" "Back"
+        echo
+        printf "%sChoose:%s " "$BOLD" "$NC"
+        local ch; read -r ch || return 0
+        case "$ch" in
+            1) menu_run cmd_backup ;;
+            2) menu_run menu_list_backups ;;
+            3) menu_run menu_restore_backup ;;
+            0|q|Q) return 0 ;;
+            *) warn "Unknown choice: $ch"; sleep 1 ;;
+        esac
+    done
+}
+
+menu_list_backups() {
+    section "Existing backups"
+    local dir="$PROJECT_ROOT/backups"
+    if [ ! -d "$dir" ] || [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
+        info "No backups found in $dir"
+        return 0
+    fi
+    ls -lh --time=ctime "$dir" 2>/dev/null || ls -lh "$dir"
+}
+
+menu_restore_backup() {
+    section "Restore from backup"
+    local dir="$PROJECT_ROOT/backups"
+    if [ ! -d "$dir" ]; then
+        err "No backups directory at $dir"
+        return 1
+    fi
+    local files=()
+    while IFS= read -r line; do
+        [ -n "$line" ] && files+=("$line")
+    done < <(ls -1t "$dir"/*.sql.gz 2>/dev/null || true)
+
+    if [ "${#files[@]}" -eq 0 ]; then
+        info "No .sql.gz backups found in $dir"
+        return 0
+    fi
+
+    echo "Available backups (newest first):"
+    local idx=1
+    for f in "${files[@]}"; do
+        printf "  %s%2d)%s %s  (%s)\n" "$BOLD" "$idx" "$NC" "$(basename "$f")" "$(du -h "$f" | cut -f1)"
+        idx=$((idx + 1))
+    done
+    echo
+    printf "Pick a number (or 0 to cancel): "
+    local pick; read -r pick || return 0
+    [ "$pick" = "0" ] && { info "Cancelled"; return 0; }
+    if ! [[ "$pick" =~ ^[0-9]+$ ]] || [ "$pick" -lt 1 ] || [ "$pick" -gt "${#files[@]}" ]; then
+        err "Invalid selection"
+        return 1
+    fi
+    local chosen="${files[$((pick - 1))]}"
+    warn "About to restore $(basename "$chosen") into the running database."
+    warn "This will DROP and recreate existing objects (--clean --if-exists in the dump)."
+    if ! menu_confirm "Proceed with restore?"; then
+        info "Cancelled"
+        return 0
+    fi
+
+    local pg_user pg_db
+    pg_user="$(env_get POSTGRES_USER || echo postgres)"
+    pg_db="$(env_get POSTGRES_DB     || echo postgres)"
+    info "Restoring…"
+    if gunzip -c "$chosen" | dc exec -T db psql -U "$pg_user" -d "$pg_db" >/dev/null; then
+        ok "Restore complete"
+    else
+        err "Restore failed; database may be in a partial state"
+        return 1
+    fi
+}
+
+menu_advanced() {
+    while true; do
+        menu_header "Advanced"
+        menu_item 1 "🐚" "Shell into web"        "/bin/bash inside the container"
+        menu_item 2 "🐚" "Shell into worker"
+        menu_item 3 "🐚" "Shell into db"          "psql access"
+        menu_item 4 "🔧" "Rebuild .env"           "from .env.example"
+        menu_item 5 "📐" "alembic upgrade head"   "apply pending migrations"
+        menu_item 6 "🧹" "Prune dangling images"  "reclaim disk (safe)"
+        menu_item 7 "⚠ " "Full reset"            "stop & DELETE volumes (DESTRUCTIVE)"
+        echo
+        menu_item 0 "←" "Back"
+        echo
+        printf "%sChoose:%s " "$BOLD" "$NC"
+        local ch; read -r ch || return 0
+        case "$ch" in
+            1) menu_run cmd_shell web ;;
+            2) menu_run cmd_shell worker ;;
+            3) menu_run menu_shell_db ;;
+            4) menu_run cmd_env_setup ;;
+            5) menu_run cmd_migrate ;;
+            6) menu_run menu_prune_images ;;
+            7) menu_run menu_full_reset ;;
+            0|q|Q) return 0 ;;
+            *) warn "Unknown choice: $ch"; sleep 1 ;;
+        esac
+    done
+}
+
+menu_shell_db() {
+    section "psql shell"
+    local pg_user pg_db
+    pg_user="$(env_get POSTGRES_USER || echo postgres)"
+    pg_db="$(env_get POSTGRES_DB     || echo postgres)"
+    dc exec db psql -U "$pg_user" -d "$pg_db"
+}
+
+menu_prune_images() {
+    section "Prune dangling images"
+    docker system prune -f
+}
+
+menu_full_reset() {
+    section "Full reset"
+    err "This will:"
+    err "  - stop every container"
+    err "  - DELETE the postgres_data and redis_data volumes"
+    err "  - DROP all user, conversation, billing, and ledger data"
+    err "It does NOT touch .env or ./backups/."
+    echo
+    if ! menu_confirm "Type 'y' to confirm full reset"; then
+        info "Cancelled"
+        return 0
+    fi
+    # Second confirmation gate — destructive.
+    printf "%sType the word DELETE in capitals to proceed:%s " "$RED" "$NC"
+    local confirm; read -r confirm || return 0
+    if [ "$confirm" != "DELETE" ]; then
+        info "Cancelled (confirmation phrase did not match)"
+        return 0
+    fi
+    dc down -v
+    ok "Volumes removed. Run 'Install' next to recreate the stack from scratch."
+}
+
+# ── Top-level menu ───────────────────────────────────────────────────────────
+
+menu_main() {
+    while true; do
+        menu_header "Manager"
+        printf "%s  Setup%s\n" "$DIM" "$NC"
+        menu_item 1 "⚙️ " ".env setup"          "create or refresh .env"
+        menu_item 2 "🚀" "Install"              "first-time: build, start, migrate"
+        echo
+        printf "%s  Maintenance%s\n" "$DIM" "$NC"
+        menu_item 3 "🔄" "Update"               "git pull + rebuild + migrate"
+        menu_item 4 "🩺" "Doctor"               "11-step diagnosis (read-only)"
+        menu_item 5 "🛠 " "Doctor --fix"         "diagnose + safe auto-remediation"
+        echo
+        printf "%s  Operations%s\n" "$DIM" "$NC"
+        menu_item 6 "⚡" "Daily operations >"   "start, stop, restart, logs, status"
+        menu_item 7 "💾" "Backup & restore >"
+        menu_item 8 "🧰" "Advanced >"           "shells, migrate, prune, full reset"
+        echo
+        menu_item 9 "📖" "Show help"
+        menu_item 0 "❌" "Exit"
+        echo
+        printf "%sChoose:%s " "$BOLD" "$NC"
+        local ch; read -r ch || return 0
+        case "$ch" in
+            1) menu_run cmd_env_setup ;;
+            2) menu_run cmd_install ;;
+            3) menu_run cmd_update ;;
+            4) menu_run cmd_doctor ;;
+            5) menu_run cmd_doctor --fix ;;
+            6) menu_daily_ops ;;
+            7) menu_backup_ops ;;
+            8) menu_advanced ;;
+            9) menu_run cmd_help ;;
+            0|q|Q|exit|quit) clear 2>/dev/null || true; ok "Bye 👋"; return 0 ;;
+            *) warn "Unknown choice: $ch"; sleep 1 ;;
+        esac
+    done
+}
+
+cmd_menu() { menu_main; }
+
 # ── Entrypoint ───────────────────────────────────────────────────────────────
 main() {
-    local cmd="${1:-help}"
+    # No args ⇒ launch the interactive menu (most users want this).
+    if [ "$#" -eq 0 ]; then
+        cmd_menu
+        return $?
+    fi
+
+    local cmd="$1"
     shift || true
     case "$cmd" in
         install)    cmd_install     "$@" ;;
@@ -803,6 +1191,7 @@ main() {
         backup)     cmd_backup      "$@" ;;
         shell)      cmd_shell       "$@" ;;
         env-setup)  cmd_env_setup   "$@" ;;
+        menu)       cmd_menu        "$@" ;;
         help|-h|--help) cmd_help ;;
         *)
             err "Unknown command: $cmd"
