@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove, URLInputFile
@@ -11,9 +14,12 @@ from app.core.i18n import t
 from app.db.models import User
 from app.db.repositories.chat_repo import ChatRepository
 
+logger = logging.getLogger(__name__)
+
 base_router = Router(name="base")
 
 BANNER_URL = "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?q=80&w=1000&auto=format&fit=crop"
+BANNER_FETCH_TIMEOUT = 5.0
 
 
 def _main_menu_text(lang: str, first_name: str, is_admin: bool) -> str:
@@ -68,13 +74,24 @@ async def cmd_start(message: Message, command: CommandObject, chat_repo: ChatRep
     lang = user.language
     welcome_text = _main_menu_text(lang, message.from_user.first_name or "friend", is_admin)
     try:
-        await message.answer_photo(
-            photo=URLInputFile(BANNER_URL),
-            caption=welcome_text,
+        await asyncio.wait_for(
+            message.answer_photo(
+                photo=URLInputFile(BANNER_URL),
+                caption=welcome_text,
+                reply_markup=get_main_menu(lang, is_admin=is_admin),
+                parse_mode="HTML",
+            ),
+            timeout=BANNER_FETCH_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Start banner fetch timed out telegram_id=%s; falling back to text-only", message.from_user.id)
+        await message.answer(
+            welcome_text,
             reply_markup=get_main_menu(lang, is_admin=is_admin),
             parse_mode="HTML",
         )
     except Exception:
+        logger.warning("Start banner send failed telegram_id=%s; falling back to text-only", message.from_user.id, exc_info=True)
         await message.answer(
             welcome_text,
             reply_markup=get_main_menu(lang, is_admin=is_admin),

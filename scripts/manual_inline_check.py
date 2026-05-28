@@ -3,7 +3,7 @@ from aiogram import Bot
 from aiogram.types import Update, ChosenInlineResult, User
 from app.main import dp
 
-async def test_update():
+async def run_inline_smoke_check():
     from app.core.config import settings
     bot = Bot(token=settings.BOT_TOKEN or "123:ABC")
     
@@ -26,4 +26,4 @@ async def test_update():
         traceback.print_exc()
 
 if __name__ == "__main__":
-    asyncio.run(test_update())
+    asyncio.run(run_inline_smoke_check())
