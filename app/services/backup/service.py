@@ -269,7 +269,8 @@ class DailyBackupService:
                 )
                 if attempt == 1:
                     await asyncio.sleep(3)
-        assert last_error is not None
+        if last_error is None:
+            raise RuntimeError("Backup send loop ended without success or captured error")
         raise last_error
 
     @classmethod

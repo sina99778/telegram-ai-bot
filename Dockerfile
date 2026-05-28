@@ -21,6 +21,13 @@ RUN pip install --no-cache-dir --upgrade pip \
 # ── Copy project source ──
 COPY . .
 
+# ── Create unprivileged runtime user ──
+# Running as root inside the container is unnecessary for this workload
+# and broadens the blast radius of any container-escape vulnerability.
+RUN groupadd --system app && useradd --system --gid app --no-create-home --home /app appuser \
+ && chown -R appuser:app /app
+USER appuser
+
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

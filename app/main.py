@@ -273,8 +273,10 @@ async def telegram_webhook(
     prevent unauthorised payloads from being processed.
     """
 
-    # ── Verify secret token ───────────────────
-    if x_telegram_bot_api_secret_token != settings.WEBHOOK_SECRET:
+    # ── Verify secret token (constant-time) ───
+    expected_secret = settings.WEBHOOK_SECRET or ""
+    received_secret = x_telegram_bot_api_secret_token or ""
+    if not hmac.compare_digest(received_secret, expected_secret):
         logger.warning("Webhook request with invalid secret token")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -282,7 +284,13 @@ async def telegram_webhook(
         )
 
     # ── Parse & dispatch the update ───────────
-    raw_body = await request.body()
+    # Cap how long we wait for the client to finish sending — protects
+    # against slow-loris style attacks that hold a connection open.
+    try:
+        raw_body = await asyncio.wait_for(request.body(), timeout=10)
+    except asyncio.TimeoutError:
+        logger.warning("Webhook request rejected: body read timed out")
+        raise HTTPException(status_code=status.HTTP_408_REQUEST_TIMEOUT, detail="Request body timeout")
     if len(raw_body) > settings.WEBHOOK_MAX_BODY_BYTES:
         logger.warning("Webhook request rejected: body too large bytes=%s", len(raw_body))
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Payload too large")
@@ -318,7 +326,11 @@ async def nowpayments_webhook(
     x_nowpayments_sig: str | None = Header(default=None),
 ) -> dict[str, str]:
     """Receives IPN from NowPayments when a payment is successful."""
-    raw_body = await request.body()
+    try:
+        raw_body = await asyncio.wait_for(request.body(), timeout=10)
+    except asyncio.TimeoutError:
+        logger.warning("NowPayments webhook rejected: body read timed out")
+        raise HTTPException(status_code=status.HTTP_408_REQUEST_TIMEOUT, detail="Request body timeout")
     if len(raw_body) > settings.NOWPAYMENTS_WEBHOOK_MAX_BODY_BYTES:
         logger.warning("NowPayments webhook rejected: body too large bytes=%s", len(raw_body))
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Payload too large")
