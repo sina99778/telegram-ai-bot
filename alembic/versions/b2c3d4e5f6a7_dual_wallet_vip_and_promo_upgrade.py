@@ -33,8 +33,81 @@ def _has_column(table_name: str, column_name: str) -> bool:
     return column_name in {column["name"] for column in inspector.get_columns(table_name)}
 
 
+def _reconcile_pg_enum(conn, type_name: str, expected_values: list[str]) -> None:
+    """Make sure a PostgreSQL enum type carries every expected value.
+
+    This guards against the common situation where ``Base.metadata.create_all``
+    created the type with a different value set (for example the SQLAlchemy
+    default, which uses the Python ``Enum`` member *names* — ``GIFT_…`` —
+    rather than the ``.value`` strings — ``gift_…``). In that state a later
+    ``Enum.create(checkfirst=True)`` here is a no-op (the *name* exists), and
+    the subsequent ``ADD COLUMN … DEFAULT 'gift_normal_credits'`` then bombs
+    with ``invalid input value for enum``.
+
+    Behaviour:
+      * Non-PostgreSQL backend → no-op.
+      * Type doesn't exist → no-op (caller's ``.create()`` will create it).
+      * All expected values already present → no-op.
+      * Some expected values missing AND no column uses the type yet →
+        drop the type so caller's ``.create()`` recreates it cleanly.
+      * Some expected values missing AND a column already uses the type →
+        ``ALTER TYPE … ADD VALUE IF NOT EXISTS`` for each missing label.
+    """
+    if conn.dialect.name != "postgresql":
+        return
+
+    type_exists = conn.execute(
+        sa.text("SELECT 1 FROM pg_type WHERE typname = :n"),
+        {"n": type_name},
+    ).scalar()
+    if not type_exists:
+        return
+
+    existing_rows = conn.execute(
+        sa.text(
+            "SELECT e.enumlabel "
+            "FROM pg_type t JOIN pg_enum e ON t.oid = e.enumtypid "
+            "WHERE t.typname = :n"
+        ),
+        {"n": type_name},
+    ).all()
+    existing = {row[0] for row in existing_rows}
+    missing = [v for v in expected_values if v not in existing]
+    if not missing:
+        return
+
+    in_use = conn.execute(
+        sa.text(
+            "SELECT 1 FROM pg_attribute a "
+            "JOIN pg_type t ON a.atttypid = t.oid "
+            "WHERE t.typname = :n AND NOT a.attisdropped LIMIT 1"
+        ),
+        {"n": type_name},
+    ).scalar()
+
+    if in_use:
+        # PG 12+ allows ADD VALUE inside a transaction as long as the type
+        # itself wasn't created in this same transaction (it wasn't — we
+        # just confirmed it pre-exists).
+        for value in missing:
+            op.execute(sa.text(f"ALTER TYPE {type_name} ADD VALUE IF NOT EXISTS '{value}'"))
+    else:
+        op.execute(sa.text(f"DROP TYPE {type_name}"))
+
+
 def upgrade() -> None:
     bind = op.get_bind()
+
+    # Reconcile any pre-existing enum types whose value set drifted from what
+    # this migration expects (typical when create_all bootstrapped the schema
+    # with SQLAlchemy's default uppercase labels).
+    _reconcile_pg_enum(bind, "wallettype", ["NORMAL", "VIP"])
+    _reconcile_pg_enum(
+        bind,
+        "promocodekind",
+        ["gift_normal_credits", "gift_vip_credits", "gift_vip_days", "discount_percent"],
+    )
+
     wallet_enum.create(bind, checkfirst=True)
     promo_kind_enum.create(bind, checkfirst=True)
 

@@ -228,7 +228,16 @@ class PromoCode(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
-    kind: Mapped[PromoCodeKind] = mapped_column(SQLEnum(PromoCodeKind), default=PromoCodeKind.GIFT_NORMAL_CREDITS)
+    # values_callable: store the lowercase Enum .value strings in PostgreSQL
+    # (gift_normal_credits, …) rather than SQLAlchemy's default of Python
+    # member names (GIFT_NORMAL_CREDITS, …). The alembic migration
+    # b2c3d4e5f6a7 expects the lowercase form — keeping create_all() in sync
+    # avoids the "invalid input value for enum promocodekind" failure on
+    # fresh installs that bootstrap via Base.metadata.create_all.
+    kind: Mapped[PromoCodeKind] = mapped_column(
+        SQLEnum(PromoCodeKind, values_callable=lambda e: [m.value for m in e]),
+        default=PromoCodeKind.GIFT_NORMAL_CREDITS,
+    )
     normal_credits: Mapped[int] = mapped_column(default=0)
     vip_credits: Mapped[int] = mapped_column(default=0)
     vip_days: Mapped[int] = mapped_column(default=0)
