@@ -6,7 +6,7 @@ from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
+    retry_if_exception,
     before_sleep_log,
 )
 
@@ -24,6 +24,25 @@ class SafetyBlockedError(Exception):
     def __init__(self, category: str = "unknown", message: str = "Content blocked by safety filters."):
         self.category = category
         super().__init__(message)
+
+
+# Tenacity exception predicate: retry only on transient/recoverable errors.
+# Never retry on safety blocks (user content issue, not transient), nor on
+# cancellation / system-exit style exceptions (those should propagate fast).
+_NON_RETRY_TYPES: tuple[type[BaseException], ...] = (
+    SafetyBlockedError,
+    asyncio.CancelledError,
+    KeyboardInterrupt,
+    SystemExit,
+    MemoryError,
+)
+
+
+def _should_retry_gemini_error(exc: BaseException) -> bool:
+    if isinstance(exc, _NON_RETRY_TYPES):
+        return False
+    # asyncio.TimeoutError, ConnectionError, OSError, google.genai errors → retry
+    return isinstance(exc, Exception)
 
 
 # ── Default safety settings ──
@@ -83,7 +102,7 @@ class AntigravityProvider(BaseAIProvider):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=8),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception(_should_retry_gemini_error),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
