@@ -34,16 +34,21 @@ async def _safe_edit_inline(
     chosen_result: ChosenInlineResult, response_text: str, prompt: str | None = None, name: str | None = None
 ):
     try:
+        # The response body (from the model or i18n) may legitimately contain
+        # Telegram-supported HTML (e.g. <b>, <i>); we trust that. But the
+        # header that echoes user input must always be escaped so a malicious
+        # username or prompt can't inject markup.
         if prompt and name:
-            # Reconstruct the header with the response
-            final_text = f"🗣 <b>{name}:</b> {prompt}\n\n🤖 {response_text}"
+            safe_name = html.escape(name)
+            safe_prompt = html.escape(prompt)
+            final_text = f"🗣 <b>{safe_name}:</b> {safe_prompt}\n\n🤖 {response_text}"
         else:
             final_text = f"🤖 {response_text}"
 
         # Max length for inline message text is 4096
         if len(final_text) > 4096:
             if prompt and name:
-                header = f"🗣 <b>{name}:</b> {prompt}\n\n🤖 "
+                header = f"🗣 <b>{html.escape(name)}:</b> {html.escape(prompt)}\n\n🤖 "
                 allowed_len = 4090 - len(header)
                 final_text = header + response_text[:allowed_len] + "..."
             else:
@@ -131,12 +136,14 @@ async def handle_inline_query(query: InlineQuery, db_user: User):
         )
         return await query.answer(results=[article], cache_time=0, is_personal=True)
 
+    safe_name = html.escape(query.from_user.first_name or "")
+    safe_prompt_preview = html.escape(prompt)
     article = InlineQueryResultArticle(
         id="ai_chat",
         title=t(lang, "inline.ask_ai_title"),
         description=prompt,
         input_message_content=InputTextMessageContent(
-            message_text=f"🗣 <b>{query.from_user.first_name}:</b> {prompt}\n\n🤖 <i>{t(lang, 'chat.thinking')}</i>",
+            message_text=f"🗣 <b>{safe_name}:</b> {safe_prompt_preview}\n\n🤖 <i>{t(lang, 'chat.thinking')}</i>",
             parse_mode="HTML",
         ),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[

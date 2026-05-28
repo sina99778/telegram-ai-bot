@@ -106,7 +106,7 @@ class CheckUserStatusMiddleware(BaseMiddleware):
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="📢 Join Channel",
+                            text=t(lang, "forced_join.join_button"),
                             url=f"https://t.me/{settings.FORCED_JOIN_CHANNEL.lstrip('@')}",
                         )
                     ]
