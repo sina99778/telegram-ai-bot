@@ -253,7 +253,11 @@ class AdminService:
 
     async def redeem_promo_code(self, telegram_id: int, code: str) -> PromoCode:
         user = await self.get_user_details(telegram_id)
-        promo = await self.session.scalar(select(PromoCode).where(PromoCode.code == code.upper()))
+        # Lock the promo row for the duration of the redemption so concurrent
+        # redemptions of the same code can't both pass the max_uses check.
+        promo = await self.session.scalar(
+            select(PromoCode).where(PromoCode.code == code.upper()).with_for_update()
+        )
         if not promo or not promo.is_active:
             raise ValueError("Promo code is invalid or inactive.")
 
@@ -263,8 +267,12 @@ class AdminService:
         if promo.used_count >= promo.max_uses:
             raise ValueError("Promo code usage limit has been reached.")
 
+        # Also lock this user's prior redemption row (if any) so the
+        # per-user cap stays atomic under concurrent attempts.
         usage = await self.session.scalar(
-            select(UserPromo).where(UserPromo.user_id == user.id, UserPromo.promo_id == promo.id)
+            select(UserPromo)
+            .where(UserPromo.user_id == user.id, UserPromo.promo_id == promo.id)
+            .with_for_update()
         )
         if usage and usage.used_count >= promo.max_uses_per_user:
             raise ValueError("You have already used this promo code the maximum number of times.")

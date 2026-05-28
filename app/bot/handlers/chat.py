@@ -24,21 +24,27 @@ async def send_chunked_message(message: Message, text: str, parse_mode: str = "H
     if len(text) <= chunk_size:
         try:
             return await message.answer(text, parse_mode=parse_mode)
-        except Exception:
+        except Exception as exc:
+            logger.warning("HTML send failed; retrying as plain text chat_id=%s err=%s", message.chat.id, exc)
             return await message.answer(text)
     for i in range(0, len(text), chunk_size):
         chunk = text[i:i + chunk_size]
         try:
             await message.answer(chunk, parse_mode=parse_mode)
-        except Exception:
+        except Exception as exc:
+            logger.warning("HTML chunk send failed; retrying as plain text chat_id=%s err=%s", message.chat.id, exc)
             await message.answer(chunk)
 
 
 async def _safe_edit(message: Message, text: str, *, parse_mode: str = "HTML") -> None:
     try:
         await message.edit_text(text, parse_mode=parse_mode)
-    except Exception:
-        await message.edit_text(text)
+    except Exception as exc:
+        logger.warning("HTML edit failed; retrying as plain text chat_id=%s err=%s", message.chat.id, exc)
+        try:
+            await message.edit_text(text)
+        except Exception:
+            logger.warning("Plain-text edit also failed chat_id=%s", message.chat.id, exc_info=True)
 
 
 async def finalize_group_response(
@@ -195,7 +201,7 @@ async def handle_group_message(
         logger.info("Group pipeline: blocked by anomaly containment chat_id=%s message_id=%s", message.chat.id, message.message_id)
         return await message.reply(anomaly.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
     prompt = message.text or ""
-    decision = group_policy_service.evaluate(group_id=message.chat.id, user_id=db_user.id, prompt=prompt, lang=lang)
+    decision = await group_policy_service.evaluate(group_id=message.chat.id, user_id=db_user.id, prompt=prompt, lang=lang)
     if not decision.allowed:
         logger.info("Group pipeline: blocked by policy chat_id=%s message_id=%s", message.chat.id, message.message_id)
         return await message.reply(decision.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
@@ -222,7 +228,7 @@ async def handle_group_message(
         lang=lang,
     )
     if delivered and result:
-        group_policy_service.record_usage(group_id=message.chat.id, user_id=db_user.id)
+        await group_policy_service.record_usage(group_id=message.chat.id, user_id=db_user.id)
 
 
 # ── Photo (Vision) Handlers ──────────────────────────────────────
@@ -345,7 +351,7 @@ async def handle_group_photo(
         return await message.reply(anomaly.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
 
     prompt = _photo_prompt(message, lang)
-    decision = group_policy_service.evaluate(group_id=message.chat.id, user_id=db_user.id, prompt=prompt, lang=lang)
+    decision = await group_policy_service.evaluate(group_id=message.chat.id, user_id=db_user.id, prompt=prompt, lang=lang)
     if not decision.allowed:
         return await message.reply(decision.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
 
@@ -372,4 +378,4 @@ async def handle_group_photo(
         lang=lang,
     )
     if delivered and result:
-        group_policy_service.record_usage(group_id=message.chat.id, user_id=db_user.id)
+        await group_policy_service.record_usage(group_id=message.chat.id, user_id=db_user.id)

@@ -140,39 +140,39 @@ class QuotaService:
         return QuotaStatus(limit=settings.FREE_WEEKLY_IMAGE_EDIT_LIMIT, used=usage.used_count if usage else 0)
 
     async def consume_search_for_user(self, user: User) -> QuotaStatus:
-        status = await self.get_search_status_for_user(user)
-        if status.exhausted:
-            return status
+        limit = self.search_limit_for_user(user)
         usage = await self._get_usage_row(
             scope_type=self.SCOPE_USER,
             scope_id=user.id,
             feature=self.SEARCH_COMMAND,
             reset_date=self._today(),
             create=True,
+            for_update=True,
         )
+        if usage.used_count >= limit:
+            return QuotaStatus(limit=limit, used=usage.used_count)
         usage.used_count += 1
         await self.session.commit()
-        return QuotaStatus(limit=status.limit, used=usage.used_count)
+        return QuotaStatus(limit=limit, used=usage.used_count)
 
     async def consume_search_for_group(self, group_id: int) -> QuotaStatus:
-        status = await self.get_search_status_for_group(group_id)
-        if status.exhausted:
-            return status
+        limit = settings.SEARCH_DAILY_GROUP_LIMIT
         usage = await self._get_usage_row(
             scope_type=self.SCOPE_GROUP,
             scope_id=group_id,
             feature=self.SEARCH_COMMAND,
             reset_date=self._today(),
             create=True,
+            for_update=True,
         )
+        if usage.used_count >= limit:
+            return QuotaStatus(limit=limit, used=usage.used_count)
         usage.used_count += 1
         await self.session.commit()
-        return QuotaStatus(limit=status.limit, used=usage.used_count)
+        return QuotaStatus(limit=limit, used=usage.used_count)
 
     async def consume_free_image_for_user(self, user_id: int) -> QuotaStatus:
-        status = await self.get_free_image_status_for_user(user_id)
-        if status.exhausted:
-            return status
+        limit = settings.FREE_DAILY_IMAGE_LIMIT
         usage = await self._get_usage_row(
             scope_type=self.SCOPE_USER,
             scope_id=user_id,
@@ -181,15 +181,15 @@ class QuotaService:
             create=True,
             for_update=True,
         )
+        if usage.used_count >= limit:
+            return QuotaStatus(limit=limit, used=usage.used_count)
         usage.used_count += 1
         await self.session.commit()
-        return QuotaStatus(limit=status.limit, used=usage.used_count)
+        return QuotaStatus(limit=limit, used=usage.used_count)
 
     async def consume_free_image_edit_for_user(self, user_id: int) -> QuotaStatus:
         """Consume one free image edit from the weekly quota."""
-        status = await self.get_free_image_edit_status_for_user(user_id)
-        if status.exhausted:
-            return status
+        limit = settings.FREE_WEEKLY_IMAGE_EDIT_LIMIT
         usage = await self._get_usage_row(
             scope_type=self.SCOPE_USER,
             scope_id=user_id,
@@ -198,9 +198,11 @@ class QuotaService:
             create=True,
             for_update=True,
         )
+        if usage.used_count >= limit:
+            return QuotaStatus(limit=limit, used=usage.used_count)
         usage.used_count += 1
         await self.session.commit()
-        return QuotaStatus(limit=status.limit, used=usage.used_count)
+        return QuotaStatus(limit=limit, used=usage.used_count)
 
     async def get_inline_status_for_user(self, user_id: int) -> QuotaStatus:
         """Daily quota for inline chat queries."""
@@ -214,9 +216,7 @@ class QuotaService:
 
     async def consume_inline_for_user(self, user_id: int) -> QuotaStatus:
         """Consume one inline chat request from the daily quota."""
-        status = await self.get_inline_status_for_user(user_id)
-        if status.exhausted:
-            return status
+        limit = settings.INLINE_DAILY_LIMIT
         usage = await self._get_usage_row(
             scope_type=self.SCOPE_USER,
             scope_id=user_id,
@@ -225,6 +225,8 @@ class QuotaService:
             create=True,
             for_update=True,
         )
+        if usage.used_count >= limit:
+            return QuotaStatus(limit=limit, used=usage.used_count)
         usage.used_count += 1
         await self.session.commit()
-        return QuotaStatus(limit=status.limit, used=usage.used_count)
+        return QuotaStatus(limit=limit, used=usage.used_count)

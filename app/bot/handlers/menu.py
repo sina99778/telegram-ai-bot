@@ -36,7 +36,12 @@ class MenuSpamMiddleware(BaseMiddleware):
         event: Message,
         data: Dict[str, Any],
     ) -> Any:
-        guard = await AbuseGuardService.check_menu_button(user_id=event.from_user.id, lang="en")
+        # Prefer the user's saved language (db_user is populated by the outer
+        # DB middleware) so throttle messages, if ever surfaced, render in
+        # the right locale. Fall back to Persian — the project's default UI.
+        db_user = data.get("db_user")
+        lang = db_user.language if (db_user and getattr(db_user, "language", None)) else "fa"
+        guard = await AbuseGuardService.check_menu_button(user_id=event.from_user.id, lang=lang)
         if not guard.allowed:
             # Silently drop the spam
             return None
@@ -242,7 +247,7 @@ async def handle_group_ai_command(
         logger.info("Group pipeline: blocked by anomaly containment chat_id=%s message_id=%s", message.chat.id, message.message_id)
         return await message.reply(anomaly.reason, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
 
-    decision = group_policy_service.evaluate(
+    decision = await group_policy_service.evaluate(
         group_id=message.chat.id,
         user_id=db_user.id,
         prompt=command.args,
@@ -267,7 +272,7 @@ async def handle_group_ai_command(
         lang=lang,
     )
     if delivered and result:
-        group_policy_service.record_usage(group_id=message.chat.id, user_id=db_user.id)
+        await group_policy_service.record_usage(group_id=message.chat.id, user_id=db_user.id)
 
 
 @menu_router.message(Command("help"), F.chat.type == "private")
