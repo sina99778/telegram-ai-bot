@@ -71,6 +71,9 @@ class RuntimeConfig:
         "payg_flash_per_1k": ConfigSpec("PAYG_FLASH_PER_1K", 0, 100000, "PAYG: normal credits per 1K Flash tokens"),
         "payg_pro_per_1k":   ConfigSpec("PAYG_PRO_PER_1K", 0, 100000, "PAYG: VIP credits per 1K Pro tokens"),
         "payg_min_charge":   ConfigSpec("PAYG_MIN_CHARGE", 0, 100000, "PAYG: minimum credits charged per request"),
+        # ── Context size (biggest input-token cost lever) ──
+        "history_max_tokens":   ConfigSpec("HISTORY_MAX_TOKENS", 256, 32000, "Context window re-sent per message (tokens)"),
+        "history_max_messages": ConfigSpec("HISTORY_MAX_MESSAGES", 2, 50, "Recent messages loaded as context"),
     }
 
     # Free-text settings (stored in the same bot_settings table). Used for

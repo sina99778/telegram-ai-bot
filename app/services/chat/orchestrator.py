@@ -95,18 +95,21 @@ class ChatOrchestrator:
         self,
         history: list[AIMessage],
         prompt: str,
+        max_tokens: int | None = None,
     ) -> list[AIMessage]:
-        """Enforce ``PRIVATE_MAX_PROMPT_LENGTH`` as a hard token ceiling.
+        """Enforce a hard token ceiling on the context re-sent to the model.
 
-        If the total estimated tokens of *history* + *prompt* exceed the
-        configured maximum, the **oldest non-system** messages are
-        dropped one-by-one until the payload fits.
+        If the total estimated tokens of *history* + *prompt* exceed
+        *max_tokens*, the **oldest non-system** messages are dropped one-by-one
+        until the payload fits. This directly bounds input-token cost — the
+        single largest line on the provider bill.
 
         System messages (e.g. conversation summaries injected by
         :class:`MemoryManager`) are always preserved so the model
         retains long-term context even under aggressive trimming.
         """
-        max_tokens = settings.PRIVATE_MAX_PROMPT_LENGTH
+        if max_tokens is None:
+            max_tokens = settings.HISTORY_MAX_TOKENS
         prompt_tokens = self._tokenizer.estimate_tokens(prompt)
         history_tokens = self._tokenizer.estimate_messages(history)
         total_tokens = prompt_tokens + history_tokens
@@ -268,11 +271,13 @@ class ChatOrchestrator:
         if ignore_history:
             history = []
         else:
-            history = await self.memory.get_conversation_history(conversation.id)
-            # ── Sliding Window Hard Limit ─────────────────────────────
-            # If the summarization queue is lagging, the history may exceed
-            # PRIVATE_MAX_PROMPT_LENGTH. Drop the oldest non-system messages.
-            history = self._apply_sliding_window(history, prompt)
+            hist_max_messages = await RuntimeConfig.get_int(self.session, "history_max_messages")
+            hist_max_tokens = await RuntimeConfig.get_int(self.session, "history_max_tokens")
+            history = await self.memory.get_conversation_history(conversation.id, limit=hist_max_messages)
+            # ── Sliding Window Hard Limit (input-token cost control) ──
+            # Cap how much prior context is re-sent on every message. Lowering
+            # history_max_tokens is the most direct lever on input-token spend.
+            history = self._apply_sliding_window(history, prompt, hist_max_tokens)
 
         if is_payg:
             # ── Pay-as-you-go: charge the REAL token usage after generation ──

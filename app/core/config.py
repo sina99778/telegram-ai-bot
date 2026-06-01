@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     PAYG_PRO_PER_1K: int = 5
     PAYG_MIN_CHARGE: int = 1
 
+    # ── Conversation context size (biggest input-token cost lever) ──
+    # How much prior conversation is re-sent to the model on every message.
+    # Lower = cheaper input tokens, shorter memory. Tunable via /config buttons.
+    HISTORY_MAX_TOKENS: int = 2000
+    HISTORY_MAX_MESSAGES: int = 10
+
     # ── Card-to-card payment (manual admin approval) ──
     CARD_TO_CARD_NUMBER: str = ""
     CARD_TO_CARD_HOLDER: str = ""

@@ -110,6 +110,27 @@ async def test_payg_does_not_charge_on_generation_failure(db_session, setup_base
     assert refreshed.normal_credits == 100  # nothing deducted (deduct happens after success)
 
 
+def test_sliding_window_trims_history_to_token_budget(db_session):
+    """The context window cap (the biggest input-token cost lever) must drop
+    oldest non-system messages so the payload fits the configured budget."""
+    from app.services.ai.provider import AIMessage
+    billing = BillingService(db_session)
+    memory = AsyncMock(spec=MemoryManager)
+    orch = ChatOrchestrator(db_session, billing, AsyncMock(), memory, AsyncMock())
+
+    # 10 messages of ~40 tokens each (~30 words). Budget 100 tokens must keep
+    # only the most recent couple, preserving any system summary.
+    history = [AIMessage(role="system", content="summary " * 5)]
+    history += [AIMessage(role="user", content=("word " * 30)) for _ in range(10)]
+
+    trimmed = orch._apply_sliding_window(history, prompt="hi", max_tokens=100)
+
+    assert trimmed[0].role == "system"          # summary preserved
+    assert len(trimmed) < len(history)          # older turns dropped
+    total = orch._tokenizer.estimate_messages(trimmed) + orch._tokenizer.estimate_tokens("hi")
+    assert total <= 100
+
+
 @pytest.mark.asyncio
 async def test_flat_mode_still_charges_one(db_session, setup_base_data):
     """Regression: a non-PAYG user is still billed the flat per-message cost."""
