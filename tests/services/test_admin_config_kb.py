@@ -88,6 +88,26 @@ def test_config_kb_one_button_per_key_with_value_and_set_callback():
     assert any(b.callback_data == "admin:config" for b in buttons)  # refresh
 
 
+def test_config_kb_renders_text_settings_as_buttons():
+    """Card details (and any text setting) must be editable via buttons, not
+    only commands — each yields an admin:config:settext:<key> callback."""
+    snapshot = [{"key": "free_daily_image", "value": 2, "is_override": False}]
+    text_items = [
+        {"key": "card_number", "value": "6037-xxxx"},
+        {"key": "card_holder", "value": ""},
+    ]
+    buttons = _flatten(get_admin_config_kb(snapshot, "en", text_items=text_items))
+    settext = [b for b in buttons if (b.callback_data or "").startswith("admin:config:settext:")]
+    assert {b.callback_data for b in settext} == {
+        "admin:config:settext:card_number",
+        "admin:config:settext:card_holder",
+    }
+    # current value (or — placeholder) is shown on the button
+    labels = {b.text for b in settext}
+    assert any("card_number" in lbl and "6037-xxxx" in lbl for lbl in labels)
+    assert any("card_holder" in lbl and "—" in lbl for lbl in labels)
+
+
 def test_config_set_callback_roundtrips_through_registry():
     """The key embedded in the callback must be parseable back to a valid key."""
     from app.services.config.runtime_config import RuntimeConfig

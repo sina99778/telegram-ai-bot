@@ -55,11 +55,13 @@ def get_admin_main_kb(lang: str) -> object:
     )
 
 
-def get_admin_config_kb(snapshot: list[dict], lang: str) -> object:
-    """One tappable button per runtime-config key, showing its current value.
+def get_admin_config_kb(snapshot: list[dict], lang: str, text_items: list[dict] | None = None) -> object:
+    """One tappable button per editable setting, showing its current value.
 
-    ``snapshot`` is the list returned by ``RuntimeConfig.snapshot`` — each item
-    has ``key``, ``value``, and ``is_override``.
+    ``snapshot`` are the numeric settings (from ``RuntimeConfig.snapshot``);
+    ``text_items`` are the free-text settings (card details), each a dict with
+    ``key`` and ``value``. Tapping a numeric setting opens a number prompt;
+    tapping a text setting opens a text prompt.
     """
     builder = InlineKeyboardBuilder()
     for item in snapshot:
@@ -68,6 +70,14 @@ def get_admin_config_kb(snapshot: list[dict], lang: str) -> object:
             InlineKeyboardButton(
                 text=f"{item['key']} = {item['value']}{star}"[:64],
                 callback_data=f"admin:config:set:{item['key']}",
+            )
+        )
+    for item in (text_items or []):
+        shown = item.get("value") or "—"
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{item['key']}: {shown}"[:64],
+                callback_data=f"admin:config:settext:{item['key']}",
             )
         )
     builder.row(

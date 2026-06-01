@@ -61,6 +61,7 @@ class AdminStates(StatesGroup):
     waiting_for_code_max_uses_per_user = State()
     waiting_for_manual_code = State()
     waiting_for_config_value = State()
+    waiting_for_config_text = State()
 
 
 async def _is_admin(user_id: int, session: AsyncSession) -> bool:
@@ -362,10 +363,14 @@ async def cb_admin_config(callback: CallbackQuery, session: AsyncSession, state:
     user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
     lang = _lang(user)
     snapshot = await RuntimeConfig.snapshot(session)
+    text_items = [
+        {"key": key, "value": (await RuntimeConfig.get_text(session, key))[:24]}
+        for key in RuntimeConfig.TEXT_REGISTRY
+    ]
     await callback.message.edit_text(
         t(lang, "admin.config.menu_hint"),
         parse_mode="HTML",
-        reply_markup=get_admin_config_kb(snapshot, lang),
+        reply_markup=get_admin_config_kb(snapshot, lang, text_items=text_items),
     )
     await callback.answer()
 
@@ -439,11 +444,75 @@ async def process_config_value(message: Message, session: AsyncSession, state: F
         message.from_user.id, key, old_value, value,
     )
     await state.clear()
-    snapshot = await RuntimeConfig.snapshot(session)
     await message.answer(
         t(lang, "admin.config.saved", setting=key, value=value, old=old_value),
         parse_mode="HTML",
-        reply_markup=get_admin_config_kb(snapshot, lang),
+        reply_markup=await _config_keyboard(session, lang),
+    )
+
+
+async def _config_keyboard(session: AsyncSession, lang: str):
+    """Build the settings keyboard with both numeric and text settings."""
+    snapshot = await RuntimeConfig.snapshot(session)
+    text_items = [
+        {"key": key, "value": (await RuntimeConfig.get_text(session, key))[:24]}
+        for key in RuntimeConfig.TEXT_REGISTRY
+    ]
+    return get_admin_config_kb(snapshot, lang, text_items=text_items)
+
+
+@admin_router.callback_query(F.data.startswith("admin:config:settext:"))
+async def cb_admin_config_settext_start(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    """Begin editing a free-text setting (e.g. card details) via a prompt."""
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    key = callback.data.split(":", 3)[3]
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    if not RuntimeConfig.is_valid_text_key(key):
+        return await callback.answer(t(lang, "admin.config.unknown_key", setting=key), show_alert=True)
+
+    description = RuntimeConfig.TEXT_REGISTRY[key][1]
+    current = await RuntimeConfig.get_text(session, key)
+    await state.update_data(config_text_key=key)
+    await state.set_state(AdminStates.waiting_for_config_text)
+    await callback.message.edit_text(
+        t(lang, "admin.config.set_text_prompt", setting=key, description=description, value=html.escape(current or "—")),
+        parse_mode="HTML",
+        reply_markup=get_back_to_admin_kb(lang, back="admin:config"),
+    )
+    await callback.answer()
+
+
+@admin_router.message(AdminStates.waiting_for_config_text)
+async def process_config_text(message: Message, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(message.from_user.id, session):
+        return
+    admin_user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
+    lang = _lang(admin_user)
+    if not await _guard_admin_mutation(admin_id=message.from_user.id, lang=lang, action="setconfig", message=message):
+        return
+
+    data = await state.get_data()
+    key = data.get("config_text_key")
+    if not key or not RuntimeConfig.is_valid_text_key(key):
+        await state.clear()
+        return await message.answer(t(lang, "admin.config.unknown_key", setting=key or "?"), parse_mode="HTML")
+
+    raw = (message.text or "").strip()
+    if raw == "-":
+        raw = ""  # explicit clear
+    try:
+        await RuntimeConfig.set_text(session, key, raw, updated_by=message.from_user.id)
+    except ValueError:
+        return await message.answer(t(lang, "admin.config.bad_value"), parse_mode="HTML")
+
+    logger.info("Admin text-config change (button) admin_telegram_id=%s key=%s", message.from_user.id, key)
+    await state.clear()
+    await message.answer(
+        t(lang, "admin.config.text_saved", setting=key),
+        parse_mode="HTML",
+        reply_markup=await _config_keyboard(session, lang),
     )
 
 

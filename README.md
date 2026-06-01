@@ -101,11 +101,12 @@ Webhook order IDs carry product metadata and are applied product-by-product inst
 Each pack can be paid two ways (chosen on a method screen after tapping a pack):
 
 - **Crypto** — a NowPayments invoice (unchanged).
-- **Card-to-card** — the bot shows the destination card (set by an admin via
-  `/setconfig card_number …`, `card_holder`, `card_note`), the user pays and
-  sends a **photo of the receipt**, which creates a *pending* transaction. An
-  admin reviews it under **Admin → 💳 Card payments**, sees the receipt, and
-  approves or rejects. On approval the pack is granted; the buyer is notified.
+- **Card-to-card** — the bot shows the destination card (set by an admin from
+  **Admin → 🎚 Limits & Prices**, where `card_number` / `card_holder` /
+  `card_note` are tappable buttons), the user pays and sends a **photo of the
+  receipt**, which creates a *pending* transaction. An admin reviews it under
+  **Admin → 💳 Card payments**, sees the receipt, and approves or rejects. On
+  approval the pack is granted; the buyer is notified.
 
 Both crypto and card approval funnel through one idempotent fulfillment helper
 (`app/services/purchase/fulfillment.py`), so a duplicate IPN or a double admin
