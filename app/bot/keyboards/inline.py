@@ -37,6 +37,12 @@ def get_profile_keyboard(user) -> object:
             InlineKeyboardButton(text=memory_text, callback_data="toggle_memory"),
         ],
         [
+            InlineKeyboardButton(
+                text=t(lang, "buttons.payg_to_flat") if getattr(user, "payg_enabled", False) else t(lang, "buttons.payg_to_payg"),
+                callback_data="toggle_payg",
+            ),
+        ],
+        [
             InlineKeyboardButton(text=t(lang, "buttons.history"), callback_data="view_chat_history"),
             InlineKeyboardButton(text=t(lang, "buttons.daily_reward"), callback_data="claim_daily_reward"),
         ],
@@ -103,6 +109,15 @@ def get_vip_access_packs_keyboard(lang: str) -> object:
     rows = [
         [InlineKeyboardButton(text=t(lang, "packs.access_30d"), callback_data="purchase:access_30d")],
         [InlineKeyboardButton(text=t(lang, "packs.access_90d"), callback_data="purchase:access_90d")],
+    ]
+    rows.extend(nav_buttons(lang, back="wallet:open", home="cancel_action"))
+    return markup(rows)
+
+
+def get_payment_method_keyboard(lang: str, code: str) -> object:
+    rows = [
+        [InlineKeyboardButton(text=t(lang, "buttons.pay_card"), callback_data=f"pay:card:{code}")],
+        [InlineKeyboardButton(text=t(lang, "buttons.pay_crypto"), callback_data=f"pay:crypto:{code}")],
     ]
     rows.extend(nav_buttons(lang, back="wallet:open", home="cancel_action"))
     return markup(rows)

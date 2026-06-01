@@ -67,6 +67,18 @@ class Settings(BaseSettings):
     # model's response length unless an admin raises them via /setconfig.
     MAX_OUTPUT_TOKENS_FLASH: int = 800
     MAX_OUTPUT_TOKENS_PRO: int = 1500
+
+    # ── Pay-as-you-go (token-metered billing) ──
+    # Credits charged per 1000 tokens of real usage when a user opts into PAYG.
+    # Pro is dearer than Flash, mirroring provider pricing. Tunable via /setconfig.
+    PAYG_FLASH_PER_1K: int = 1
+    PAYG_PRO_PER_1K: int = 5
+    PAYG_MIN_CHARGE: int = 1
+
+    # ── Card-to-card payment (manual admin approval) ──
+    CARD_TO_CARD_NUMBER: str = ""
+    CARD_TO_CARD_HOLDER: str = ""
+    CARD_TO_CARD_NOTE: str = ""
     GROUP_DAILY_GROUP_CAP: int = 40
     GROUP_DAILY_USER_CAP: int = 5
     GROUP_USER_COOLDOWN_SECONDS: int = 15

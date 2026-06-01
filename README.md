@@ -96,6 +96,38 @@ Purchases are separated into three clear product types:
 
 Webhook order IDs carry product metadata and are applied product-by-product instead of using a generic VIP heuristic.
 
+### Payment methods
+
+Each pack can be paid two ways (chosen on a method screen after tapping a pack):
+
+- **Crypto** — a NowPayments invoice (unchanged).
+- **Card-to-card** — the bot shows the destination card (set by an admin via
+  `/setconfig card_number …`, `card_holder`, `card_note`), the user pays and
+  sends a **photo of the receipt**, which creates a *pending* transaction. An
+  admin reviews it under **Admin → 💳 Card payments**, sees the receipt, and
+  approves or rejects. On approval the pack is granted; the buyer is notified.
+
+Both crypto and card approval funnel through one idempotent fulfillment helper
+(`app/services/purchase/fulfillment.py`), so a duplicate IPN or a double admin
+tap can never double-credit.
+
+## Pay-as-you-go (token-metered) billing
+
+By default every text message costs a flat `NORMAL_MESSAGE_COST` (1 credit).
+A user can switch to **pay-as-you-go** from their profile (⚡ button): each
+reply is then billed by **real token usage** — `ceil(tokens / 1000 × rate)` —
+from the same wallet, with a minimum charge per request. Rates are runtime-editable:
+
+- `payg_flash_per_1k` — credits per 1K Flash tokens (default 1)
+- `payg_pro_per_1k` — VIP credits per 1K Pro tokens (default 5)
+- `payg_min_charge` — minimum credits per request (default 1)
+
+Safety: before generating, the orchestrator requires the wallet to hold at
+least the **maximum possible** cost (estimated input + the model's
+`max_output_tokens` cap), so metered usage can never push a balance negative;
+the **actual** cost is deducted only after a successful reply, and a failed
+generation costs nothing.
+
 ## Bilingual UX
 
 - Persian (`fa`) and English (`en`) are centralized in `app/core/i18n.py`

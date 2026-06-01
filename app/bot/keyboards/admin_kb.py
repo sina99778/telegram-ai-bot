@@ -46,6 +46,7 @@ def get_admin_main_kb(lang: str) -> object:
             ],
             [
                 InlineKeyboardButton(text=t(lang, "buttons.admin_config"), callback_data="admin:config"),
+                InlineKeyboardButton(text=t(lang, "buttons.admin_cardpay"), callback_data="admin:cardpay:list"),
             ],
             [
                 InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"),

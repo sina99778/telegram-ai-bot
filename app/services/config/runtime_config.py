@@ -67,6 +67,20 @@ class RuntimeConfig:
         "vip_message_cost":       ConfigSpec("VIP_MESSAGE_COST", 0, 1000, "VIP credits per Pro message"),
         "max_output_tokens_flash": ConfigSpec("MAX_OUTPUT_TOKENS_FLASH", 64, 8192, "Max output tokens (Flash)"),
         "max_output_tokens_pro":   ConfigSpec("MAX_OUTPUT_TOKENS_PRO", 64, 8192, "Max output tokens (Pro)"),
+        # ── Pay-as-you-go (token-metered) rates ──
+        "payg_flash_per_1k": ConfigSpec("PAYG_FLASH_PER_1K", 0, 100000, "PAYG: normal credits per 1K Flash tokens"),
+        "payg_pro_per_1k":   ConfigSpec("PAYG_PRO_PER_1K", 0, 100000, "PAYG: VIP credits per 1K Pro tokens"),
+        "payg_min_charge":   ConfigSpec("PAYG_MIN_CHARGE", 0, 100000, "PAYG: minimum credits charged per request"),
+    }
+
+    # Free-text settings (stored in the same bot_settings table). Used for
+    # operational text that isn't a number — e.g. the card-to-card details an
+    # admin pastes in. Default comes from the named Settings attribute.
+    TEXT_REGISTRY: dict[str, tuple[str, str]] = {
+        # key: (settings_attr, description)
+        "card_number": ("CARD_TO_CARD_NUMBER", "Card-to-card destination card number"),
+        "card_holder": ("CARD_TO_CARD_HOLDER", "Card-to-card account holder name"),
+        "card_note":   ("CARD_TO_CARD_NOTE", "Card-to-card extra instructions shown to buyers"),
     }
 
     # ── Helpers ──────────────────────────────────────────────────────────────
@@ -148,6 +162,68 @@ class RuntimeConfig:
 
         cls._cache[key] = (value, time.monotonic() + cls._CACHE_TTL)
         logger.info("RuntimeConfig updated key=%s value=%s updated_by=%s", key, value, updated_by)
+        return value
+
+    # ── Text settings (card details, etc.) ───────────────────────────────────
+
+    @classmethod
+    def is_valid_text_key(cls, key: str) -> bool:
+        return key in cls.TEXT_REGISTRY
+
+    @classmethod
+    def text_default_for(cls, key: str) -> str:
+        attr = cls.TEXT_REGISTRY[key][0]
+        return str(getattr(settings, attr, "") or "")
+
+    @classmethod
+    async def get_text(cls, session: AsyncSession, key: str) -> str:
+        if key not in cls.TEXT_REGISTRY:
+            raise KeyError(f"Unknown text-config key: {key}")
+        now = time.monotonic()
+        cache_key = f"text:{key}"
+        cached = cls._cache.get(cache_key)
+        if cached is not None and cached[1] > now:
+            return cached[0]
+        value = cls.text_default_for(key)
+        try:
+            row = await session.get(BotSetting, cache_key)
+            if row is not None and row.value is not None:
+                value = row.value
+        except Exception as exc:
+            logger.warning("RuntimeConfig text read failed for key=%s (%s); using default", key, exc)
+        cls._cache[cache_key] = (value, now + cls._CACHE_TTL)
+        return value
+
+    @classmethod
+    async def set_text(cls, session: AsyncSession, key: str, value: str, *, updated_by: int | None = None) -> str:
+        if key not in cls.TEXT_REGISTRY:
+            raise KeyError(f"Unknown text-config key: {key}")
+        value = (value or "").strip()
+        if len(value) > 200:
+            raise ValueError("Value is too long (max 200 chars).")
+        cache_key = f"text:{key}"
+        stmt = (
+            pg_insert(BotSetting)
+            .values(key=cache_key, value=value, updated_by=updated_by)
+            .on_conflict_do_update(
+                index_elements=[BotSetting.key],
+                set_={"value": value, "updated_by": updated_by},
+            )
+        )
+        try:
+            await session.execute(stmt)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            row = await session.get(BotSetting, cache_key)
+            if row is None:
+                session.add(BotSetting(key=cache_key, value=value, updated_by=updated_by))
+            else:
+                row.value = value
+                row.updated_by = updated_by
+            await session.commit()
+        cls._cache[cache_key] = (value, time.monotonic() + cls._CACHE_TTL)
+        logger.info("RuntimeConfig text updated key=%s updated_by=%s", key, updated_by)
         return value
 
     # ── Introspection (for /config listing) ──────────────────────────────────

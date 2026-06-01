@@ -81,6 +81,9 @@ class User(Base):
     language: Mapped[str] = mapped_column(String(10), default="")
     preferred_text_model: Mapped[Optional[str]] = mapped_column(String(50))
     keep_chat_history: Mapped[bool] = mapped_column(default=True)
+    # Pay-as-you-go: when True, text requests are billed by REAL token usage
+    # (model rate × tokens) instead of the flat per-message cost.
+    payg_enabled: Mapped[bool] = mapped_column(default=False)
     
     # ── Admin / moderation ────────────────────
     is_admin: Mapped[bool] = mapped_column(default=False)

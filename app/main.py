@@ -393,40 +393,22 @@ async def nowpayments_webhook(
                 if user:
                     from app.services.billing.billing_service import BillingService
                     from app.core.enums import LedgerEntryType, WalletType
-                    
+                    from app.services.purchase.fulfillment import apply_product
+
                     price_amount = float(payload.get("price_amount", 0))
                     billing = BillingService(session)
                     payment_id_str = str(payload.get("payment_id", order_id))
+                    lang = user.language if user.language else "en"
 
                     if product is not None:
-                        if product.kind == PurchaseKind.NORMAL_CREDITS and product.normal_credits > 0:
-                            await billing.add_credits(
-                                user_id=user.id,
-                                amount=product.normal_credits,
-                                entry_type=LedgerEntryType.PURCHASE,
-                                reference_type="nowpayments_normal_pack",
-                                reference_id=f"np_{payment_id_str}",
-                                description=f"Normal credits purchase ${price_amount}",
-                                wallet_type=WalletType.NORMAL,
-                            )
-                        elif product.kind == PurchaseKind.VIP_CREDITS and product.vip_credits > 0:
-                            await billing.add_credits(
-                                user_id=user.id,
-                                amount=product.vip_credits,
-                                entry_type=LedgerEntryType.PURCHASE,
-                                reference_type="nowpayments_vip_pack",
-                                reference_id=f"np_{payment_id_str}",
-                                description=f"VIP credits purchase ${price_amount}",
-                                wallet_type=WalletType.VIP,
-                            )
-                        elif product.kind == PurchaseKind.VIP_ACCESS and product.vip_days > 0:
-                            await billing.grant_vip_access(
-                                user_id=user.id,
-                                days=product.vip_days,
-                                reference_type="nowpayments_vip_access",
-                                reference_id=f"np_access_{payment_id_str}",
-                                description=f"VIP access purchase ${price_amount}",
-                            )
+                        notify_text = await apply_product(
+                            billing,
+                            user_id=user.id,
+                            product=product,
+                            payment_ref=f"np_{payment_id_str}",
+                            price_label=f"${price_amount}",
+                            lang=lang,
+                        )
                     else:
                         # Backward compatibility for older order IDs:
                         await billing.add_credits(
@@ -447,15 +429,6 @@ async def nowpayments_webhook(
                             description=f"Legacy VIP access purchase ${price_amount}",
                             auto_commit=True,
                         )
-
-                    lang = user.language if user.language else "en"
-                    if product and product.kind == PurchaseKind.NORMAL_CREDITS:
-                        notify_text = t(lang, "purchase.success.normal_credits", normal=product.normal_credits)
-                    elif product and product.kind == PurchaseKind.VIP_CREDITS:
-                        notify_text = t(lang, "purchase.success.vip_credits", vip=product.vip_credits)
-                    elif product and product.kind == PurchaseKind.VIP_ACCESS:
-                        notify_text = t(lang, "purchase.success.vip_access", days=product.vip_days)
-                    else:
                         notify_text = "🎉 <b>Payment successful.</b>"
 
                     # Notify the user via Telegram

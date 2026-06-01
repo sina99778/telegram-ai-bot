@@ -11,9 +11,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.keyboards.inline import (
+    get_cancel_keyboard,
     get_cancel_promo_keyboard,
     get_checkout_keyboard,
     get_normal_credit_packs_keyboard,
+    get_payment_method_keyboard,
     get_profile_keyboard,
     get_support_menu_keyboard,
     get_vip_access_packs_keyboard,
@@ -21,12 +23,14 @@ from app.bot.keyboards.inline import (
     get_vip_menu_keyboard,
     get_wallet_menu_keyboard,
 )
-from app.core.enums import LedgerEntryType, WalletType
+from app.core.config import settings
+from app.core.enums import LedgerEntryType, TransactionStatus, WalletType
 from app.core.i18n import t
-from app.db.models import User
+from app.db.models import PaymentTransaction, User
 from app.db.repositories.chat_repo import ChatRepository
 from app.services.admin.admin_service import AdminService
 from app.services.billing.billing_service import BillingService
+from app.services.config.runtime_config import RuntimeConfig
 from app.services.payment_service import NowPaymentsService
 from app.services.purchase.catalog import build_order_id, get_product
 
@@ -35,6 +39,10 @@ callback_router = Router(name="callbacks")
 
 class PromoStates(StatesGroup):
     waiting_for_code = State()
+
+
+class CardPayStates(StatesGroup):
+    waiting_for_receipt = State()
 
 
 def _lang(user: User | None) -> str:
@@ -51,6 +59,7 @@ def _format_profile(user: User) -> str:
     )
     current_model = str(user.preferred_text_model).upper() if user.preferred_text_model else "FLASH"
     memory = t(lang, "profile.memory.keep") if user.keep_chat_history else t(lang, "profile.memory.clear")
+    billing = t(lang, "profile.billing.payg") if getattr(user, "payg_enabled", False) else t(lang, "profile.billing.flat")
     return "\n".join(
         [
             t(lang, "profile.title"),
@@ -62,6 +71,7 @@ def _format_profile(user: User) -> str:
             t(lang, "profile.vip_status", value=vip_status),
             t(lang, "profile.model", value=current_model),
             t(lang, "profile.memory", value=memory),
+            t(lang, "profile.billing", value=billing),
         ]
     )
 
@@ -143,10 +153,33 @@ async def cb_support_back(callback: CallbackQuery, db_user: User | None = None):
     await callback.answer()
 
 
+def _pack_label(lang: str, code: str) -> str:
+    label = t(lang, f"packs.{code}")
+    return label if label != f"packs.{code}" else code
+
+
 @callback_router.callback_query(F.data.startswith("purchase:"))
 async def cb_purchase_checkout(callback: CallbackQuery, db_user: User | None = None):
+    """Step 1: a pack was chosen — let the user pick a payment method."""
     lang = _lang(db_user)
     code = callback.data.split(":", 1)[1]
+    product = get_product(code)
+    if not product:
+        return await callback.answer(t(lang, "purchase.not_found"), show_alert=True)
+
+    await callback.message.edit_text(
+        t(lang, "purchase.method_choose", pack=_pack_label(lang, code), price=f"{product.usd_price:.2f}"),
+        parse_mode="HTML",
+        reply_markup=get_payment_method_keyboard(lang, code),
+    )
+    await callback.answer()
+
+
+@callback_router.callback_query(F.data.startswith("pay:crypto:"))
+async def cb_pay_crypto(callback: CallbackQuery, db_user: User | None = None):
+    """Crypto path — create a NowPayments invoice (unchanged behaviour)."""
+    lang = _lang(db_user)
+    code = callback.data.split(":", 2)[2]
     product = get_product(code)
     if not product:
         return await callback.answer(t(lang, "purchase.not_found"), show_alert=True)
@@ -182,6 +215,98 @@ async def cb_purchase_checkout(callback: CallbackQuery, db_user: User | None = N
     await callback.answer()
 
 
+@callback_router.callback_query(F.data.startswith("pay:card:"))
+async def cb_pay_card(callback: CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User | None = None):
+    """Card-to-card path — show the destination card and await a receipt photo."""
+    lang = _lang(db_user)
+    code = callback.data.split(":", 2)[2]
+    product = get_product(code)
+    if not product:
+        return await callback.answer(t(lang, "purchase.not_found"), show_alert=True)
+
+    card_number = await RuntimeConfig.get_text(session, "card_number")
+    if not card_number.strip():
+        return await callback.answer(t(lang, "purchase.card.not_configured"), show_alert=True)
+    card_holder = await RuntimeConfig.get_text(session, "card_holder")
+    card_note = await RuntimeConfig.get_text(session, "card_note")
+
+    await state.set_state(CardPayStates.waiting_for_receipt)
+    await state.update_data(card_product=code)
+    await callback.message.edit_text(
+        t(
+            lang,
+            "purchase.card.instructions",
+            pack=_pack_label(lang, code),
+            price=f"{product.usd_price:.2f}",
+            card_number=card_number,
+            card_holder=card_holder or "-",
+            note=card_note,
+        ),
+        parse_mode="HTML",
+        reply_markup=get_cancel_keyboard(lang),
+    )
+    await callback.answer()
+
+
+@callback_router.message(CardPayStates.waiting_for_receipt)
+async def process_card_receipt(message: Message, state: FSMContext, session: AsyncSession, db_user: User | None = None):
+    """Step 2: user uploads the receipt photo → create a PENDING transaction."""
+    lang = _lang(db_user)
+    if not message.photo:
+        return await message.answer(t(lang, "purchase.card.not_a_photo"), parse_mode="HTML")
+
+    data = await state.get_data()
+    code = data.get("card_product")
+    product = get_product(code) if code else None
+    if not product or not db_user:
+        await state.clear()
+        return await message.answer(t(lang, "purchase.not_found"), parse_mode="HTML")
+
+    receipt_file_id = message.photo[-1].file_id
+    tx = PaymentTransaction(
+        user_id=db_user.id,
+        provider="card_to_card",
+        provider_payment_id=receipt_file_id,
+        amount=product.usd_price,
+        currency="USD",
+        credits_granted=0,
+        status=TransactionStatus.PENDING,
+        idempotency_key=f"card_{db_user.telegram_id}_{int(datetime.now(timezone.utc).timestamp())}_{message.message_id}",
+        raw_payload={
+            "product_code": code,
+            "receipt_file_id": receipt_file_id,
+            "telegram_id": db_user.telegram_id,
+        },
+    )
+    session.add(tx)
+    await session.commit()
+    await session.refresh(tx)
+    await state.clear()
+
+    await message.answer(
+        t(lang, "purchase.card.receipt_received", pack=_pack_label(lang, code)),
+        parse_mode="HTML",
+        reply_markup=get_wallet_menu_keyboard(lang),
+    )
+
+    # Notify configured admins (best-effort; never blocks the user).
+    for admin_id in settings.admin_ids_list:
+        try:
+            await message.bot.send_message(
+                chat_id=admin_id,
+                text=t(
+                    "fa",
+                    "admin.cardpay.notify",
+                    telegram_id=db_user.telegram_id,
+                    pack=_pack_label("fa", code),
+                    price=f"{product.usd_price:.2f}",
+                ),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
+
 @callback_router.callback_query(F.data == "profile_refresh")
 async def cq_profile_refresh(callback: CallbackQuery, chat_repo: ChatRepository) -> None:
     user = await chat_repo.get_user_by_telegram_id(callback.from_user.id)
@@ -208,6 +333,19 @@ async def cq_toggle_model(callback: CallbackQuery, chat_repo: ChatRepository, se
     await session.commit()
     await callback.message.edit_text(_format_profile(user), parse_mode="HTML", reply_markup=get_profile_keyboard(user))
     await callback.answer(t(lang, "profile.model_switched", model=next_model))
+
+
+@callback_router.callback_query(F.data == "toggle_payg")
+async def cq_toggle_payg(callback: CallbackQuery, chat_repo: ChatRepository, session: AsyncSession):
+    user = await chat_repo.get_user_by_telegram_id(callback.from_user.id)
+    lang = _lang(user)
+    if not user:
+        return await callback.answer(t("en", "errors.user_not_found"), show_alert=True)
+
+    user.payg_enabled = not user.payg_enabled
+    await session.commit()
+    await callback.message.edit_text(_format_profile(user), parse_mode="HTML", reply_markup=get_profile_keyboard(user))
+    await callback.answer(t(lang, "profile.payg_switched"))
 
 
 @callback_router.callback_query(F.data == "toggle_memory")

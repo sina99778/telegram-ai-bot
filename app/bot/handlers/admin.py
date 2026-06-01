@@ -31,12 +31,14 @@ from app.bot.keyboards.admin_kb import (
 )
 from app.core.access import is_configured_admin
 from app.core.config import settings
-from app.core.enums import PromoCodeKind, WalletType
+from app.core.enums import PromoCodeKind, TransactionStatus, WalletType
 from app.core.i18n import t
-from app.db.models import FeatureConfig, User
+from app.db.models import FeatureConfig, PaymentTransaction, User
 from app.services.admin.admin_service import AdminService
 from app.services.billing.billing_service import BillingService
 from app.services.config.runtime_config import RuntimeConfig
+from app.services.purchase.catalog import get_product
+from app.services.purchase.fulfillment import apply_product
 from app.services.security.abuse_guard import AbuseGuardService
 from app.services.security.broadcast_control import BroadcastControlService
 
@@ -280,6 +282,11 @@ async def cmd_config(message: Message, session: AsyncSession):
                 star=t(lang, "admin.config.override_mark") if item["is_override"] else "",
             )
         )
+    # Text settings (e.g. card-to-card details)
+    for key in RuntimeConfig.TEXT_REGISTRY:
+        current = await RuntimeConfig.get_text(session, key)
+        shown = current if current else "—"
+        lines.append(f"<code>{key}</code> = {html.escape(shown)}")
     lines.append("")
     lines.append(t(lang, "admin.config.usage"))
     await message.answer("\n".join(lines), parse_mode="HTML")
@@ -298,13 +305,25 @@ async def cmd_setconfig(message: Message, session: AsyncSession):
     if not await _guard_admin_mutation(admin_id=message.from_user.id, lang=lang, action="setconfig", message=message):
         return
 
-    parts = (message.text or "").split()
+    parts = (message.text or "").split(maxsplit=2)
     # parts[0] == "/setconfig"
     if len(parts) < 3:
         return await message.answer(t(lang, "admin.config.usage"), parse_mode="HTML")
 
     key = parts[1].strip().lower()
     raw_value = parts[2].strip()
+
+    # Text settings (card details, etc.) — value may contain spaces.
+    if RuntimeConfig.is_valid_text_key(key):
+        try:
+            await RuntimeConfig.set_text(session, key, raw_value, updated_by=message.from_user.id)
+        except ValueError:
+            return await message.answer(t(lang, "admin.config.bad_value"), parse_mode="HTML")
+        logger.info("Admin text-config change admin_telegram_id=%s key=%s", message.from_user.id, key)
+        return await message.answer(
+            t(lang, "admin.config.saved", setting=key, value=html.escape(raw_value[:60]), old="—"),
+            parse_mode="HTML",
+        )
 
     if not RuntimeConfig.is_valid_key(key):
         return await message.answer(t(lang, "admin.config.unknown_key", setting=key), parse_mode="HTML")
@@ -426,6 +445,207 @@ async def process_config_value(message: Message, session: AsyncSession, state: F
         parse_mode="HTML",
         reply_markup=get_admin_config_kb(snapshot, lang),
     )
+
+
+def _pack_label(lang: str, code: str | None) -> str:
+    if not code:
+        return "?"
+    label = t(lang, f"packs.{code}")
+    return label if label != f"packs.{code}" else code
+
+
+@admin_router.callback_query(F.data == "admin:cardpay:list")
+async def cb_admin_cardpay_list(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    admin_user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(admin_user)
+    rows = (
+        await session.scalars(
+            select(PaymentTransaction)
+            .where(
+                PaymentTransaction.provider == "card_to_card",
+                PaymentTransaction.status == TransactionStatus.PENDING,
+            )
+            .order_by(PaymentTransaction.created_at.asc())
+            .limit(20)
+        )
+    ).all()
+
+    builder = InlineKeyboardBuilder()
+    if not rows:
+        await callback.message.edit_text(t(lang, "admin.cardpay.empty"), parse_mode="HTML", reply_markup=get_back_to_admin_kb(lang))
+        return await callback.answer()
+
+    for tx in rows:
+        payload = tx.raw_payload or {}
+        code = payload.get("product_code")
+        name = payload.get("telegram_id", tx.user_id)
+        builder.row(
+            InlineKeyboardButton(
+                text=t(lang, "admin.cardpay.item", tx=tx.id, name=name, pack=_pack_label(lang, code))[:64],
+                callback_data=f"admin:cardpay:view:{tx.id}",
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(text=t(lang, "buttons.refresh"), callback_data="admin:cardpay:list"),
+        InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"),
+    )
+    await callback.message.edit_text(t(lang, "admin.cardpay.title"), parse_mode="HTML", reply_markup=builder.as_markup())
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin:cardpay:view:"))
+async def cb_admin_cardpay_view(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    admin_user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(admin_user)
+    tx_id = int(callback.data.split(":")[3])
+    tx = await session.get(PaymentTransaction, tx_id)
+    if not tx or tx.provider != "card_to_card":
+        return await callback.answer(t(lang, "admin.cardpay.not_found"), show_alert=True)
+
+    payload = tx.raw_payload or {}
+    code = payload.get("product_code")
+    product = get_product(code)
+    buyer = await session.get(User, tx.user_id)
+    name = html.escape((buyer.username or buyer.first_name or "unknown")) if buyer else "?"
+    caption = t(
+        lang,
+        "admin.cardpay.detail",
+        tx=tx.id,
+        telegram_id=payload.get("telegram_id", tx.user_id),
+        name=name,
+        pack=_pack_label(lang, code),
+        price=f"{(product.usd_price if product else tx.amount):.2f}",
+        created=tx.created_at.strftime("%Y-%m-%d %H:%M"),
+    )
+    kb = InlineKeyboardBuilder()
+    if tx.status == TransactionStatus.PENDING:
+        kb.row(
+            InlineKeyboardButton(text=t(lang, "buttons.approve"), callback_data=f"admin:cardpay:approve:{tx.id}"),
+            InlineKeyboardButton(text=t(lang, "buttons.reject"), callback_data=f"admin:cardpay:reject:{tx.id}"),
+        )
+    kb.row(InlineKeyboardButton(text=t(lang, "buttons.back"), callback_data="admin:cardpay:list"))
+
+    receipt = payload.get("receipt_file_id")
+    await callback.answer()
+    if receipt:
+        try:
+            return await callback.message.answer_photo(photo=receipt, caption=caption, parse_mode="HTML", reply_markup=kb.as_markup())
+        except Exception:
+            logger.warning("Could not render receipt photo for tx=%s", tx.id, exc_info=True)
+    await callback.message.answer(caption, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@admin_router.callback_query(F.data.startswith("admin:cardpay:approve:"))
+async def cb_admin_cardpay_approve(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    admin_user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(admin_user)
+    if not await _guard_admin_mutation(admin_id=callback.from_user.id, lang=lang, action="cardpay", callback=callback):
+        return
+    tx_id = int(callback.data.split(":")[3])
+
+    # Lock the transaction row so two admins can't approve the same payment.
+    tx = await session.scalar(
+        select(PaymentTransaction).where(PaymentTransaction.id == tx_id).with_for_update()
+    )
+    if not tx or tx.provider != "card_to_card":
+        return await callback.answer(t(lang, "admin.cardpay.not_found"), show_alert=True)
+    if tx.status != TransactionStatus.PENDING:
+        return await callback.answer(t(lang, "admin.cardpay.already", tx=tx.id), show_alert=True)
+
+    payload = tx.raw_payload or {}
+    product = get_product(payload.get("product_code"))
+    buyer = await session.get(User, tx.user_id)
+    if not product or not buyer:
+        return await callback.answer(t(lang, "admin.cardpay.not_found"), show_alert=True)
+
+    buyer_lang = buyer.language or "fa"
+    billing = BillingService(session)
+    try:
+        grant_text = await apply_product(
+            billing,
+            user_id=buyer.id,
+            product=product,
+            payment_ref=f"card_{tx.id}",
+            price_label=f"${product.usd_price}",
+            lang=buyer_lang,
+        )
+    except Exception as exc:
+        from app.core.exceptions import DuplicateTransactionError
+        if isinstance(exc, DuplicateTransactionError):
+            tx.status = TransactionStatus.COMPLETED
+            await session.commit()
+            return await callback.answer(t(lang, "admin.cardpay.already", tx=tx.id), show_alert=True)
+        logger.error("Card payment approve failed tx=%s: %s", tx.id, exc, exc_info=True)
+        await session.rollback()
+        return await callback.answer(_admin_action_error(lang), show_alert=True)
+
+    tx.status = TransactionStatus.COMPLETED
+    tx.credits_granted = product.normal_credits or product.vip_credits or 0
+    await session.commit()
+
+    try:
+        await callback.bot.send_message(
+            chat_id=payload.get("telegram_id", buyer.telegram_id),
+            text=t(buyer_lang, "purchase.card.approved_user", grant=grant_text),
+            parse_mode="HTML",
+        )
+    except Exception:
+        logger.warning("Could not notify buyer of approved card payment tx=%s", tx.id)
+
+    await callback.answer(
+        t(lang, "admin.cardpay.approved", grant=grant_text, telegram_id=payload.get("telegram_id", buyer.telegram_id)),
+        show_alert=True,
+    )
+    try:
+        await callback.message.edit_reply_markup(reply_markup=get_back_to_admin_kb(lang, back="admin:cardpay:list"))
+    except Exception:
+        pass
+
+
+@admin_router.callback_query(F.data.startswith("admin:cardpay:reject:"))
+async def cb_admin_cardpay_reject(callback: CallbackQuery, session: AsyncSession):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    admin_user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(admin_user)
+    if not await _guard_admin_mutation(admin_id=callback.from_user.id, lang=lang, action="cardpay", callback=callback):
+        return
+    tx_id = int(callback.data.split(":")[3])
+
+    tx = await session.scalar(
+        select(PaymentTransaction).where(PaymentTransaction.id == tx_id).with_for_update()
+    )
+    if not tx or tx.provider != "card_to_card":
+        return await callback.answer(t(lang, "admin.cardpay.not_found"), show_alert=True)
+    if tx.status != TransactionStatus.PENDING:
+        return await callback.answer(t(lang, "admin.cardpay.already", tx=tx.id), show_alert=True)
+
+    payload = tx.raw_payload or {}
+    buyer = await session.get(User, tx.user_id)
+    buyer_lang = (buyer.language if buyer else None) or "fa"
+    tx.status = TransactionStatus.FAILED
+    await session.commit()
+
+    try:
+        await callback.bot.send_message(
+            chat_id=payload.get("telegram_id", buyer.telegram_id if buyer else None),
+            text=t(buyer_lang, "purchase.card.rejected_user"),
+            parse_mode="HTML",
+        )
+    except Exception:
+        logger.warning("Could not notify buyer of rejected card payment tx=%s", tx.id)
+
+    await callback.answer(t(lang, "admin.cardpay.rejected", tx=tx.id), show_alert=True)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=get_back_to_admin_kb(lang, back="admin:cardpay:list"))
+    except Exception:
+        pass
 
 
 @admin_router.callback_query(F.data == "admin:main")

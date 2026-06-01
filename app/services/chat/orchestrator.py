@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -192,6 +193,28 @@ class ChatOrchestrator:
             cost=normal_cost,
         )
 
+    async def _payg_rate(self, feature_name: FeatureName) -> int:
+        """Credits charged per 1000 real tokens for the given text feature."""
+        key = "payg_pro_per_1k" if feature_name == FeatureName.PRO_TEXT else "payg_flash_per_1k"
+        return await RuntimeConfig.get_int(self.session, key)
+
+    @staticmethod
+    def _metered_cost(tokens: int, rate_per_1k: int, min_charge: int) -> int:
+        """Round token usage up to whole credits at the given per-1K rate."""
+        billed = math.ceil(max(0, tokens) / 1000 * max(0, rate_per_1k))
+        return max(min_charge, billed)
+
+    async def _invoke_model(self, config, prompt, history, conversation, image_bytes):
+        """Single place the provider is called, shared by flat & PAYG paths."""
+        return await self.router.route_text_request_with_config(
+            config=config,
+            prompt=prompt,
+            history=history,
+            persona=conversation.persona,
+            language=conversation.language_preference,
+            image_bytes=image_bytes,
+        )
+
     async def process_message(self, user_id: int, prompt: str, feature_name: FeatureName, allow_vip: bool = True, image_bytes: bytes | None = None, ignore_history: bool = False) -> ChatResult:
         user = await self.session.get(User, user_id)
         if not user:
@@ -236,103 +259,146 @@ class ChatOrchestrator:
         cost = policy.cost
         reference_id = f"msg_{uuid.uuid4().hex}"
         mode_str = policy.feature_name.value
+        is_payg = bool(getattr(user, "payg_enabled", False))
 
-        try:
-            await self.billing.deduct_credits(
-                user_id=user_id,
-                amount=cost,
-                reference_type="chat_message",
-                reference_id=reference_id,
-                description=f"AI Chat ({policy.feature_name.value})",
-                wallet_type=policy.wallet_type,
-            )
-        except InsufficientCreditsError:
-            await self.session.rollback()
-            key = "errors.insufficient_vip" if policy.wallet_type == WalletType.VIP else "errors.insufficient_normal"
-            return ChatResult(
-                text=t(lang, key, cost=cost),
-                success=False,
-                error_message="insufficient_funds",
-                feature_name=policy.feature_name,
-                wallet_type=policy.wallet_type,
-            )
-        except Exception as exc:
-            logger.error("Billing deduction error: %s", exc, exc_info=True)
-            await self.session.rollback()
-            return ChatResult(
-                text=t(lang, "errors.wallet_check_failed"),
-                success=False,
-                error_message="billing_error",
-                feature_name=policy.feature_name,
-                wallet_type=policy.wallet_type,
-            )
+        # Build conversation + history up front. PAYG needs the history to
+        # estimate an upper-bound cost before generating; for the flat path it
+        # is simply fetched a few lines earlier than before (no behaviour change).
+        conversation = await self._get_or_create_active_conversation(user_id, mode_str)
+        if ignore_history:
+            history = []
+        else:
+            history = await self.memory.get_conversation_history(conversation.id)
+            # ── Sliding Window Hard Limit ─────────────────────────────
+            # If the summarization queue is lagging, the history may exceed
+            # PRIVATE_MAX_PROMPT_LENGTH. Drop the oldest non-system messages.
+            history = self._apply_sliding_window(history, prompt)
 
-        try:
-            conversation = await self._get_or_create_active_conversation(user_id, mode_str)
-            if ignore_history:
-                history = []
-            else:
-                history = await self.memory.get_conversation_history(conversation.id)
-                # ── Sliding Window Hard Limit ─────────────────────────────
-                # If the summarization queue is lagging, the history may
-                # exceed PRIVATE_MAX_PROMPT_LENGTH.  Drop the oldest non-
-                # system messages to stay within the provider envelope.
-                history = self._apply_sliding_window(history, prompt)
-
-            response = await self.router.route_text_request_with_config(
-                config=config,
-                prompt=prompt,
-                history=history,
-                persona=conversation.persona,
-                language=conversation.language_preference,
-                image_bytes=image_bytes,
-            )
-        except SafetyBlockedError as exc:
-            logger.warning(
-                "AI safety block for user_id=%s category=%s ref=%s",
-                user_id, exc.category, reference_id,
-            )
-            await self.session.rollback()
-            try:
-                await self.billing.refund_credits(
-                    user_id=user_id,
-                    original_reference_id=reference_id,
-                    amount=cost,
-                    description="Refund: Content blocked by safety filter",
+        if is_payg:
+            # ── Pay-as-you-go: charge the REAL token usage after generation ──
+            rate = await self._payg_rate(policy.feature_name)
+            min_charge = await RuntimeConfig.get_int(self.session, "payg_min_charge")
+            est_input = self._tokenizer.estimate_tokens(prompt) + self._tokenizer.estimate_messages(history)
+            max_out = config.max_output_tokens or settings.MAX_OUTPUT_TOKENS_PRO
+            max_cost = self._metered_cost(est_input + max_out, rate, min_charge)
+            balance = user.vip_credits if policy.wallet_type == WalletType.VIP else user.normal_credits
+            if balance < max_cost:
+                # Reject up-front so usage can never push the wallet negative.
+                key = "errors.insufficient_vip" if policy.wallet_type == WalletType.VIP else "errors.insufficient_normal"
+                return ChatResult(
+                    text=t(lang, key, cost=max_cost),
+                    success=False,
+                    error_message="insufficient_funds",
+                    feature_name=policy.feature_name,
                     wallet_type=policy.wallet_type,
                 )
-            except Exception as refund_exc:
-                logger.error("Safety-block refund failure for %s: %s", reference_id, refund_exc, exc_info=True)
-                await self.session.rollback()
-            return ChatResult(
-                text=t(lang, "abuse.content_blocked"),
-                success=False,
-                error_message="safety_blocked",
-                feature_name=policy.feature_name,
-                wallet_type=policy.wallet_type,
-            )
-        except Exception as exc:
-            logger.error("AI generation failed: %s", exc, exc_info=True)
-            await self.session.rollback()
             try:
-                await self.billing.refund_credits(
+                # Nothing is deducted yet, so a failure needs no refund.
+                response = await self._invoke_model(config, prompt, history, conversation, image_bytes)
+            except SafetyBlockedError as exc:
+                logger.warning("AI safety block (payg) user_id=%s category=%s ref=%s", user_id, exc.category, reference_id)
+                return ChatResult(
+                    text=t(lang, "abuse.content_blocked"), success=False, error_message="safety_blocked",
+                    feature_name=policy.feature_name, wallet_type=policy.wallet_type,
+                )
+            except Exception as exc:
+                logger.error("AI generation failed (payg): %s", exc, exc_info=True)
+                return ChatResult(
+                    text=t(lang, "errors.ai_failed_refunded"), success=False, error_message=str(exc),
+                    feature_name=policy.feature_name, wallet_type=policy.wallet_type,
+                )
+            actual_cost = self._metered_cost(response.tokens_used or 0, rate, min_charge)
+            actual_cost = min(actual_cost, balance)  # never overdraw
+            try:
+                await self.billing.deduct_credits(
                     user_id=user_id,
-                    original_reference_id=reference_id,
-                    amount=cost,
-                    description="Refund: AI generation failed",
+                    amount=actual_cost,
+                    reference_type="chat_message_payg",
+                    reference_id=reference_id,
+                    description=f"PAYG {policy.feature_name.value} {response.tokens_used or 0}tok",
                     wallet_type=policy.wallet_type,
                 )
-            except Exception as refund_exc:
-                logger.error("Critical refund failure for %s: %s", reference_id, refund_exc, exc_info=True)
+            except Exception as exc:
+                # Pre-checked balance makes this unlikely; never fail the reply
+                # over a billing hiccup — log and serve the answer.
+                logger.error("PAYG deduction failed ref=%s: %s", reference_id, exc, exc_info=True)
                 await self.session.rollback()
+        else:
+            # ── Flat per-message: reserve credits before generation, refund on failure ──
+            try:
+                await self.billing.deduct_credits(
+                    user_id=user_id,
+                    amount=cost,
+                    reference_type="chat_message",
+                    reference_id=reference_id,
+                    description=f"AI Chat ({policy.feature_name.value})",
+                    wallet_type=policy.wallet_type,
+                )
+            except InsufficientCreditsError:
+                await self.session.rollback()
+                key = "errors.insufficient_vip" if policy.wallet_type == WalletType.VIP else "errors.insufficient_normal"
+                return ChatResult(
+                    text=t(lang, key, cost=cost),
+                    success=False,
+                    error_message="insufficient_funds",
+                    feature_name=policy.feature_name,
+                    wallet_type=policy.wallet_type,
+                )
+            except Exception as exc:
+                logger.error("Billing deduction error: %s", exc, exc_info=True)
+                await self.session.rollback()
+                return ChatResult(
+                    text=t(lang, "errors.wallet_check_failed"),
+                    success=False,
+                    error_message="billing_error",
+                    feature_name=policy.feature_name,
+                    wallet_type=policy.wallet_type,
+                )
 
-            return ChatResult(
-                text=t(lang, "errors.ai_failed_refunded"),
-                success=False,
-                error_message=str(exc),
-                feature_name=policy.feature_name,
-                wallet_type=policy.wallet_type,
-            )
+            try:
+                response = await self._invoke_model(config, prompt, history, conversation, image_bytes)
+            except SafetyBlockedError as exc:
+                logger.warning("AI safety block for user_id=%s category=%s ref=%s", user_id, exc.category, reference_id)
+                await self.session.rollback()
+                try:
+                    await self.billing.refund_credits(
+                        user_id=user_id,
+                        original_reference_id=reference_id,
+                        amount=cost,
+                        description="Refund: Content blocked by safety filter",
+                        wallet_type=policy.wallet_type,
+                    )
+                except Exception as refund_exc:
+                    logger.error("Safety-block refund failure for %s: %s", reference_id, refund_exc, exc_info=True)
+                    await self.session.rollback()
+                return ChatResult(
+                    text=t(lang, "abuse.content_blocked"),
+                    success=False,
+                    error_message="safety_blocked",
+                    feature_name=policy.feature_name,
+                    wallet_type=policy.wallet_type,
+                )
+            except Exception as exc:
+                logger.error("AI generation failed: %s", exc, exc_info=True)
+                await self.session.rollback()
+                try:
+                    await self.billing.refund_credits(
+                        user_id=user_id,
+                        original_reference_id=reference_id,
+                        amount=cost,
+                        description="Refund: AI generation failed",
+                        wallet_type=policy.wallet_type,
+                    )
+                except Exception as refund_exc:
+                    logger.error("Critical refund failure for %s: %s", reference_id, refund_exc, exc_info=True)
+                    await self.session.rollback()
+                return ChatResult(
+                    text=t(lang, "errors.ai_failed_refunded"),
+                    success=False,
+                    error_message=str(exc),
+                    feature_name=policy.feature_name,
+                    wallet_type=policy.wallet_type,
+                )
 
         try:
             user_message = Message(
