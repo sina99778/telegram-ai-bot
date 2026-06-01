@@ -235,7 +235,7 @@ Copy `.env.example` to `.env` and set real values.
 
 Important keys:
 
-- `GEMINI_MODEL_NORMAL=gemini-3.1-flash-lite-preview`
+- `GEMINI_MODEL_NORMAL=gemini-3.1-flash-lite` (GA/stable — same price as the preview)
 - `GEMINI_MODEL_PRO=gemini-3.1-pro-preview`
 - `GEMINI_MODEL_IMAGE=gemini-3.1-flash-image-preview`
 - `NORMAL_MESSAGE_COST=1`

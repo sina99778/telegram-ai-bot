@@ -1,6 +1,7 @@
 import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from app.core.config import settings
 from app.db.models import Conversation, Message
 from app.services.ai.provider import AIMessage
 
@@ -76,7 +77,7 @@ async def summarize_chat(ctx: dict, conversation_id: int):
                 conv.summarization_started_at = datetime.now(timezone.utc)
                 # 3. Call injected Provider safely executing the flash-lite endpoint dynamically
                 response = await ai_provider.generate_text(
-                    model_name="gemini-3.1-flash-lite-preview",  # Refined explicit 1. cheap model configuration
+                    model_name=settings.GEMINI_MODEL_NORMAL,  # cheap Flash-Lite model (GA), from config
                     messages=[AIMessage(role="user", content=prompt)],
                     system_instruction=system_instruction
                 )

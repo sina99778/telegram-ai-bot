@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # ── Google Gemini AI ──────────────────────
     GEMINI_API_KEY: str = ""
     # Final text models
-    GEMINI_MODEL_NORMAL: str = "gemini-3.1-flash-lite-preview"
+    GEMINI_MODEL_NORMAL: str = "gemini-3.1-flash-lite"  # GA (stable) — same price as the preview
     GEMINI_MODEL_PRO: str = "gemini-3.1-pro-preview"
     GEMINI_MODEL_IMAGE: str = "gemini-3.1-flash-image-preview"
     # ── Per-feature credit costs (calibrated to real provider cost) ──
