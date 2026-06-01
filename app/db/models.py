@@ -268,6 +268,26 @@ class UserPromo(Base):
     redeemed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class BotSetting(Base):
+    """Runtime-editable key/value overrides for cost-sensitive limits & prices.
+
+    Admins change these through ``/setconfig`` without a redeploy. Values are
+    stored as strings and parsed by :class:`RuntimeConfig`, which falls back to
+    the env-based ``settings`` defaults when a key has no row here.
+    """
+
+    __tablename__ = "bot_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(255), nullable=False)
+    updated_by: Mapped[Optional[int]] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
 class FeatureUsage(Base):
     __tablename__ = "feature_usage"
     __table_args__ = (

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models import FeatureUsage, User
+from app.services.config.runtime_config import RuntimeConfig
 
 
 @dataclass
@@ -93,13 +94,12 @@ class QuotaService:
                 stmt_retry = stmt_retry.with_for_update()
             return await self.session.scalar(stmt_retry)
 
-    @staticmethod
-    def search_limit_for_user(user: User) -> int:
+    async def search_limit_for_user(self, user: User) -> int:
         if user.has_active_vip:
-            return settings.SEARCH_DAILY_VIP_LIMIT
+            return await RuntimeConfig.get_int(self.session, "search_daily_vip")
         if user.lifetime_credits_purchased > 0 or user.is_premium:
-            return settings.SEARCH_DAILY_PAID_LIMIT
-        return settings.SEARCH_DAILY_FREE_LIMIT
+            return await RuntimeConfig.get_int(self.session, "search_daily_paid")
+        return await RuntimeConfig.get_int(self.session, "search_daily_free")
 
     async def get_search_status_for_user(self, user: User) -> QuotaStatus:
         usage = await self._get_usage_row(
@@ -108,7 +108,7 @@ class QuotaService:
             feature=self.SEARCH_COMMAND,
             reset_date=self._today(),
         )
-        limit = self.search_limit_for_user(user)
+        limit = await self.search_limit_for_user(user)
         return QuotaStatus(limit=limit, used=usage.used_count if usage else 0)
 
     async def get_search_status_for_group(self, group_id: int) -> QuotaStatus:
@@ -118,7 +118,8 @@ class QuotaService:
             feature=self.SEARCH_COMMAND,
             reset_date=self._today(),
         )
-        return QuotaStatus(limit=settings.SEARCH_DAILY_GROUP_LIMIT, used=usage.used_count if usage else 0)
+        limit = await RuntimeConfig.get_int(self.session, "search_daily_group")
+        return QuotaStatus(limit=limit, used=usage.used_count if usage else 0)
 
     async def get_free_image_status_for_user(self, user_id: int) -> QuotaStatus:
         usage = await self._get_usage_row(
@@ -127,7 +128,8 @@ class QuotaService:
             feature=self.FREE_IMAGE_GENERATION,
             reset_date=self._today(),
         )
-        return QuotaStatus(limit=settings.FREE_DAILY_IMAGE_LIMIT, used=usage.used_count if usage else 0)
+        limit = await RuntimeConfig.get_int(self.session, "free_daily_image")
+        return QuotaStatus(limit=limit, used=usage.used_count if usage else 0)
 
     async def get_free_image_edit_status_for_user(self, user_id: int) -> QuotaStatus:
         """Weekly quota for free image editing — resets every Monday."""
@@ -137,10 +139,11 @@ class QuotaService:
             feature=self.FREE_IMAGE_EDIT,
             reset_date=self._week_start(),
         )
-        return QuotaStatus(limit=settings.FREE_WEEKLY_IMAGE_EDIT_LIMIT, used=usage.used_count if usage else 0)
+        limit = await RuntimeConfig.get_int(self.session, "free_weekly_image_edit")
+        return QuotaStatus(limit=limit, used=usage.used_count if usage else 0)
 
     async def consume_search_for_user(self, user: User) -> QuotaStatus:
-        limit = self.search_limit_for_user(user)
+        limit = await self.search_limit_for_user(user)
         usage = await self._get_usage_row(
             scope_type=self.SCOPE_USER,
             scope_id=user.id,
@@ -156,7 +159,7 @@ class QuotaService:
         return QuotaStatus(limit=limit, used=usage.used_count)
 
     async def consume_search_for_group(self, group_id: int) -> QuotaStatus:
-        limit = settings.SEARCH_DAILY_GROUP_LIMIT
+        limit = await RuntimeConfig.get_int(self.session, "search_daily_group")
         usage = await self._get_usage_row(
             scope_type=self.SCOPE_GROUP,
             scope_id=group_id,
@@ -172,7 +175,7 @@ class QuotaService:
         return QuotaStatus(limit=limit, used=usage.used_count)
 
     async def consume_free_image_for_user(self, user_id: int) -> QuotaStatus:
-        limit = settings.FREE_DAILY_IMAGE_LIMIT
+        limit = await RuntimeConfig.get_int(self.session, "free_daily_image")
         usage = await self._get_usage_row(
             scope_type=self.SCOPE_USER,
             scope_id=user_id,
@@ -189,7 +192,7 @@ class QuotaService:
 
     async def consume_free_image_edit_for_user(self, user_id: int) -> QuotaStatus:
         """Consume one free image edit from the weekly quota."""
-        limit = settings.FREE_WEEKLY_IMAGE_EDIT_LIMIT
+        limit = await RuntimeConfig.get_int(self.session, "free_weekly_image_edit")
         usage = await self._get_usage_row(
             scope_type=self.SCOPE_USER,
             scope_id=user_id,
@@ -212,11 +215,12 @@ class QuotaService:
             feature=self.INLINE_CHAT,
             reset_date=self._today(),
         )
-        return QuotaStatus(limit=settings.INLINE_DAILY_LIMIT, used=usage.used_count if usage else 0)
+        limit = await RuntimeConfig.get_int(self.session, "inline_daily")
+        return QuotaStatus(limit=limit, used=usage.used_count if usage else 0)
 
     async def consume_inline_for_user(self, user_id: int) -> QuotaStatus:
         """Consume one inline chat request from the daily quota."""
-        limit = settings.INLINE_DAILY_LIMIT
+        limit = await RuntimeConfig.get_int(self.session, "inline_daily")
         usage = await self._get_usage_row(
             scope_type=self.SCOPE_USER,
             scope_id=user_id,

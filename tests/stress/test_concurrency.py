@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.exc import OperationalError
 from app.db.models import Base, User
 from app.services.billing.billing_service import BillingService
+from app.core.enums import LedgerEntryType
 from app.core.exceptions import InsufficientCreditsError, DuplicateTransactionError
 
 # PostgreSQL URI for concurrency tests (SQLite cannot enforce FOR UPDATE).
@@ -74,9 +75,11 @@ async def test_concurrent_credit_deduction(pg_session_factory):
     - final balance must be 3
     - balance must never go negative
     """
-    # Setup initial independent context
+    # Setup initial independent context.
+    # deduct_credits operates on the NORMAL wallet, so seed normal_credits=10
+    # (not just credit_balance) to exercise the FOR UPDATE single-winner path.
     async with pg_session_factory() as setup_session:
-        user = User(telegram_id=999991, credit_balance=10)
+        user = User(telegram_id=999991, credit_balance=10, normal_credits=10, vip_credits=0)
         setup_session.add(user)
         await setup_session.commit()
         user_id = user.id
@@ -126,9 +129,10 @@ async def test_concurrent_duplicate_webhook_race(pg_session_factory):
     - 5 concurrent webhooks attempt to grant credits utilizing strictly identical reference logic.
     - Result natively resolves 1 exact success guaranteeing idempotent bounds.
     """
-    # Setup state natively
+    # Setup state natively. add_credits targets the NORMAL wallet by default,
+    # so seed normal_credits=100 to match the expected final balance of 600.
     async with pg_session_factory() as setup_session:
-        user = User(telegram_id=999992, credit_balance=100)
+        user = User(telegram_id=999992, credit_balance=100, normal_credits=100, vip_credits=0)
         setup_session.add(user)
         await setup_session.commit()
         user_id = user.id
@@ -144,6 +148,7 @@ async def test_concurrent_duplicate_webhook_race(pg_session_factory):
                 await billing.add_credits(
                     user_id=user_id,
                     amount=500,
+                    entry_type=LedgerEntryType.PURCHASE,
                     reference_type="payment_webhook",
                     reference_id=payment_identity_ref,
                     description=f"Concurrent Webhook Delivery Process {worker_id}"

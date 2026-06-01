@@ -178,7 +178,7 @@ async def handle_chosen_inline_result(
     if inline_status.exhausted:
         return await _safe_edit_inline(
             chosen_result,
-            t(lang, "inline.daily_limit_reached", limit=settings.INLINE_DAILY_LIMIT),
+            t(lang, "inline.daily_limit_reached", limit=inline_status.limit),
             prompt=prompt,
             name=chosen_result.from_user.first_name,
         )

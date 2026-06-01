@@ -115,6 +115,35 @@ Main admin capabilities:
 
 Configured admins in `ADMIN_IDS` automatically see the admin shortcut in the main menu.
 
+### Runtime cost controls
+
+Cost-sensitive limits and prices are editable live from Telegram — no redeploy:
+
+```
+/config                          # list every editable key with current & default value
+/setconfig free_daily_image 1    # e.g. cut free image generations to 1/day
+/setconfig search_daily_free 1
+/setconfig normal_message_cost 2
+/setconfig max_output_tokens_flash 600
+```
+
+Overrides are stored in the `bot_settings` table, cached for ~30s, and fall
+back to the env defaults when unset. Editable keys include the per-tier
+search limits, free image/edit quotas, inline limit, per-message credit
+costs, and the Flash/Pro output-token caps.
+
+### Cost & token notes
+
+- Real Gemini token usage is now captured from `usage_metadata` on every
+  call and stored on each conversation, which also drives summarization.
+- Text features carry a hard `max_output_tokens` cap (Flash 800, Pro 1500 by
+  default) because output tokens are the expensive half of a request.
+- The system preamble was compressed (~690 → ~230 tokens) since it ships on
+  every single request.
+- The biggest per-unit costs are **image generation** and **`/search`
+  grounding** — keep their daily caps low and watch the Google Cloud billing
+  breakdown by SKU to see where spend actually goes.
+
 ## Environment
 
 Copy `.env.example` to `.env` and set real values.

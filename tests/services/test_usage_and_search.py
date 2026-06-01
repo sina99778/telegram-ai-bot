@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock
 
+from app.core.config import settings
 from app.db.models import User
 from app.services.search.search_service import SearchService
 from app.services.usage.quota_service import QuotaService
@@ -14,18 +15,18 @@ async def test_search_quota_tiers(db_session, setup_base_data):
     user = await db_session.get(User, setup_base_data["user_id"])
 
     status = await quota.get_search_status_for_user(user)
-    assert status.limit == 5
+    assert status.limit == settings.SEARCH_DAILY_FREE_LIMIT
 
     user.lifetime_credits_purchased = 10
     await db_session.commit()
     status = await quota.get_search_status_for_user(user)
-    assert status.limit == 15
+    assert status.limit == settings.SEARCH_DAILY_PAID_LIMIT
 
     user.is_vip = True
     user.vip_credits = 100
     await db_session.commit()
     status = await quota.get_search_status_for_user(user)
-    assert status.limit == 25
+    assert status.limit == settings.SEARCH_DAILY_VIP_LIMIT
 
 
 @pytest.mark.asyncio
@@ -66,7 +67,7 @@ async def test_free_image_quota_without_vip_billing(db_session, setup_base_data)
     user.is_vip = False
     await db_session.commit()
 
-    for _ in range(5):
+    for _ in range(settings.FREE_DAILY_IMAGE_LIMIT):
         result = await orchestrator.process_image_request(user.id, "sunset")
         assert result.success is True
 

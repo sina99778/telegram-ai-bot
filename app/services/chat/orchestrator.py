@@ -20,6 +20,7 @@ from app.services.ai.provider import AIMessage
 from app.services.chat.memory import MemoryManager, TokenEstimator
 from app.services.queue.queue_service import QueueService
 from app.services.ai.antigravity import SafetyBlockedError
+from app.services.config.runtime_config import RuntimeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -149,44 +150,46 @@ class ChatOrchestrator:
 
     async def _resolve_policy(self, user: User, requested_feature: FeatureName, allow_vip: bool = True) -> RoutedChatPolicy:
         lang = user.language or "fa"
+        normal_cost = await RuntimeConfig.get_int(self.session, "normal_message_cost")
+        vip_cost = await RuntimeConfig.get_int(self.session, "vip_message_cost")
         if not allow_vip:
             return RoutedChatPolicy(
                 feature_name=FeatureName.FLASH_TEXT,
                 wallet_type=WalletType.NORMAL,
-                cost=settings.NORMAL_MESSAGE_COST,
+                cost=normal_cost,
             )
 
         requested_is_pro = requested_feature == FeatureName.PRO_TEXT
         has_vip_access = user.has_active_vip
         vip_credits = user.vip_credits
 
-        if requested_is_pro and has_vip_access and vip_credits >= settings.VIP_MESSAGE_COST:
+        if requested_is_pro and has_vip_access and vip_credits >= vip_cost:
             return RoutedChatPolicy(
                 feature_name=FeatureName.PRO_TEXT,
                 wallet_type=WalletType.VIP,
-                cost=settings.VIP_MESSAGE_COST,
+                cost=vip_cost,
             )
 
-        if requested_is_pro and has_vip_access and vip_credits < settings.VIP_MESSAGE_COST:
+        if requested_is_pro and has_vip_access and vip_credits < vip_cost:
             if settings.VIP_DEPLETION_BEHAVIOR == "fallback_to_normal":
                 return RoutedChatPolicy(
                     feature_name=FeatureName.FLASH_TEXT,
                     wallet_type=WalletType.NORMAL,
-                    cost=settings.NORMAL_MESSAGE_COST,
+                    cost=normal_cost,
                     depleted_vip_fallback=True,
                     notice=t(lang, "chat.vip_fallback"),
                 )
             return RoutedChatPolicy(
                 feature_name=FeatureName.PRO_TEXT,
                 wallet_type=WalletType.VIP,
-                cost=settings.VIP_MESSAGE_COST,
+                cost=vip_cost,
                 notice=t(lang, "chat.vip_depleted"),
             )
 
         return RoutedChatPolicy(
             feature_name=FeatureName.FLASH_TEXT,
             wallet_type=WalletType.NORMAL,
-            cost=settings.NORMAL_MESSAGE_COST,
+            cost=normal_cost,
         )
 
     async def process_message(self, user_id: int, prompt: str, feature_name: FeatureName, allow_vip: bool = True, image_bytes: bytes | None = None, ignore_history: bool = False) -> ChatResult:

@@ -33,6 +33,7 @@ from app.core.i18n import t
 from app.db.models import FeatureConfig, User
 from app.services.admin.admin_service import AdminService
 from app.services.billing.billing_service import BillingService
+from app.services.config.runtime_config import RuntimeConfig
 from app.services.security.abuse_guard import AbuseGuardService
 from app.services.security.broadcast_control import BroadcastControlService
 
@@ -249,6 +250,83 @@ async def cmd_admin(message: Message, session: AsyncSession, state: FSMContext):
         t(_lang(None), "admin.panel_title"),
         parse_mode="HTML",
         reply_markup=get_admin_main_kb("fa"),
+    )
+
+
+@admin_router.message(Command("config"))
+async def cmd_config(message: Message, session: AsyncSession):
+    """List every runtime-editable limit/price with its current & default value."""
+    if message.chat.type != "private":
+        return
+    if not await _is_admin(message.from_user.id, session):
+        return
+    user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
+    lang = _lang(user)
+    snapshot = await RuntimeConfig.snapshot(session)
+    lines = [t(lang, "admin.config.title"), ""]
+    for item in snapshot:
+        lines.append(
+            t(
+                lang,
+                "admin.config.row",
+                key=item["key"],
+                value=item["value"],
+                default=item["default"],
+                description=item["description"],
+                star=t(lang, "admin.config.override_mark") if item["is_override"] else "",
+            )
+        )
+    lines.append("")
+    lines.append(t(lang, "admin.config.usage"))
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@admin_router.message(Command("setconfig"))
+async def cmd_setconfig(message: Message, session: AsyncSession):
+    """Change a runtime-editable limit/price: /setconfig <key> <value>."""
+    if message.chat.type != "private":
+        return
+    if not await _is_admin(message.from_user.id, session):
+        return
+    user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
+    lang = _lang(user)
+
+    if not await _guard_admin_mutation(admin_id=message.from_user.id, lang=lang, action="setconfig", message=message):
+        return
+
+    parts = (message.text or "").split()
+    # parts[0] == "/setconfig"
+    if len(parts) < 3:
+        return await message.answer(t(lang, "admin.config.usage"), parse_mode="HTML")
+
+    key = parts[1].strip().lower()
+    raw_value = parts[2].strip()
+
+    if not RuntimeConfig.is_valid_key(key):
+        return await message.answer(t(lang, "admin.config.unknown_key", key=key), parse_mode="HTML")
+
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return await message.answer(t(lang, "admin.config.bad_value"), parse_mode="HTML")
+
+    old_value = await RuntimeConfig.get_int(session, key)
+    try:
+        await RuntimeConfig.set_int(session, key, value, updated_by=message.from_user.id)
+    except ValueError:
+        spec = RuntimeConfig.REGISTRY[key]
+        return await message.answer(
+            t(lang, "admin.config.out_of_range", key=key, min=spec.minimum, max=spec.maximum),
+            parse_mode="HTML",
+        )
+
+    logger.info(
+        "Admin runtime-config change admin_telegram_id=%s key=%s old=%s new=%s",
+        message.from_user.id, key, old_value, value,
+    )
+    await message.answer(
+        t(lang, "admin.config.saved", key=key, value=value, old=old_value),
+        parse_mode="HTML",
     )
 
 
