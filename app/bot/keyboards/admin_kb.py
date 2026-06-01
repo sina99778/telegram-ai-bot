@@ -81,6 +81,9 @@ def get_admin_config_kb(snapshot: list[dict], lang: str, text_items: list[dict] 
             )
         )
     builder.row(
+        InlineKeyboardButton(text=t(lang, "admin.config.fetch_rate_btn"), callback_data="admin:config:fetchrate"),
+    )
+    builder.row(
         InlineKeyboardButton(text=t(lang, "buttons.refresh"), callback_data="admin:config"),
         InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"),
     )

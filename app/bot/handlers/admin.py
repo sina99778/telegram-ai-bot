@@ -517,6 +517,42 @@ async def process_config_text(message: Message, session: AsyncSession, state: FS
     )
 
 
+@admin_router.callback_query(F.data == "admin:config:fetchrate")
+async def cb_admin_config_fetchrate(callback: CallbackQuery, session: AsyncSession):
+    """Trigger a one-off USD→Toman fetch and report whether the source worked."""
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+
+    from app.db.session import AsyncSessionLocal
+    from app.services.exchange.rate_updater import ExchangeRateUpdater
+
+    applied = None
+    try:
+        applied = await ExchangeRateUpdater.update_once(AsyncSessionLocal)
+    except Exception:
+        logger.exception("Manual exchange-rate fetch failed")
+
+    if applied:
+        await callback.answer(
+            t(lang, "admin.config.rate_fetched", provider=settings.EXCHANGE_RATE_PROVIDER, rate=f"{applied:,}"),
+            show_alert=True,
+        )
+    else:
+        await callback.answer(t(lang, "admin.config.rate_failed"), show_alert=True)
+
+    # Re-render the panel so the (possibly updated) usd_toman_rate is visible.
+    try:
+        await callback.message.edit_text(
+            t(lang, "admin.config.menu_hint"),
+            parse_mode="HTML",
+            reply_markup=await _config_keyboard(session, lang),
+        )
+    except Exception:
+        pass
+
+
 def _pack_label(lang: str, code: str | None) -> str:
     if not code:
         return "?"

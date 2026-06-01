@@ -86,6 +86,8 @@ def test_config_kb_one_button_per_key_with_value_and_set_callback():
     # Navigation back to the panel is present.
     assert any(b.callback_data == "admin:main" for b in buttons)
     assert any(b.callback_data == "admin:config" for b in buttons)  # refresh
+    # The on-demand USD→Toman fetch button is present.
+    assert any(b.callback_data == "admin:config:fetchrate" for b in buttons)
 
 
 def test_config_kb_renders_text_settings_as_buttons():
