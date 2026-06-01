@@ -78,6 +78,8 @@ class RuntimeConfig:
         # ── Context size (biggest input-token cost lever) ──
         "history_max_tokens":   ConfigSpec("HISTORY_MAX_TOKENS", 256, 32000, "Context window re-sent per message (tokens)"),
         "history_max_messages": ConfigSpec("HISTORY_MAX_MESSAGES", 2, 50, "Recent messages loaded as context"),
+        # ── Card-to-card USD→Toman conversion ──
+        "usd_toman_rate": ConfigSpec("USD_TOMAN_RATE", 0, 100_000_000, "Toman per 1 USD (card-to-card; 0 = hide Toman)"),
     }
 
     # Free-text settings (stored in the same bot_settings table). Used for

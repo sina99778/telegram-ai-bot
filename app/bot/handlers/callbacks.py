@@ -230,6 +230,14 @@ async def cb_pay_card(callback: CallbackQuery, session: AsyncSession, state: FSM
     card_holder = await RuntimeConfig.get_text(session, "card_holder")
     card_note = await RuntimeConfig.get_text(session, "card_note")
 
+    # USD→Toman conversion for the displayed amount (rate is admin-set; 0 hides it).
+    rate = await RuntimeConfig.get_int(session, "usd_toman_rate")
+    if rate > 0:
+        toman = int(round(product.usd_price * rate))
+        toman_line = t(lang, "purchase.card.toman_line", toman=f"{toman:,}")
+    else:
+        toman_line = ""
+
     await state.set_state(CardPayStates.waiting_for_receipt)
     await state.update_data(card_product=code)
     await callback.message.edit_text(
@@ -238,6 +246,7 @@ async def cb_pay_card(callback: CallbackQuery, session: AsyncSession, state: FSM
             "purchase.card.instructions",
             pack=_pack_label(lang, code),
             price=f"{product.usd_price:.2f}",
+            toman_line=toman_line,
             card_number=card_number,
             card_holder=card_holder or "-",
             note=card_note,

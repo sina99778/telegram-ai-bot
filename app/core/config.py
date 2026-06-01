@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     CARD_TO_CARD_NUMBER: str = ""
     CARD_TO_CARD_HOLDER: str = ""
     CARD_TO_CARD_NOTE: str = ""
+    # Toman per 1 USD, used to show card-to-card amounts in Toman.
+    # 0 = not configured (the bot then shows USD only). Admin updates it
+    # from the panel button whenever the market rate moves.
+    USD_TOMAN_RATE: int = 0
     GROUP_DAILY_GROUP_CAP: int = 40
     GROUP_DAILY_USER_CAP: int = 5
     GROUP_USER_COOLDOWN_SECONDS: int = 15

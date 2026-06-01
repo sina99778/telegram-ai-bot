@@ -580,6 +580,9 @@ async def cb_admin_cardpay_view(callback: CallbackQuery, session: AsyncSession):
     product = get_product(code)
     buyer = await session.get(User, tx.user_id)
     name = html.escape((buyer.username or buyer.first_name or "unknown")) if buyer else "?"
+    usd_price = product.usd_price if product else tx.amount
+    rate = await RuntimeConfig.get_int(session, "usd_toman_rate")
+    toman_line = t(lang, "purchase.card.toman_line", toman=f"{int(round(usd_price * rate)):,}") if rate > 0 else ""
     caption = t(
         lang,
         "admin.cardpay.detail",
@@ -587,7 +590,8 @@ async def cb_admin_cardpay_view(callback: CallbackQuery, session: AsyncSession):
         telegram_id=payload.get("telegram_id", tx.user_id),
         name=name,
         pack=_pack_label(lang, code),
-        price=f"{(product.usd_price if product else tx.amount):.2f}",
+        price=f"{usd_price:.2f}",
+        toman_line=toman_line,
         created=tx.created_at.strftime("%Y-%m-%d %H:%M"),
     )
     kb = InlineKeyboardBuilder()

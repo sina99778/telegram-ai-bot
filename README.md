@@ -112,6 +112,13 @@ Both crypto and card approval funnel through one idempotent fulfillment helper
 (`app/services/purchase/fulfillment.py`), so a duplicate IPN or a double admin
 tap can never double-credit.
 
+**USD → Toman.** Card-to-card amounts are shown in Toman alongside USD. The
+rate is the `usd_toman_rate` button in **Admin → 🎚 Limits & Prices** (Toman
+per 1 USD); the admin updates it as the market moves and every pack's Toman
+price recomputes instantly. Set it to `0` to show USD only. (A reliable free
+live feed for the Iranian free-market rate isn't available, so the rate is
+admin-controlled rather than auto-fetched.)
+
 ## Pricing & margin model
 
 Credit costs are calibrated to the **real provider cost** measured from the
