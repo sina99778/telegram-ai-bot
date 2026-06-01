@@ -117,7 +117,13 @@ Configured admins in `ADMIN_IDS` automatically see the admin shortcut in the mai
 
 ### Runtime cost controls
 
-Cost-sensitive limits and prices are editable live from Telegram — no redeploy:
+Cost-sensitive limits and prices are editable live from Telegram — no redeploy.
+
+**From the admin panel (buttons):** open `/admin` → **🎚 Limits & Prices**.
+Each setting is a button showing its current value (★ = overridden); tap one
+and send the new number. No need to remember key names.
+
+**From commands (power users):**
 
 ```
 /config                          # list every editable key with current & default value
@@ -127,7 +133,7 @@ Cost-sensitive limits and prices are editable live from Telegram — no redeploy
 /setconfig max_output_tokens_flash 600
 ```
 
-Overrides are stored in the `bot_settings` table, cached for ~30s, and fall
+Both paths write to the same `bot_settings` table, cached for ~30s, falling
 back to the env defaults when unset. Editable keys include the per-tier
 search limits, free image/edit quotas, inline limit, per-message credit
 costs, and the Flash/Pro output-token caps.

@@ -24,10 +24,35 @@ def get_admin_main_kb(lang: str) -> object:
                 InlineKeyboardButton(text=t(lang, "buttons.admin_pricing"), callback_data="admin:pricing"),
             ],
             [
+                InlineKeyboardButton(text=t(lang, "buttons.admin_config"), callback_data="admin:config"),
+            ],
+            [
                 InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"),
             ],
         ]
     )
+
+
+def get_admin_config_kb(snapshot: list[dict], lang: str) -> object:
+    """One tappable button per runtime-config key, showing its current value.
+
+    ``snapshot`` is the list returned by ``RuntimeConfig.snapshot`` — each item
+    has ``key``, ``value``, and ``is_override``.
+    """
+    builder = InlineKeyboardBuilder()
+    for item in snapshot:
+        star = " ★" if item["is_override"] else ""
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{item['key']} = {item['value']}{star}"[:64],
+                callback_data=f"admin:config:set:{item['key']}",
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(text=t(lang, "buttons.refresh"), callback_data="admin:config"),
+        InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"),
+    )
+    return builder.as_markup()
 
 
 def get_back_to_admin_kb(lang: str, back: str | None = None) -> object:

@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.keyboards.admin_kb import (
+    get_admin_config_kb,
     get_admin_main_kb,
     get_admin_users_kb,
     get_back_to_admin_kb,
@@ -55,6 +56,7 @@ class AdminStates(StatesGroup):
     waiting_for_code_max_uses = State()
     waiting_for_code_max_uses_per_user = State()
     waiting_for_manual_code = State()
+    waiting_for_config_value = State()
 
 
 async def _is_admin(user_id: int, session: AsyncSession) -> bool:
@@ -327,6 +329,100 @@ async def cmd_setconfig(message: Message, session: AsyncSession):
     await message.answer(
         t(lang, "admin.config.saved", key=key, value=value, old=old_value),
         parse_mode="HTML",
+    )
+
+
+@admin_router.callback_query(F.data == "admin:config")
+async def cb_admin_config(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    """Render the runtime-config screen: one tappable button per editable key."""
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    await state.clear()
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    snapshot = await RuntimeConfig.snapshot(session)
+    await callback.message.edit_text(
+        t(lang, "admin.config.menu_hint"),
+        parse_mode="HTML",
+        reply_markup=get_admin_config_kb(snapshot, lang),
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin:config:set:"))
+async def cb_admin_config_set_start(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    """Begin editing one key: show its detail and wait for the new value."""
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    key = callback.data.split(":", 3)[3]
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    if not RuntimeConfig.is_valid_key(key):
+        return await callback.answer(t(lang, "admin.config.unknown_key", key=key), show_alert=True)
+
+    spec = RuntimeConfig.REGISTRY[key]
+    current = await RuntimeConfig.get_int(session, key)
+    await state.update_data(config_key=key)
+    await state.set_state(AdminStates.waiting_for_config_value)
+    await callback.message.edit_text(
+        t(
+            lang,
+            "admin.config.set_prompt",
+            key=key,
+            description=spec.description,
+            value=current,
+            default=RuntimeConfig.default_for(key),
+            min=spec.minimum,
+            max=spec.maximum,
+        ),
+        parse_mode="HTML",
+        reply_markup=get_back_to_admin_kb(lang, back="admin:config"),
+    )
+    await callback.answer()
+
+
+@admin_router.message(AdminStates.waiting_for_config_value)
+async def process_config_value(message: Message, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(message.from_user.id, session):
+        return
+    admin_user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
+    lang = _lang(admin_user)
+    if not await _guard_admin_mutation(admin_id=message.from_user.id, lang=lang, action="setconfig", message=message):
+        return
+
+    data = await state.get_data()
+    key = data.get("config_key")
+    if not key or not RuntimeConfig.is_valid_key(key):
+        await state.clear()
+        return await message.answer(t(lang, "admin.config.unknown_key", key=key or "?"), parse_mode="HTML")
+
+    raw = (message.text or "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        # Keep the state so the admin can simply re-send a correct number.
+        return await message.answer(t(lang, "admin.config.bad_value"), parse_mode="HTML")
+
+    old_value = await RuntimeConfig.get_int(session, key)
+    try:
+        await RuntimeConfig.set_int(session, key, value, updated_by=message.from_user.id)
+    except ValueError:
+        spec = RuntimeConfig.REGISTRY[key]
+        return await message.answer(
+            t(lang, "admin.config.out_of_range", key=key, min=spec.minimum, max=spec.maximum),
+            parse_mode="HTML",
+        )
+
+    logger.info(
+        "Admin runtime-config change (button) admin_telegram_id=%s key=%s old=%s new=%s",
+        message.from_user.id, key, old_value, value,
+    )
+    await state.clear()
+    snapshot = await RuntimeConfig.snapshot(session)
+    await message.answer(
+        t(lang, "admin.config.saved", key=key, value=value, old=old_value),
+        parse_mode="HTML",
+        reply_markup=get_admin_config_kb(snapshot, lang),
     )
 
 
