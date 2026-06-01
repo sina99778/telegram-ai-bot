@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 
 from aiogram import F, Router
@@ -24,7 +25,7 @@ BANNER_FETCH_TIMEOUT = 5.0
 
 def _main_menu_text(lang: str, first_name: str, is_admin: bool) -> str:
     lines = [
-        t(lang, "main.welcome", name=first_name),
+        t(lang, "main.welcome", name=html.escape(first_name or "")),
         "",
         t(lang, "main.subtitle"),
     ]

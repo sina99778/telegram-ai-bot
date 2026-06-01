@@ -7,6 +7,27 @@ from app.bot.keyboards.common import markup, nav_buttons
 from app.core.i18n import t
 from app.db.models import PromoCode, User
 
+# Telegram caps callback_data at 64 BYTES. The admin user-list embeds the
+# current search term inside several callbacks (pagination + per-user actions).
+# A long term — or a short Persian one (2 bytes/char in UTF-8) — would push the
+# data past 64 bytes and Telegram would reject the WHOLE message, not just the
+# button. We therefore round-trip only a short, byte-bounded, colon-free token;
+# the first search still queries the full term, only deep-link navigation uses
+# the shortened token.
+_SEARCH_TOKEN_BUDGET = 12
+
+
+def _safe_search_token(search: str | None) -> str:
+    token = (search or "").strip()
+    if not token:
+        return "-"
+    # ':' is the callback_data delimiter — neutralise it so parsing stays sane.
+    token = token.replace(":", " ")
+    encoded = token.encode("utf-8")
+    if len(encoded) <= _SEARCH_TOKEN_BUDGET:
+        return token
+    return encoded[:_SEARCH_TOKEN_BUDGET].decode("utf-8", "ignore").strip() or "-"
+
 
 def get_admin_main_kb(lang: str) -> object:
     return markup(
@@ -61,7 +82,7 @@ def get_back_to_admin_kb(lang: str, back: str | None = None) -> object:
 
 def get_admin_users_kb(users: list[User], page: int, total_pages: int, search: str | None, lang: str) -> object:
     builder = InlineKeyboardBuilder()
-    search_token = search or "-"
+    search_token = _safe_search_token(search)
 
     for user in users:
         display_name = user.username or user.first_name or "unknown"
@@ -91,7 +112,7 @@ def get_admin_users_kb(users: list[User], page: int, total_pages: int, search: s
 
 
 def get_user_manage_kb(user: User, lang: str, page: int = 1, search: str | None = None) -> object:
-    search_token = search or "-"
+    search_token = _safe_search_token(search)
     ban_label = t(lang, "admin.unban") if user.is_banned else t(lang, "admin.ban")
     vip_label = t(lang, "admin.extend_vip") if user.has_active_vip else t(lang, "admin.give_vip")
     add_normal_cb = f"admin:user:add_normal:{user.telegram_id}:page:{page}:search:{search_token}"

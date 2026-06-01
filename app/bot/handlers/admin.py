@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -15,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.keyboards.admin_kb import (
+    _safe_search_token,
     get_admin_config_kb,
     get_admin_main_kb,
     get_admin_users_kb,
@@ -69,7 +71,7 @@ def _admin_service(session: AsyncSession) -> AdminService:
 
 def _format_user_detail(user: User) -> str:
     lang = _lang(user)
-    display_name = user.username or user.first_name or "unknown"
+    display_name = html.escape(user.username or user.first_name or "unknown")
     vip_until = user.active_vip_until
     vip_status = t(lang, "admin.user_vip_until", date=vip_until.strftime("%Y-%m-%d")) if user.has_active_vip and vip_until else (
         t(lang, "admin.user_vip_active") if user.has_active_vip else t(lang, "admin.user_vip_inactive")
@@ -124,7 +126,7 @@ def _parse_page_search(parts: list[str]) -> tuple[int, str | None]:
 
 
 def _user_detail_callback(telegram_id: int, page: int, search: str | None) -> str:
-    return f"admin:user:{telegram_id}:page:{page}:search:{search or '-'}"
+    return f"admin:user:{telegram_id}:page:{page}:search:{_safe_search_token(search)}"
 
 
 def _format_stats(stats: dict) -> str:

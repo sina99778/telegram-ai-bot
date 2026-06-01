@@ -32,8 +32,32 @@ def _flatten(markup):
     return [btn for row in markup.inline_keyboard for btn in row]
 
 
-def _flatten(markup):
-    return [btn for row in markup.inline_keyboard for btn in row]
+def test_search_token_keeps_callback_data_under_64_bytes():
+    """Telegram rejects callback_data > 64 bytes. A long or Persian search
+    term embedded in admin user-list callbacks must stay within budget."""
+    from app.bot.keyboards.admin_kb import _safe_search_token
+
+    for term in ["a" * 80, "محمدرضا حسینی نژاد بزرگ", "user:name:with:colons", "", None]:
+        token = _safe_search_token(term)
+        # worst-case (longest prefix) callback we build with a search token
+        cb = f"admin:user:add_normal:1234567890:page:999:search:{token}"
+        assert len(cb.encode("utf-8")) <= 64, (term, len(cb.encode("utf-8")))
+        assert ":" not in token  # delimiter must not leak into the token
+        assert token.encode("utf-8").decode("utf-8") == token  # no half-truncated char
+
+
+def test_user_management_kb_callbacks_are_byte_safe():
+    from types import SimpleNamespace
+    from app.bot.keyboards.admin_kb import get_user_manage_kb
+
+    user = SimpleNamespace(
+        telegram_id=1234567890, is_banned=False, has_active_vip=False,
+        username=None, first_name="x", normal_credits=0, vip_credits=0,
+    )
+    markup = get_user_manage_kb(user, "fa", page=999, search="محمدرضا حسینی نژاد بزرگ")
+    for btn in _flatten(markup):
+        if btn.callback_data:
+            assert len(btn.callback_data.encode("utf-8")) <= 64, btn.callback_data
 
 
 def test_admin_main_kb_has_config_button():

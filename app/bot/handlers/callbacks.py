@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
@@ -54,7 +55,7 @@ def _format_profile(user: User) -> str:
         [
             t(lang, "profile.title"),
             "",
-            t(lang, "profile.name", value=user.first_name or user.username or "unknown"),
+            t(lang, "profile.name", value=html.escape(user.first_name or user.username or "unknown")),
             t(lang, "profile.id", value=user.telegram_id),
             t(lang, "profile.normal_credits", value=user.normal_credits),
             t(lang, "profile.vip_credits", value=user.vip_credits),
@@ -214,7 +215,7 @@ async def cq_toggle_memory(callback: CallbackQuery, chat_repo: ChatRepository, s
     user = await chat_repo.get_user_by_telegram_id(callback.from_user.id)
     lang = _lang(user)
     if not user:
-        return
+        return await callback.answer(t("en", "errors.user_not_found"), show_alert=True)
 
     user.keep_chat_history = not user.keep_chat_history
     await session.commit()
@@ -227,7 +228,7 @@ async def cq_claim_daily_reward(callback: CallbackQuery, chat_repo: ChatReposito
     user = await chat_repo.get_user_by_telegram_id(callback.from_user.id)
     lang = _lang(user)
     if not user:
-        return
+        return await callback.answer(t("en", "errors.user_not_found"), show_alert=True)
 
     now = datetime.now(timezone.utc)
     if user.last_daily_reward:
@@ -265,6 +266,7 @@ async def cq_redeem_promo_init(callback: CallbackQuery, state: FSMContext, db_us
     lang = _lang(db_user)
     await callback.message.edit_text(t(lang, "promo.enter_code"), reply_markup=get_cancel_promo_keyboard(lang), parse_mode="HTML")
     await state.set_state(PromoStates.waiting_for_code)
+    await callback.answer()
 
 
 @callback_router.callback_query(F.data == "cancel_promo_action")
@@ -272,6 +274,7 @@ async def cq_cancel_promo(callback: CallbackQuery, state: FSMContext, db_user: U
     lang = _lang(db_user)
     await state.clear()
     await callback.message.edit_text(t(lang, "promo.cancelled"), parse_mode="HTML", reply_markup=get_wallet_menu_keyboard(lang))
+    await callback.answer()
 
 
 @callback_router.message(PromoStates.waiting_for_code)
@@ -297,7 +300,7 @@ async def view_chat_history(callback: CallbackQuery, chat_repo: ChatRepository):
     user = await chat_repo.get_user_by_telegram_id(callback.from_user.id)
     lang = _lang(user)
     if not user:
-        return
+        return await callback.answer(t("en", "errors.user_not_found"), show_alert=True)
     if not user.keep_chat_history:
         return await callback.answer(t(lang, "chat.history.disabled"), show_alert=True)
 
@@ -312,12 +315,18 @@ async def view_chat_history(callback: CallbackQuery, chat_repo: ChatRepository):
     builder.row(InlineKeyboardButton(text=t(lang, "buttons.back"), callback_data="profile_refresh"))
 
     await callback.message.edit_text(t(lang, "chat.history.title"), reply_markup=builder.as_markup(), parse_mode="HTML")
+    await callback.answer()
 
 
 @callback_router.callback_query(F.data.startswith("resume_chat_"))
 async def resume_chat(callback: CallbackQuery, chat_repo: ChatRepository, session: AsyncSession, db_user: User | None = None):
     lang = _lang(db_user)
-    conv_id = int(callback.data.split("_")[2])
+    # callback_data is "resume_chat_<id>"; guard against malformed data so a
+    # bad/old button can't crash the handler before we acknowledge it.
+    parts = (callback.data or "").split("_")
+    if len(parts) < 3 or not parts[2].isdigit():
+        return await callback.answer()
+    conv_id = int(parts[2])
     await chat_repo.set_active_conversation(callback.from_user.id, conv_id)
     await session.commit()
     await callback.answer(t(lang, "chat.history.resumed"), show_alert=True)
