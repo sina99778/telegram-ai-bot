@@ -80,6 +80,7 @@ async def _ensure_feature_configs() -> None:
                 "provider": "antigravity",
                 "model_name": settings.GEMINI_MODEL_NORMAL,
                 "fallback_model_name": None,
+                "max_output_tokens": settings.MAX_OUTPUT_TOKENS_FLASH,
             },
             FeatureName.PRO_TEXT: {
                 "credit_cost": settings.VIP_MESSAGE_COST,
@@ -87,6 +88,7 @@ async def _ensure_feature_configs() -> None:
                 "provider": "antigravity",
                 "model_name": settings.GEMINI_MODEL_PRO,
                 "fallback_model_name": settings.GEMINI_MODEL_NORMAL,
+                "max_output_tokens": settings.MAX_OUTPUT_TOKENS_PRO,
             },
             FeatureName.IMAGE_GEN: {
                 "credit_cost": 10,
@@ -94,6 +96,7 @@ async def _ensure_feature_configs() -> None:
                 "provider": "antigravity",
                 "model_name": settings.GEMINI_MODEL_IMAGE,
                 "fallback_model_name": None,
+                "max_output_tokens": None,
             },
             FeatureName.IMAGE_EDIT: {
                 "credit_cost": 10,
@@ -101,6 +104,7 @@ async def _ensure_feature_configs() -> None:
                 "provider": "antigravity",
                 "model_name": settings.GEMINI_MODEL_IMAGE,
                 "fallback_model_name": None,
+                "max_output_tokens": None,
             },
         }
 
@@ -122,6 +126,10 @@ async def _ensure_feature_configs() -> None:
                 feature.provider = values["provider"]
             if feature.credit_cost is None:
                 feature.credit_cost = values["credit_cost"]
+            # Backfill an output-token cap on text features that have none yet,
+            # so existing deployments inherit the cost control without a wipe.
+            if feature_name in (FeatureName.FLASH_TEXT, FeatureName.PRO_TEXT) and feature.max_output_tokens is None:
+                feature.max_output_tokens = values["max_output_tokens"]
 
         await session.commit()
 

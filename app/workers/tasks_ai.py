@@ -38,9 +38,18 @@ async def summarize_chat(ctx: dict, conversation_id: int):
 
         stmt_msgs = select(Message).where(Message.conversation_id == conversation_id).order_by(Message.id.asc())
         messages = (await session.scalars(stmt_msgs)).all()
-        
-        # 4. Safer Archival Policy: Retain explicitly the last 10 messages untouched
+
+        # 4. Safer Archival Policy: Retain explicitly the last 10 messages untouched.
+        #    Even when there is nothing to summarize we MUST clear the pending
+        #    flag and reset the running token counter, otherwise the orchestrator
+        #    (which now tracks real token usage) would re-enqueue a summarization
+        #    job on every subsequent message once the threshold is crossed.
         if len(messages) <= 10:
+            async with session.begin():
+                clean_conv = await session.get(Conversation, conversation_id)
+                if clean_conv:
+                    clean_conv.summarization_pending = False
+                    clean_conv.total_tokens_used = 0
             return
 
         # 2. Compile context payload correctly
@@ -75,15 +84,18 @@ async def summarize_chat(ctx: dict, conversation_id: int):
                 # 4. Reflect Summary modifications identically
                 conv.summary_text = response.text
                 conv.summary_version += 1
-                
+                # Reset the running token counter so the next summarization
+                # only fires after another threshold's worth of fresh usage.
+                conv.total_tokens_used = 0
+
                 # Archival: delete everything except the last 10 messages.
                 # Their content is now compressed into summary_text.
                 msgs_to_delete = messages[:-10]
                 for m in msgs_to_delete:
                     await session.delete(m)
-                    
+
             logger.info(f"Successfully processed Background summary {conversation_id}. V: {conv.summary_version}")
-            
+
         except Exception as e:
             logger.error(f"Failed completely summarizing conversation {conversation_id}: {e}", exc_info=True)
             # Safe rollback automatically handles inside `Session.begin()` context bounding

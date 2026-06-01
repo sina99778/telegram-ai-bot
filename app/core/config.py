@@ -41,25 +41,34 @@ class Settings(BaseSettings):
     NORMAL_MESSAGE_COST: int = 1
     VIP_MESSAGE_COST: int = 1
     VIP_DEPLETION_BEHAVIOR: str = "fallback_to_normal"
-    DEFAULT_DAILY_NORMAL_CREDITS: int = 50
+    DEFAULT_DAILY_NORMAL_CREDITS: int = 30
     VIP_DEFAULT_PLAN_NAME: str = "vip"
-    SEARCH_DAILY_FREE_LIMIT: int = 5
-    SEARCH_DAILY_PAID_LIMIT: int = 15
-    SEARCH_DAILY_VIP_LIMIT: int = 25
-    SEARCH_DAILY_GROUP_LIMIT: int = 7
-    FREE_DAILY_IMAGE_LIMIT: int = 5
+    # ── Daily usage caps ──────────────────────
+    # NOTE: these are the conservative defaults. They are runtime-editable
+    # by admins via /setconfig (see app/services/config/runtime_config.py),
+    # which overrides them from the bot_settings table without a redeploy.
+    SEARCH_DAILY_FREE_LIMIT: int = 2
+    SEARCH_DAILY_PAID_LIMIT: int = 8
+    SEARCH_DAILY_VIP_LIMIT: int = 15
+    SEARCH_DAILY_GROUP_LIMIT: int = 4
+    FREE_DAILY_IMAGE_LIMIT: int = 2
     FREE_WEEKLY_IMAGE_EDIT_LIMIT: int = 1
     IMAGE_EDIT_MAX_PROMPT_LENGTH: int = 500
     IMAGE_EDIT_COMMAND_COOLDOWN_SECONDS: int = 30
     PRIVATE_MAX_PROMPT_LENGTH: int = 4000
     INLINE_MAX_PROMPT_LENGTH: int = 500
-    INLINE_DAILY_LIMIT: int = 15
+    INLINE_DAILY_LIMIT: int = 6
     INLINE_BURST_LIMIT: int = 3
     INLINE_BURST_WINDOW_SECONDS: int = 60
     SEARCH_MAX_QUERY_LENGTH: int = 500
     IMAGE_MAX_PROMPT_LENGTH: int = 1000
-    GROUP_DAILY_GROUP_CAP: int = 150
-    GROUP_DAILY_USER_CAP: int = 12
+    # ── Per-feature output token caps (cost control) ──
+    # Output tokens are the expensive half of a request. These hard-cap the
+    # model's response length unless an admin raises them via /setconfig.
+    MAX_OUTPUT_TOKENS_FLASH: int = 800
+    MAX_OUTPUT_TOKENS_PRO: int = 1500
+    GROUP_DAILY_GROUP_CAP: int = 40
+    GROUP_DAILY_USER_CAP: int = 5
     GROUP_USER_COOLDOWN_SECONDS: int = 15
     GROUP_RESPONSE_TIMEOUT_SECONDS: int = 45
     AI_REQUEST_TIMEOUT_SECONDS: int = 60

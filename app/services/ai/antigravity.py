@@ -52,6 +52,25 @@ def _should_retry_gemini_error(exc: BaseException) -> bool:
 SAFETY_SETTINGS = None
 
 
+def _extract_total_tokens(response) -> int:
+    """Pull the total token count from a Gemini response's usage_metadata.
+
+    Returns 0 if the SDK didn't attach usage data (older previews, streamed
+    partials, errors). We prefer total_token_count; if absent we sum the
+    prompt + candidates counts so cost reporting and the summarization
+    trigger still get a meaningful number.
+    """
+    meta = getattr(response, "usage_metadata", None)
+    if not meta:
+        return 0
+    total = getattr(meta, "total_token_count", None)
+    if total:
+        return int(total)
+    prompt = getattr(meta, "prompt_token_count", 0) or 0
+    candidates = getattr(meta, "candidates_token_count", 0) or 0
+    return int(prompt) + int(candidates)
+
+
 def _check_response_safety(response) -> None:
     """Check the Gemini response for safety blocks and raise SafetyBlockedError if found."""
     # Check prompt-level block
@@ -170,10 +189,16 @@ class AntigravityProvider(BaseAIProvider):
             # Check for safety blocks BEFORE accessing .text
             _check_response_safety(response)
 
+            total_tokens = _extract_total_tokens(response)
+            logger.info(
+                "Gemini text call model=%s tokens_used=%s",
+                model_name,
+                total_tokens,
+            )
             return AIResponse(
                 text=response.text or "",
                 model_name=model_name,
-                tokens_used=0,
+                tokens_used=total_tokens,
                 finish_reason=str(getattr(response.candidates[0], "finish_reason", "stop")) if response.candidates else "stop",
                 raw_metadata={},
             )
