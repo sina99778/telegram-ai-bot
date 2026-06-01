@@ -21,11 +21,14 @@ class MemoryManager:
         self.session = session
         self.tokenizer = tokenizer or TokenEstimator()
 
-    async def get_conversation_history(self, conversation_id: int, max_tokens: int = 4000) -> List[AIMessage]:
+    async def get_conversation_history(self, conversation_id: int, limit: int = 20, max_tokens: int = 4000) -> List[AIMessage]:
         """
         Fetches the recent conversation history, ensuring it stays within token limits.
         Reverses the order so the oldest message is first in the list.
         Also logically injects conversation summaries when contextually available.
+
+        ``limit`` caps how many recent messages are loaded; ``max_tokens`` caps
+        the estimated token budget. Both are honoured.
         """
         # Fetch the conversation to resolve summary state
         conv = await self.session.get(Conversation, conversation_id)
@@ -40,8 +43,8 @@ class MemoryManager:
         # Calculate remaining tokens for actual messages
         available_tokens = max(0, max_tokens - summary_tokens)
 
-        # Fetch last 20 messages, ordered by newest first
-        stmt = select(Message).where(Message.conversation_id == conversation_id).order_by(Message.id.desc()).limit(20)
+        # Fetch the most recent messages (newest first), capped by `limit`.
+        stmt = select(Message).where(Message.conversation_id == conversation_id).order_by(Message.id.desc()).limit(max(1, limit))
         result = await self.session.scalars(stmt)
         messages = result.all()
         

@@ -162,6 +162,13 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
         await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
         await _safe_edit(processing_msg, t(lang, "errors.ai_timeout"))
         return
+    except Exception:
+        # Any non-timeout failure must still update the placeholder — never
+        # leave the user staring at a frozen "thinking…" message.
+        logger.exception("Private chat: unexpected error user_id=%s chat_id=%s", db_user.id, message.chat.id)
+        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+        await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
+        return
 
     try:
         if not result.success:
@@ -311,6 +318,11 @@ async def handle_user_photo(message: Message, db_user: User, chat_orchestrator: 
         logger.warning("Vision: AI timeout user_id=%s chat_id=%s", db_user.id, message.chat.id)
         await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
         await _safe_edit(processing_msg, t(lang, "errors.ai_timeout"))
+        return
+    except Exception:
+        logger.exception("Vision: unexpected error user_id=%s chat_id=%s", db_user.id, message.chat.id)
+        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+        await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
         return
 
     try:

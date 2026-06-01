@@ -3,8 +3,10 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, ReplyKeyboardRemove
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.keyboards.admin_kb import get_admin_main_kb
+from app.services.config.runtime_config import RuntimeConfig
 from app.bot.keyboards.inline import (
     get_support_menu_keyboard,
     get_vip_menu_keyboard,
@@ -70,14 +72,14 @@ def _user_lang(user: User | None) -> str:
     return user.language if user and user.language else "fa"
 
 
-def _private_help_text(lang: str, *, is_admin: bool) -> str:
+def _private_help_text(lang: str, *, is_admin: bool, free_images: int) -> str:
     lines = [
         t(lang, "help.private.title"),
         t(lang, "help.private.subtitle"),
         "",
         t(lang, "help.private.chat"),
         t(lang, "help.private.search"),
-        t(lang, "help.private.image"),
+        t(lang, "help.private.image", free_images=free_images),
         t(lang, "help.private.wallet"),
         t(lang, "help.private.vip"),
         t(lang, "help.private.invite"),
@@ -90,7 +92,7 @@ def _private_help_text(lang: str, *, is_admin: bool) -> str:
     return "\n".join(lines)
 
 
-def _group_help_text(lang: str) -> str:
+def _group_help_text(lang: str, *, group_search: int) -> str:
     return "\n".join(
         [
             t(lang, "help.group.title"),
@@ -98,7 +100,7 @@ def _group_help_text(lang: str) -> str:
             "",
             t(lang, "help.group.trigger"),
             t(lang, "help.group.ai"),
-            t(lang, "help.group.search"),
+            t(lang, "help.group.search", group_search=group_search),
             t(lang, "help.group.limit"),
             t(lang, "help.group.cooldown"),
             t(lang, "help.group.private_only"),
@@ -173,10 +175,11 @@ async def menu_support(message: Message, db_user: User) -> None:
 
 
 @menu_router.message(F.text.in_(GUIDE_BTNS), F.chat.type == "private")
-async def menu_private_help(message: Message, db_user: User) -> None:
+async def menu_private_help(message: Message, db_user: User, session: AsyncSession) -> None:
     lang = _user_lang(db_user)
+    free_images = await RuntimeConfig.get_int(session, "free_daily_image")
     await message.answer(
-        _private_help_text(lang, is_admin=is_configured_admin(message.from_user.id)),
+        _private_help_text(lang, is_admin=is_configured_admin(message.from_user.id), free_images=free_images),
         parse_mode="HTML",
     )
 
@@ -276,16 +279,18 @@ async def handle_group_ai_command(
 
 
 @menu_router.message(Command("help"), F.chat.type == "private")
-async def command_private_help(message: Message, db_user: User) -> None:
+async def command_private_help(message: Message, db_user: User, session: AsyncSession) -> None:
     lang = _user_lang(db_user)
+    free_images = await RuntimeConfig.get_int(session, "free_daily_image")
     await message.answer(
-        _private_help_text(lang, is_admin=is_configured_admin(message.from_user.id)),
+        _private_help_text(lang, is_admin=is_configured_admin(message.from_user.id), free_images=free_images),
         parse_mode="HTML",
     )
 
 
 @menu_router.message(Command("help"), F.chat.type.in_({"group", "supergroup"}))
 @menu_router.message(Command("group_help"), F.chat.type.in_({"group", "supergroup"}))
-async def command_group_help(message: Message, db_user: User) -> None:
+async def command_group_help(message: Message, db_user: User, session: AsyncSession) -> None:
     lang = _user_lang(db_user)
-    await message.reply(_group_help_text(lang), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+    group_search = await RuntimeConfig.get_int(session, "search_daily_group")
+    await message.reply(_group_help_text(lang, group_search=group_search), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
