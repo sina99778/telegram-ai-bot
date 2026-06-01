@@ -271,7 +271,7 @@ async def cmd_config(message: Message, session: AsyncSession):
             t(
                 lang,
                 "admin.config.row",
-                key=item["key"],
+                setting=item["key"],
                 value=item["value"],
                 default=item["default"],
                 description=item["description"],
@@ -305,7 +305,7 @@ async def cmd_setconfig(message: Message, session: AsyncSession):
     raw_value = parts[2].strip()
 
     if not RuntimeConfig.is_valid_key(key):
-        return await message.answer(t(lang, "admin.config.unknown_key", key=key), parse_mode="HTML")
+        return await message.answer(t(lang, "admin.config.unknown_key", setting=key), parse_mode="HTML")
 
     try:
         value = int(raw_value)
@@ -318,7 +318,7 @@ async def cmd_setconfig(message: Message, session: AsyncSession):
     except ValueError:
         spec = RuntimeConfig.REGISTRY[key]
         return await message.answer(
-            t(lang, "admin.config.out_of_range", key=key, min=spec.minimum, max=spec.maximum),
+            t(lang, "admin.config.out_of_range", setting=key, min=spec.minimum, max=spec.maximum),
             parse_mode="HTML",
         )
 
@@ -327,7 +327,7 @@ async def cmd_setconfig(message: Message, session: AsyncSession):
         message.from_user.id, key, old_value, value,
     )
     await message.answer(
-        t(lang, "admin.config.saved", key=key, value=value, old=old_value),
+        t(lang, "admin.config.saved", setting=key, value=value, old=old_value),
         parse_mode="HTML",
     )
 
@@ -358,7 +358,7 @@ async def cb_admin_config_set_start(callback: CallbackQuery, session: AsyncSessi
     user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
     lang = _lang(user)
     if not RuntimeConfig.is_valid_key(key):
-        return await callback.answer(t(lang, "admin.config.unknown_key", key=key), show_alert=True)
+        return await callback.answer(t(lang, "admin.config.unknown_key", setting=key), show_alert=True)
 
     spec = RuntimeConfig.REGISTRY[key]
     current = await RuntimeConfig.get_int(session, key)
@@ -368,7 +368,7 @@ async def cb_admin_config_set_start(callback: CallbackQuery, session: AsyncSessi
         t(
             lang,
             "admin.config.set_prompt",
-            key=key,
+            setting=key,
             description=spec.description,
             value=current,
             default=RuntimeConfig.default_for(key),
@@ -394,7 +394,7 @@ async def process_config_value(message: Message, session: AsyncSession, state: F
     key = data.get("config_key")
     if not key or not RuntimeConfig.is_valid_key(key):
         await state.clear()
-        return await message.answer(t(lang, "admin.config.unknown_key", key=key or "?"), parse_mode="HTML")
+        return await message.answer(t(lang, "admin.config.unknown_key", setting=key or "?"), parse_mode="HTML")
 
     raw = (message.text or "").strip()
     try:
@@ -409,7 +409,7 @@ async def process_config_value(message: Message, session: AsyncSession, state: F
     except ValueError:
         spec = RuntimeConfig.REGISTRY[key]
         return await message.answer(
-            t(lang, "admin.config.out_of_range", key=key, min=spec.minimum, max=spec.maximum),
+            t(lang, "admin.config.out_of_range", setting=key, min=spec.minimum, max=spec.maximum),
             parse_mode="HTML",
         )
 
@@ -420,7 +420,7 @@ async def process_config_value(message: Message, session: AsyncSession, state: F
     await state.clear()
     snapshot = await RuntimeConfig.snapshot(session)
     await message.answer(
-        t(lang, "admin.config.saved", key=key, value=value, old=old_value),
+        t(lang, "admin.config.saved", setting=key, value=value, old=old_value),
         parse_mode="HTML",
         reply_markup=get_admin_config_kb(snapshot, lang),
     )

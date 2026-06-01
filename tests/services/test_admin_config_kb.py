@@ -2,7 +2,34 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.bot.keyboards.admin_kb import get_admin_config_kb, get_admin_main_kb
+from app.core.i18n import t
+from app.services.config.runtime_config import RuntimeConfig
+
+
+@pytest.mark.parametrize("lang", ["en", "fa"])
+def test_config_i18n_strings_format_with_handler_kwargs(lang):
+    """Regression: t() takes a positional param named `key`, so an i18n
+    placeholder also named {key} (passed as key=...) raised TypeError and
+    made the config buttons silently die. These calls mirror the handlers
+    exactly and must not raise."""
+    spec = RuntimeConfig.REGISTRY["search_daily_free"]
+    # set_prompt (tap a key)
+    t(lang, "admin.config.set_prompt", setting="search_daily_free",
+      description=spec.description, value=2, default=2, min=spec.minimum, max=spec.maximum)
+    # row (/config listing)
+    t(lang, "admin.config.row", setting="search_daily_free", value=2,
+      default=2, description=spec.description, star="")
+    # unknown_key / out_of_range / saved (set flow)
+    t(lang, "admin.config.unknown_key", setting="bogus")
+    t(lang, "admin.config.out_of_range", setting="search_daily_free", min=0, max=1000)
+    t(lang, "admin.config.saved", setting="search_daily_free", value=1, old=2)
+
+
+def _flatten(markup):
+    return [btn for row in markup.inline_keyboard for btn in row]
 
 
 def _flatten(markup):
