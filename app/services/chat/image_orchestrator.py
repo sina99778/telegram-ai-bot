@@ -15,6 +15,7 @@ from app.core.i18n import t
 from app.db.models import FeatureConfig, User
 from app.services.ai.router import ModelRouter
 from app.services.billing.billing_service import BillingService
+from app.services.config.runtime_config import RuntimeConfig
 from app.services.usage.quota_service import QuotaService
 from app.services.ai.antigravity import SafetyBlockedError
 
@@ -61,7 +62,9 @@ class ImageOrchestrator:
 
         try:
             config = await self._get_feature_config()
-            cost = int(config.credit_cost or 0)
+            # Cost is taken from runtime config (button-editable), not the
+            # static FeatureConfig row, so admins can retune image pricing live.
+            cost = await RuntimeConfig.get_int(self.session, "image_credit_cost")
             if cost <= 0:
                 raise ValueError("Invalid image cost config")
         except Exception as exc:
@@ -188,7 +191,7 @@ class ImageOrchestrator:
             config = await self.session.scalar(stmt)
             if not config or not config.is_active:
                 raise ValueError("Image edit feature unavailable")
-            cost = int(config.credit_cost or 0)
+            cost = await RuntimeConfig.get_int(self.session, "image_edit_credit_cost")
             if cost <= 0:
                 raise ValueError("Invalid image edit cost config")
         except Exception as exc:

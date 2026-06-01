@@ -112,6 +112,36 @@ Both crypto and card approval funnel through one idempotent fulfillment helper
 (`app/services/purchase/fulfillment.py`), so a duplicate IPN or a double admin
 tap can never double-credit.
 
+## Pricing & margin model
+
+Credit costs are calibrated to the **real provider cost** measured from the
+billing export, so every pack keeps a wide margin (target ≥ 70%).
+
+Cost basis (≈ €0.0011 of provider cost per "credit", = one Flash message):
+
+| Feature | Credit cost | ≈ real cost | Notes |
+|---|---|---|---|
+| Flash message | 1 | €0.0011 | input+output capped |
+| Pro message | 15 | ~€0.02 | priced conservatively (Pro ≫ Flash) |
+| Image (premium) | 60 | ~€0.066 | from VIP wallet |
+
+Packs (USD list price → margin at worst-case usage):
+
+| Pack | Credits | Price | Margin |
+|---|---|---|---|
+| Normal 100 | 100 normal | $1.99 | ~94% |
+| Normal 350 | 350 normal | $5.99 | ~93% |
+| Normal 800 | 800 normal | $11.99 | ~92% |
+| VIP 150 | 150 vip | $1.99 | ~91% |
+| VIP 700 | 700 vip | $6.99 | ~88% |
+| VIP 1800 | 1800 vip | $14.99 | ~86% |
+| VIP access 30d / 90d | unlock only | $2.99 / $7.99 | usage billed separately |
+
+Every credit cost (Flash/Pro/image), the daily free allowance, and the output
+caps are **runtime-editable from the admin panel buttons**, so margins can be
+retuned the moment provider prices move — no redeploy. Pack *list prices* live
+in `app/services/purchase/catalog.py`.
+
 ## Pay-as-you-go (token-metered) billing
 
 By default every text message costs a flat `NORMAL_MESSAGE_COST` (1 credit).

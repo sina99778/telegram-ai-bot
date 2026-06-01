@@ -89,10 +89,11 @@ async def test_premium_image_uses_vip_credits_without_daily_cap(db_session, setu
     user = await db_session.get(User, setup_base_data["user_id"])
 
     user.is_premium = True
-    user.vip_credits = 50
+    user.vip_credits = 100
     await db_session.commit()
 
     result = await orchestrator.process_image_request(user.id, "premium sunset")
     assert result.success is True
     refreshed = await db_session.get(type(user), user.id)
+    # image_credit_cost default is 60 → 100 - 60 = 40
     assert refreshed.vip_credits == 40

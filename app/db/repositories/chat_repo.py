@@ -364,8 +364,10 @@ class ChatRepository:
             return user_locked
             
         # Free users receive a daily baseline in the normal wallet.
-        if user_locked.normal_credits < settings.DEFAULT_DAILY_NORMAL_CREDITS:
-            deficit = settings.DEFAULT_DAILY_NORMAL_CREDITS - user_locked.normal_credits
+        from app.services.config.runtime_config import RuntimeConfig
+        daily_free = await RuntimeConfig.get_int(self._session, "daily_free_credits")
+        if user_locked.normal_credits < daily_free:
+            deficit = daily_free - user_locked.normal_credits
             from app.services.billing.billing_service import BillingService
             from app.core.enums import LedgerEntryType
             from app.core.enums import WalletType

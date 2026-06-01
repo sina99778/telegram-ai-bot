@@ -38,10 +38,16 @@ class Settings(BaseSettings):
     GEMINI_MODEL_NORMAL: str = "gemini-3.1-flash-lite-preview"
     GEMINI_MODEL_PRO: str = "gemini-3.1-pro-preview"
     GEMINI_MODEL_IMAGE: str = "gemini-3.1-flash-image-preview"
-    NORMAL_MESSAGE_COST: int = 1
-    VIP_MESSAGE_COST: int = 1
+    # ── Per-feature credit costs (calibrated to real provider cost) ──
+    # 1 credit ≈ €0.0011 provider cost (one Flash message). Image and Pro are
+    # priced to match their true cost so every pack keeps a healthy margin;
+    # all are runtime-editable from the admin panel buttons.
+    NORMAL_MESSAGE_COST: int = 1       # Flash message  (~€0.0011)
+    VIP_MESSAGE_COST: int = 15         # Pro message    (~€0.02, priced conservatively)
+    IMAGE_CREDIT_COST: int = 60        # 1 image        (~€0.066)
+    IMAGE_EDIT_CREDIT_COST: int = 60
     VIP_DEPLETION_BEHAVIOR: str = "fallback_to_normal"
-    DEFAULT_DAILY_NORMAL_CREDITS: int = 30
+    DEFAULT_DAILY_NORMAL_CREDITS: int = 20
     VIP_DEFAULT_PLAN_NAME: str = "vip"
     # ── Daily usage caps ──────────────────────
     # NOTE: these are the conservative defaults. They are runtime-editable
@@ -51,7 +57,7 @@ class Settings(BaseSettings):
     SEARCH_DAILY_PAID_LIMIT: int = 8
     SEARCH_DAILY_VIP_LIMIT: int = 15
     SEARCH_DAILY_GROUP_LIMIT: int = 4
-    FREE_DAILY_IMAGE_LIMIT: int = 2
+    FREE_DAILY_IMAGE_LIMIT: int = 1
     FREE_WEEKLY_IMAGE_EDIT_LIMIT: int = 1
     IMAGE_EDIT_MAX_PROMPT_LENGTH: int = 500
     IMAGE_EDIT_COMMAND_COOLDOWN_SECONDS: int = 30
@@ -65,8 +71,8 @@ class Settings(BaseSettings):
     # ── Per-feature output token caps (cost control) ──
     # Output tokens are the expensive half of a request. These hard-cap the
     # model's response length unless an admin raises them via /setconfig.
-    MAX_OUTPUT_TOKENS_FLASH: int = 800
-    MAX_OUTPUT_TOKENS_PRO: int = 1500
+    MAX_OUTPUT_TOKENS_FLASH: int = 600
+    MAX_OUTPUT_TOKENS_PRO: int = 1000
 
     # ── Pay-as-you-go (token-metered billing) ──
     # Credits charged per 1000 tokens of real usage when a user opts into PAYG.
@@ -78,7 +84,7 @@ class Settings(BaseSettings):
     # ── Conversation context size (biggest input-token cost lever) ──
     # How much prior conversation is re-sent to the model on every message.
     # Lower = cheaper input tokens, shorter memory. Tunable via /config buttons.
-    HISTORY_MAX_TOKENS: int = 2000
+    HISTORY_MAX_TOKENS: int = 1200
     HISTORY_MAX_MESSAGES: int = 10
 
     # ── Card-to-card payment (manual admin approval) ──
