@@ -114,10 +114,19 @@ tap can never double-credit.
 
 **USD → Toman.** Card-to-card amounts are shown in Toman alongside USD. The
 rate is the `usd_toman_rate` button in **Admin → 🎚 Limits & Prices** (Toman
-per 1 USD); the admin updates it as the market moves and every pack's Toman
-price recomputes instantly. Set it to `0` to show USD only. (A reliable free
-live feed for the Iranian free-market rate isn't available, so the rate is
-admin-controlled rather than auto-fetched.)
+per 1 USD); every pack's Toman price recomputes instantly. Set it to `0` to
+show USD only.
+
+A background updater refreshes that rate from a free-market source
+(`EXCHANGE_RATE_PROVIDER`, default **bonbast**) every
+`EXCHANGE_RATE_UPDATE_INTERVAL_SECONDS` (default 30 min). It only applies a
+value that passes a sanity range (`EXCHANGE_RATE_MIN_TOMAN` …
+`EXCHANGE_RATE_MAX_TOMAN`); on any failure, parse error, or out-of-range
+value the **admin-set rate is kept untouched** — the bot never shows a wrong
+or zero rate. Disable with `EXCHANGE_RATE_AUTO_ENABLED=false` to run purely on
+the manual button. The provider layer (`app/services/exchange/providers.py`)
+is pluggable — adding navasan/alanchand is one more class. bonbast has no
+official API, so its adapter is intentionally defensive.
 
 ## Pricing & margin model
 

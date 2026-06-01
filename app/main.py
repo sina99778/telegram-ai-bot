@@ -46,6 +46,7 @@ logging.basicConfig(
 # ── Shared references (populated during lifespan) ──
 bot: Bot | None = None
 backup_scheduler_task: asyncio.Task | None = None
+exchange_rate_task: asyncio.Task | None = None
 dp = get_dispatcher()
 
 # ── Startup validation ───────────────────────
@@ -160,7 +161,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
       • Close the bot's HTTP session.
       • Dispose of the SQLAlchemy async engine (release connection pool).
     """
-    global bot, backup_scheduler_task
+    global bot, backup_scheduler_task, exchange_rate_task
 
     # ── Validate env vars ─────────────────────
     missing = _validate_settings()
@@ -220,9 +221,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 backup_recipient,
             )
 
+    if settings.EXCHANGE_RATE_AUTO_ENABLED:
+        from app.services.exchange.rate_updater import ExchangeRateUpdater
+        exchange_rate_task = asyncio.create_task(ExchangeRateUpdater.run_scheduler(AsyncSessionLocal))
+        logger.info(
+            "Exchange-rate auto-updater launched provider=%s interval=%ss",
+            settings.EXCHANGE_RATE_PROVIDER,
+            settings.EXCHANGE_RATE_UPDATE_INTERVAL_SECONDS,
+        )
+
     yield  # ← application is running
 
     # ── Shutdown ──────────────────────────────
+    if exchange_rate_task:
+        exchange_rate_task.cancel()
+        try:
+            await exchange_rate_task
+        except asyncio.CancelledError:
+            logger.info("Exchange-rate updater stopped")
+        except Exception:
+            logger.warning("Could not stop exchange-rate updater cleanly", exc_info=True)
+        finally:
+            exchange_rate_task = None
+
     if backup_scheduler_task:
         backup_scheduler_task.cancel()
         try:

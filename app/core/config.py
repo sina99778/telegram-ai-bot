@@ -93,8 +93,18 @@ class Settings(BaseSettings):
     CARD_TO_CARD_NOTE: str = ""
     # Toman per 1 USD, used to show card-to-card amounts in Toman.
     # 0 = not configured (the bot then shows USD only). Admin updates it
-    # from the panel button whenever the market rate moves.
+    # from the panel button; an optional auto-updater can refresh it too.
     USD_TOMAN_RATE: int = 0
+
+    # ── Live USD→Toman auto-update ──
+    # A background task refreshes USD_TOMAN_RATE from a free-market source.
+    # On any failure or an out-of-range value, the existing (admin-set) rate
+    # is left untouched, so the bot never shows a wrong/zero rate.
+    EXCHANGE_RATE_AUTO_ENABLED: bool = True
+    EXCHANGE_RATE_PROVIDER: str = "bonbast"
+    EXCHANGE_RATE_UPDATE_INTERVAL_SECONDS: int = 1800  # 30 minutes
+    EXCHANGE_RATE_MIN_TOMAN: int = 20000   # sanity floor (reject below)
+    EXCHANGE_RATE_MAX_TOMAN: int = 500000  # sanity ceiling (reject above)
     GROUP_DAILY_GROUP_CAP: int = 40
     GROUP_DAILY_USER_CAP: int = 5
     GROUP_USER_COOLDOWN_SECONDS: int = 15
