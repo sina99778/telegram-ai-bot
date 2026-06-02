@@ -115,6 +115,48 @@ class RuntimeConfig:
     def clear_cache(cls) -> None:
         cls._cache.clear()
 
+    # ── Synchronous cache reads (for non-async call sites) ────────────────────
+    # Keyboard builders run synchronously with no DB session, but still need to
+    # know e.g. whether premium emoji are enabled. These return the last cached
+    # value (warmed by any async read or by an admin write, which updates the
+    # cache immediately) and fall back to the env default when never cached.
+    # They never touch the DB and never raise — they are for cosmetics only.
+
+    @classmethod
+    def cached_int(cls, key: str) -> int:
+        entry = cls._cache.get(key)
+        if entry is not None:
+            return entry[0]
+        try:
+            return cls.default_for(key)
+        except Exception:
+            return 0
+
+    @classmethod
+    def cached_text(cls, key: str) -> str:
+        entry = cls._cache.get(f"text:{key}")
+        if entry is not None:
+            return entry[0]
+        try:
+            return cls.text_default_for(key)
+        except Exception:
+            return ""
+
+    @classmethod
+    async def warm_cache(cls, session: AsyncSession, *, int_keys: list[str] | None = None, text_keys: list[str] | None = None) -> None:
+        """Populate the cache from the DB for the given keys (best-effort), so
+        synchronous ``cached_*`` reads reflect admin overrides right after boot."""
+        for key in (int_keys or []):
+            try:
+                await cls.get_int(session, key)
+            except Exception:
+                pass
+        for key in (text_keys or []):
+            try:
+                await cls.get_text(session, key)
+            except Exception:
+                pass
+
     # ── Reads ────────────────────────────────────────────────────────────────
 
     @classmethod

@@ -8,6 +8,8 @@ from aiogram import Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent, ChosenInlineResult, InlineKeyboardMarkup, InlineKeyboardButton
 
+from app.bot.keyboards.styling import colorize_inline_markup
+
 from app.core.config import settings
 from app.core.enums import FeatureName
 from app.core.i18n import t
@@ -146,9 +148,9 @@ async def handle_inline_query(query: InlineQuery, db_user: User):
             message_text=f"🗣 <b>{safe_name}:</b> {safe_prompt_preview}\n\n🤖 <i>{t(lang, 'chat.thinking')}</i>",
             parse_mode="HTML",
         ),
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+        reply_markup=colorize_inline_markup(InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="⏳ ...", callback_data="ignore")
-        ]])
+        ]]))
     )
 
     await query.answer(results=[article], cache_time=0, is_personal=True)

@@ -177,12 +177,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 
+    # Colour every builder-made inline keyboard (Bot API 9.4 `style`). Markups
+    # built via the markup() helper and the few hand-built ones are coloured at
+    # their call sites; this covers InlineKeyboardBuilder usages too. Idempotent.
+    try:
+        from app.bot.keyboards.styling import install_global_coloring
+
+        install_global_coloring()
+        logger.info("Global button coloring installed")
+    except Exception as color_err:  # cosmetics must never block startup
+        logger.warning("Could not install global button coloring: %s", color_err)
+
     # Ensure all tables exist (safe on subsequent runs — it's a no-op if they already exist)
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables verified / created")
         await _ensure_feature_configs()
+        # Warm the runtime-config cache for the premium-emoji slots so the
+        # synchronous keyboard styler reflects admin-set values right after boot
+        # (not only after the first DB read elsewhere).
+        try:
+            from app.services.config.runtime_config import RuntimeConfig
+
+            async with AsyncSessionLocal() as _warm_session:
+                await RuntimeConfig.warm_cache(
+                    _warm_session,
+                    int_keys=["premium_emoji_enabled"],
+                    text_keys=["emoji_crown", "emoji_coin", "emoji_spark", "emoji_gem", "emoji_fire"],
+                )
+        except Exception as warm_err:
+            logger.warning("RuntimeConfig cache warm-up skipped: %s", warm_err)
     except Exception as db_err:
         logger.critical("DATABASE CONNECTION FAILED: %s", db_err, exc_info=True)
         raise

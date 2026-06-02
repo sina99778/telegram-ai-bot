@@ -6,6 +6,8 @@ from typing import Any, Awaitable, Callable, Dict
 from aiogram import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+
+from app.bot.keyboards.styling import colorize_inline_markup
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,7 +104,7 @@ class CheckUserStatusMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         if member.status in {"left", "kicked", "banned"}:
-            kb = InlineKeyboardMarkup(
+            kb = colorize_inline_markup(InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
@@ -111,7 +113,7 @@ class CheckUserStatusMiddleware(BaseMiddleware):
                         )
                     ]
                 ]
-            )
+            ))
             await event.answer(
                 t(lang, "forced_join.required"),
                 reply_markup=kb,

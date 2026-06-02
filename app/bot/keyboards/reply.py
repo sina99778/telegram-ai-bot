@@ -22,8 +22,12 @@ def get_main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
     ]
     if is_admin:
         keyboard.append([KeyboardButton(text=t(lang, "buttons.admin"))])
-    return ReplyKeyboardMarkup(
-        keyboard=keyboard,
-        resize_keyboard=True,
-        input_field_placeholder=t(lang, "main.menu_placeholder"),
+    from app.bot.keyboards.styling import colorize_reply_markup
+
+    return colorize_reply_markup(
+        ReplyKeyboardMarkup(
+            keyboard=keyboard,
+            resize_keyboard=True,
+            input_field_placeholder=t(lang, "main.menu_placeholder"),
+        )
     )

@@ -6,6 +6,8 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyKeyboardRemove
 
+from app.bot.keyboards.styling import colorize_inline_markup
+
 from app.core.config import settings
 from app.core.i18n import t
 from app.db.models import User
@@ -55,9 +57,9 @@ async def handle_image_command(message: Message, command: CommandObject, db_user
         await AbuseGuardService.record_failure(subject="image", subject_id=db_user.id)
         topup_kb = None
         if result.error_code in {"insufficient_vip", "billing_error", "free_quota_exhausted"}:
-            topup_kb = InlineKeyboardMarkup(
+            topup_kb = colorize_inline_markup(InlineKeyboardMarkup(
                 inline_keyboard=[[InlineKeyboardButton(text=t(lang, "buttons.top_up"), callback_data="wallet:open")]]
-            )
+            ))
         await processing_msg.edit_text(result.error_message or t(lang, "image.failed_refunded"), parse_mode="HTML", reply_markup=topup_kb)
         return
 
@@ -138,9 +140,9 @@ async def handle_edit_command(message: Message, command: CommandObject, db_user:
         await AbuseGuardService.record_failure(subject="image_edit", subject_id=db_user.id)
         topup_kb = None
         if result.error_code in {"insufficient_vip", "billing_error", "free_quota_exhausted"}:
-            topup_kb = InlineKeyboardMarkup(
+            topup_kb = colorize_inline_markup(InlineKeyboardMarkup(
                 inline_keyboard=[[InlineKeyboardButton(text=t(lang, "buttons.top_up"), callback_data="wallet:open")]]
-            )
+            ))
         await processing_msg.edit_text(result.error_message or t(lang, "image.failed_refunded"), parse_mode="HTML", reply_markup=topup_kb)
         return
 

@@ -13,6 +13,7 @@ from app.bot.keyboards.inline import (
     get_wallet_menu_keyboard,
 )
 from app.bot.keyboards.reply import get_main_menu
+from app.bot.keyboards.styling import strip_leading_emoji
 from app.core.access import is_configured_admin
 from app.core.enums import FeatureName
 from app.core.i18n import t
@@ -53,7 +54,15 @@ menu_router.message.middleware(MenuSpamMiddleware())
 
 
 def _labels(key: str) -> set[str]:
-    return {t("fa", key), t("en", key)}
+    """Both languages, AND an emoji-stripped variant of each.
+
+    Reply-keyboard buttons route by the text the user sends. When premium icons
+    are enabled the leading emoji is moved off the label into the button's icon
+    (see keyboards/styling.py), so the sent text loses its emoji. Including the
+    stripped variant here keeps routing working whether the emoji is present or
+    not — so turning premium icons on/off can never break the bottom menu."""
+    raw = {t("fa", key), t("en", key)}
+    return raw | {strip_leading_emoji(label) for label in raw}
 
 
 PROFILE_BTNS = _labels("buttons.wallet")

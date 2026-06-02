@@ -26,4 +26,8 @@ def nav_buttons(
 
 
 def markup(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[row for row in rows if row])
+    from app.bot.keyboards.styling import colorize_inline_markup
+
+    return colorize_inline_markup(
+        InlineKeyboardMarkup(inline_keyboard=[row for row in rows if row])
+    )
