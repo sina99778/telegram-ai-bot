@@ -76,22 +76,22 @@ def _premium_icon_map() -> dict[str, str]:
     """``{plain_emoji: custom_emoji_id}`` for configured slots, or ``{}`` when
     the feature is off / nothing configured.
 
-    Reads through :class:`RuntimeConfig`'s **synchronous** cache so the values an
-    admin sets from the panel BUTTONS (``premium_emoji_enabled`` + ``emoji_*``)
-    take effect, while still working inside synchronous keyboard builders. Falls
-    back to the env defaults when the cache is cold."""
+    Gated by the ``premium_emoji_enabled`` runtime flag (read through
+    :class:`RuntimeConfig`'s synchronous cache). The actual ids come from
+    :class:`PremiumEmojiStore`'s synchronous cache, which the admin fills in from
+    the panel by sending their own premium emoji. Works inside synchronous
+    keyboard builders; returns ``{}`` when cold so it can never break a build."""
+    from app.services.config.premium_emoji_store import PremiumEmojiStore
     from app.services.config.runtime_config import RuntimeConfig
 
     if RuntimeConfig.cached_int("premium_emoji_enabled") != 1:
         return {}
-    raw = {
-        "👑": RuntimeConfig.cached_text("emoji_crown"),
-        "🪙": RuntimeConfig.cached_text("emoji_coin"),
-        "✨": RuntimeConfig.cached_text("emoji_spark"),
-        "💎": RuntimeConfig.cached_text("emoji_gem"),
-        "🔥": RuntimeConfig.cached_text("emoji_fire"),
-    }
-    return {emoji: (cid or "").strip() for emoji, cid in raw.items() if (cid or "").strip()}
+    return PremiumEmojiStore.cached_map()
+
+
+def _norm_emoji(text: str) -> str:
+    """Variation-selector-insensitive form, so '✏️' and '✏' compare equal."""
+    return (text or "").replace("️", "")
 
 
 def _apply_premium_icon(button) -> None:
@@ -104,10 +104,13 @@ def _apply_premium_icon(button) -> None:
     if not mapping:
         return
     lead = (button.text or "").lstrip()
+    lead_norm = _norm_emoji(lead)
     for emoji, cid in mapping.items():
-        if lead.startswith(emoji):
+        if lead_norm.startswith(_norm_emoji(emoji)):
             button.icon_custom_emoji_id = cid
-            button.text = lead[len(emoji):].strip() or button.text
+            # strip_leading_emoji drops the leading emoji regardless of any
+            # variation selector, so the visible label is clean.
+            button.text = strip_leading_emoji(lead) or button.text
             return
 
 

@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from app.bot.keyboards.admin_kb import get_admin_config_kb, get_admin_main_kb
+from app.bot.keyboards.admin_kb import (
+    CONFIG_SECTIONS,
+    get_admin_config_kb,
+    get_admin_config_section_kb,
+    get_admin_emoji_kb,
+    get_admin_main_kb,
+)
 from app.core.i18n import t
 from app.services.config.runtime_config import RuntimeConfig
 
@@ -65,49 +71,71 @@ def test_admin_main_kb_has_config_button():
     assert any(b.callback_data == "admin:config" for b in buttons)
 
 
-def test_config_kb_one_button_per_key_with_value_and_set_callback():
+def test_config_home_shows_section_buttons():
+    """The settings home is a set of section buttons (not one giant list)."""
+    buttons = _flatten(get_admin_config_kb("en"))
+    cbs = {b.callback_data for b in buttons}
+    assert "admin:config:cat:pricing" in cbs
+    assert "admin:config:cat:limits" in cbs
+    assert "admin:config:cat:context" in cbs
+    assert "admin:config:cat:payments" in cbs
+    assert "admin:emoji" in cbs          # premium-emoji manager entry
+    assert "admin:main" in cbs           # home
+
+
+def test_section_kb_one_button_per_key_with_value_and_set_callback():
     snapshot = [
         {"key": "free_daily_image", "value": 2, "is_override": False},
         {"key": "search_daily_free", "value": 1, "is_override": True},
     ]
-    buttons = _flatten(get_admin_config_kb(snapshot, "en"))
+    buttons = _flatten(get_admin_config_section_kb("limits", snapshot, "en"))
     set_buttons = [b for b in buttons if (b.callback_data or "").startswith("admin:config:set:")]
 
-    assert len(set_buttons) == 2
     assert {b.callback_data for b in set_buttons} == {
         "admin:config:set:free_daily_image",
         "admin:config:set:search_daily_free",
     }
-    # Each button shows the live value; the overridden one is starred.
     labels = {b.text for b in set_buttons}
     assert any("free_daily_image = 2" == lbl for lbl in labels)
     assert any(lbl.startswith("search_daily_free = 1") and "★" in lbl for lbl in labels)
-
-    # Navigation back to the panel is present.
+    # A section goes back to the config home, and home to the panel.
+    assert any(b.callback_data == "admin:config" for b in buttons)
     assert any(b.callback_data == "admin:main" for b in buttons)
-    assert any(b.callback_data == "admin:config" for b in buttons)  # refresh
-    # The on-demand USD→Toman fetch button is present.
-    assert any(b.callback_data == "admin:config:fetchrate" for b in buttons)
 
 
-def test_config_kb_renders_text_settings_as_buttons():
-    """Card details (and any text setting) must be editable via buttons, not
-    only commands — each yields an admin:config:settext:<key> callback."""
-    snapshot = [{"key": "free_daily_image", "value": 2, "is_override": False}]
+def test_payments_section_has_text_buttons_and_fetch_rate():
+    """Card details are editable via buttons; the rate fetch lives here too."""
+    snapshot = [{"key": "usd_toman_rate", "value": 0, "is_override": False}]
     text_items = [
         {"key": "card_number", "value": "6037-xxxx"},
         {"key": "card_holder", "value": ""},
     ]
-    buttons = _flatten(get_admin_config_kb(snapshot, "en", text_items=text_items))
+    buttons = _flatten(get_admin_config_section_kb("payments", snapshot, "en", text_items=text_items))
     settext = [b for b in buttons if (b.callback_data or "").startswith("admin:config:settext:")]
     assert {b.callback_data for b in settext} == {
         "admin:config:settext:card_number",
         "admin:config:settext:card_holder",
     }
-    # current value (or — placeholder) is shown on the button
     labels = {b.text for b in settext}
     assert any("card_number" in lbl and "6037-xxxx" in lbl for lbl in labels)
     assert any("card_holder" in lbl and "—" in lbl for lbl in labels)
+    assert any(b.callback_data == "admin:config:fetchrate" for b in buttons)
+
+
+def test_emoji_kb_lists_registry_with_toggle():
+    from app.services.config.premium_emoji_store import EMOJI_REGISTRY
+
+    buttons = _flatten(get_admin_emoji_kb("en", enabled=False, configured_slugs={"crown"}))
+    cbs = [b.callback_data for b in buttons]
+    assert "admin:emoji:toggle" in cbs
+    slug_cbs = [c for c in cbs if (c or "").startswith("admin:emoji:s:")]
+    assert len(slug_cbs) == len(EMOJI_REGISTRY)
+    # the configured one is marked ✅, others ➕
+    crown_btn = next(b for b in buttons if b.callback_data == "admin:emoji:s:crown")
+    assert "✅" in crown_btn.text
+    # every slug callback stays well under Telegram's 64-byte cap
+    for c in slug_cbs:
+        assert len(c.encode("utf-8")) <= 64
 
 
 def test_topup_keyboard_routes_to_correct_buy_screen():
@@ -137,13 +165,22 @@ def test_failure_markup_only_on_billing_errors():
 
 
 def test_config_set_callback_roundtrips_through_registry():
-    """The key embedded in the callback must be parseable back to a valid key."""
-    from app.services.config.runtime_config import RuntimeConfig
-
+    """Every key embedded in a section's set-callback must parse back to a valid
+    registry key, across all sections."""
     snapshot = [{"key": k, "value": 0, "is_override": False} for k in RuntimeConfig.REGISTRY]
-    buttons = _flatten(get_admin_config_kb(snapshot, "en"))
-    for b in buttons:
-        cb = b.callback_data or ""
-        if cb.startswith("admin:config:set:"):
-            key = cb.split(":", 3)[3]
-            assert RuntimeConfig.is_valid_key(key)
+    for section in CONFIG_SECTIONS:
+        buttons = _flatten(get_admin_config_section_kb(section, snapshot, "en"))
+        for b in buttons:
+            cb = b.callback_data or ""
+            if cb.startswith("admin:config:set:"):
+                key = cb.split(":", 3)[3]
+                assert RuntimeConfig.is_valid_key(key)
+
+
+def test_every_registry_key_appears_in_some_section():
+    """No runtime-config key should be orphaned out of the sectioned UI."""
+    sectioned = {k for keys in CONFIG_SECTIONS.values() for k in keys}
+    # premium_emoji_enabled is managed in the dedicated emoji screen, not a section.
+    expected = set(RuntimeConfig.REGISTRY) - {"premium_emoji_enabled"}
+    missing = expected - sectioned
+    assert not missing, f"keys missing from CONFIG_SECTIONS: {missing}"

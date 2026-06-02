@@ -27,16 +27,6 @@ from app.services.config.runtime_config import RuntimeConfig
 
 logger = logging.getLogger(__name__)
 
-# RuntimeConfig text slot → the plain emoji it customises.
-SLOTS: dict[str, str] = {
-    "emoji_crown": "👑",
-    "emoji_coin": "🪙",
-    "emoji_spark": "✨",
-    "emoji_gem": "💎",
-    "emoji_fire": "🔥",
-}
-
-
 def premiumize(text: str, mapping: dict[str, str]) -> str:
     """Wrap each mapped plain emoji in a <tg-emoji> tag. Pure & idempotent-safe
     for a single pass (we only wrap bare emojis, never re-wrap)."""
@@ -51,17 +41,14 @@ def premiumize(text: str, mapping: dict[str, str]) -> str:
 
 
 async def load_mapping(session: AsyncSession) -> dict[str, str]:
-    """Return {plain_emoji: custom_emoji_id} for configured slots, or {} when
-    the feature is off / nothing configured."""
+    """Return {plain_emoji: custom_emoji_id} from the admin-managed store, or {}
+    when the feature is off / nothing configured."""
     try:
         if await RuntimeConfig.get_int(session, "premium_emoji_enabled") != 1:
             return {}
-        mapping: dict[str, str] = {}
-        for slot, emoji in SLOTS.items():
-            emoji_id = (await RuntimeConfig.get_text(session, slot) or "").strip()
-            if emoji_id:
-                mapping[emoji] = emoji_id
-        return mapping
+        from app.services.config.premium_emoji_store import PremiumEmojiStore
+
+        return await PremiumEmojiStore.get_map(session)
     except Exception as exc:  # never let cosmetics break a message
         logger.warning("premium emoji load failed: %s", exc)
         return {}

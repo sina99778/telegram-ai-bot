@@ -1,14 +1,17 @@
 import pytest
 
 from app.core import premium_emoji
+from app.services.config.premium_emoji_store import PremiumEmojiStore
 from app.services.config.runtime_config import RuntimeConfig
 
 
 @pytest.fixture(autouse=True)
 def _clear_cache():
     RuntimeConfig.clear_cache()
+    PremiumEmojiStore.clear_cache()
     yield
     RuntimeConfig.clear_cache()
+    PremiumEmojiStore.clear_cache()
 
 
 def test_premiumize_noop_without_mapping():
@@ -40,8 +43,17 @@ async def test_load_mapping_disabled_by_default(db_session):
 @pytest.mark.asyncio
 async def test_load_mapping_when_enabled_with_ids(db_session):
     await RuntimeConfig.set_int(db_session, "premium_emoji_enabled", 1)
-    await RuntimeConfig.set_text(db_session, "emoji_crown", "12345")
+    await PremiumEmojiStore.set_id(db_session, "crown", "12345")
     mapping = await premium_emoji.load_mapping(db_session)
     assert mapping == {"👑": "12345"}
     decorated = await premium_emoji.decorate(db_session, "👑 VIP")
     assert decorated == '<tg-emoji emoji-id="12345">👑</tg-emoji> VIP'
+
+
+@pytest.mark.asyncio
+async def test_store_set_clear_roundtrip(db_session):
+    await PremiumEmojiStore.set_id(db_session, "coin", "999")
+    assert await PremiumEmojiStore.get_map(db_session) == {"🪙": "999"}
+    # Clearing (empty id) removes the mapping.
+    await PremiumEmojiStore.set_id(db_session, "coin", "")
+    assert await PremiumEmojiStore.get_map(db_session) == {}

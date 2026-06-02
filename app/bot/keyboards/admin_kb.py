@@ -55,16 +55,75 @@ def get_admin_main_kb(lang: str) -> object:
     )
 
 
-def get_admin_config_kb(snapshot: list[dict], lang: str, text_items: list[dict] | None = None) -> object:
-    """One tappable button per editable setting, showing its current value.
+# Runtime-config keys grouped into tappable sections (better than one long list).
+# Keys not listed here still work via /setconfig; they just won't show a button.
+CONFIG_SECTIONS: dict[str, list[str]] = {
+    "pricing": [
+        "normal_message_cost", "vip_message_cost",
+        "image_credit_cost", "image_edit_credit_cost",
+        "payg_flash_per_1k", "payg_pro_per_1k", "payg_min_charge",
+    ],
+    "limits": [
+        "search_daily_free", "search_daily_paid", "search_daily_vip", "search_daily_group",
+        "free_daily_image", "free_weekly_image_edit", "inline_daily", "daily_free_credits",
+    ],
+    "context": [
+        "history_max_tokens", "history_max_messages",
+        "max_output_tokens_flash", "max_output_tokens_pro",
+    ],
+    "payments": ["usd_toman_rate"],
+}
+# Free-text settings shown inside the Payments section.
+PAYMENTS_TEXT_KEYS = ["card_number", "card_holder", "card_note"]
 
-    ``snapshot`` are the numeric settings (from ``RuntimeConfig.snapshot``);
-    ``text_items`` are the free-text settings (card details), each a dict with
-    ``key`` and ``value``. Tapping a numeric setting opens a number prompt;
-    tapping a text setting opens a text prompt.
-    """
+
+def section_for_key(key: str) -> str | None:
+    for section, keys in CONFIG_SECTIONS.items():
+        if key in keys:
+            return section
+    if key in PAYMENTS_TEXT_KEYS:
+        return "payments"
+    return None
+
+
+def get_admin_config_kb(lang: str) -> object:
+    """Top-level settings screen: one button per section (not one giant list)."""
+    return markup(
+        [
+            [
+                InlineKeyboardButton(text=t(lang, "admin.config.cat.pricing"), callback_data="admin:config:cat:pricing"),
+                InlineKeyboardButton(text=t(lang, "admin.config.cat.limits"), callback_data="admin:config:cat:limits"),
+            ],
+            [
+                InlineKeyboardButton(text=t(lang, "admin.config.cat.context"), callback_data="admin:config:cat:context"),
+                InlineKeyboardButton(text=t(lang, "admin.config.cat.payments"), callback_data="admin:config:cat:payments"),
+            ],
+            [
+                InlineKeyboardButton(text=t(lang, "admin.config.cat.emoji"), callback_data="admin:emoji"),
+            ],
+            [
+                InlineKeyboardButton(text=t(lang, "buttons.refresh"), callback_data="admin:config"),
+                InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"),
+            ],
+        ]
+    )
+
+
+def get_admin_config_section_kb(
+    section: str,
+    snapshot: list[dict],
+    lang: str,
+    text_items: list[dict] | None = None,
+) -> object:
+    """The settings inside one section: a button per numeric/text key, plus
+    (for payments) the live-rate fetch button."""
+    order = CONFIG_SECTIONS.get(section, [])
+    by_key = {item["key"]: item for item in snapshot}
     builder = InlineKeyboardBuilder()
-    for item in snapshot:
+    for key in order:
+        item = by_key.get(key)
+        if not item:
+            continue
         star = " ★" if item["is_override"] else ""
         builder.row(
             InlineKeyboardButton(
@@ -80,11 +139,41 @@ def get_admin_config_kb(snapshot: list[dict], lang: str, text_items: list[dict] 
                 callback_data=f"admin:config:settext:{item['key']}",
             )
         )
+    if section == "payments":
+        builder.row(
+            InlineKeyboardButton(text=t(lang, "admin.config.fetch_rate_btn"), callback_data="admin:config:fetchrate"),
+        )
     builder.row(
-        InlineKeyboardButton(text=t(lang, "admin.config.fetch_rate_btn"), callback_data="admin:config:fetchrate"),
+        InlineKeyboardButton(text=t(lang, "buttons.back"), callback_data="admin:config"),
+        InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"),
     )
+    return builder.as_markup()
+
+
+def get_admin_emoji_kb(lang: str, *, enabled: bool, configured_slugs: set[str]) -> object:
+    """Premium-emoji manager: a toggle + the complete list of UI emojis as
+    buttons (✅ mapped / ➕ unset). Status mark is placed FIRST so the styler
+    never premiumizes the emoji shown here (the admin must see the plain emoji)."""
+    from app.services.config.premium_emoji_store import EMOJI_REGISTRY
+
+    builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text=t(lang, "buttons.refresh"), callback_data="admin:config"),
+        InlineKeyboardButton(
+            text=t(lang, "admin.emoji.toggle_off" if enabled else "admin.emoji.toggle_on"),
+            callback_data="admin:emoji:toggle",
+        )
+    )
+    row: list[InlineKeyboardButton] = []
+    for slug, emoji, _label in EMOJI_REGISTRY:
+        mark = "✅" if slug in configured_slugs else "➕"
+        row.append(InlineKeyboardButton(text=f"{mark} {emoji}", callback_data=f"admin:emoji:s:{slug}"))
+        if len(row) == 3:
+            builder.row(*row)
+            row = []
+    if row:
+        builder.row(*row)
+    builder.row(
+        InlineKeyboardButton(text=t(lang, "buttons.back"), callback_data="admin:config"),
         InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"),
     )
     return builder.as_markup()

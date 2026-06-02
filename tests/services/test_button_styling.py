@@ -51,9 +51,11 @@ def test_existing_style_is_preserved():
 
 
 def test_premium_icons_off_by_default_leaves_text(monkeypatch):
+    from app.services.config.premium_emoji_store import PremiumEmojiStore
     from app.services.config.runtime_config import RuntimeConfig
 
     RuntimeConfig.clear_cache()
+    PremiumEmojiStore.clear_cache()
     monkeypatch.setattr(settings, "PREMIUM_EMOJI_ENABLED", False)
     btn = InlineKeyboardButton(text="🪙 Wallet", callback_data="wallet:open")
     colorize_inline_markup(_inline(btn))
@@ -62,16 +64,20 @@ def test_premium_icons_off_by_default_leaves_text(monkeypatch):
 
 
 def test_premium_icons_on_moves_emoji_to_icon(monkeypatch):
+    from app.services.config.premium_emoji_store import PremiumEmojiStore
     from app.services.config.runtime_config import RuntimeConfig
 
     RuntimeConfig.clear_cache()
+    # enabled flag falls back to env default (True) when the cache is clear;
+    # the id comes from the store's synchronous cache.
     monkeypatch.setattr(settings, "PREMIUM_EMOJI_ENABLED", True)
-    monkeypatch.setattr(settings, "CUSTOM_EMOJI_COIN", "5301234567890123456")
+    PremiumEmojiStore._cache = {"🪙": "5301234567890123456"}
     btn = InlineKeyboardButton(text="🪙 Wallet", callback_data="wallet:open")
     colorize_inline_markup(_inline(btn))
     assert btn.icon_custom_emoji_id == "5301234567890123456"
     assert btn.text == "Wallet"  # emoji stripped from the label
     RuntimeConfig.clear_cache()
+    PremiumEmojiStore.clear_cache()
 
 
 def test_reply_buttons_get_colored():

@@ -194,20 +194,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables verified / created")
         await _ensure_feature_configs()
-        # Warm the runtime-config cache for the premium-emoji slots so the
-        # synchronous keyboard styler reflects admin-set values right after boot
-        # (not only after the first DB read elsewhere).
+        # Warm the caches the synchronous keyboard styler relies on, so admin-set
+        # premium-emoji values are reflected right after boot (not only after the
+        # first DB read elsewhere).
         try:
+            from app.services.config.premium_emoji_store import PremiumEmojiStore
             from app.services.config.runtime_config import RuntimeConfig
 
             async with AsyncSessionLocal() as _warm_session:
-                await RuntimeConfig.warm_cache(
-                    _warm_session,
-                    int_keys=["premium_emoji_enabled"],
-                    text_keys=["emoji_crown", "emoji_coin", "emoji_spark", "emoji_gem", "emoji_fire"],
-                )
+                await RuntimeConfig.warm_cache(_warm_session, int_keys=["premium_emoji_enabled"])
+                await PremiumEmojiStore.warm(_warm_session)
         except Exception as warm_err:
-            logger.warning("RuntimeConfig cache warm-up skipped: %s", warm_err)
+            logger.warning("Premium-emoji cache warm-up skipped: %s", warm_err)
     except Exception as db_err:
         logger.critical("DATABASE CONNECTION FAILED: %s", db_err, exc_info=True)
         raise

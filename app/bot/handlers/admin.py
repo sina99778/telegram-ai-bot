@@ -18,7 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.keyboards.admin_kb import (
     _safe_search_token,
+    PAYMENTS_TEXT_KEYS,
     get_admin_config_kb,
+    get_admin_config_section_kb,
+    get_admin_emoji_kb,
     get_admin_main_kb,
     get_admin_users_kb,
     get_back_to_admin_kb,
@@ -29,6 +32,7 @@ from app.bot.keyboards.admin_kb import (
     get_code_menu_kb,
     get_codes_list_kb,
     get_user_manage_kb,
+    section_for_key,
 )
 from app.core.access import is_configured_admin
 from app.core.config import settings
@@ -63,6 +67,7 @@ class AdminStates(StatesGroup):
     waiting_for_manual_code = State()
     waiting_for_config_value = State()
     waiting_for_config_text = State()
+    waiting_for_premium_emoji = State()
 
 
 async def _is_admin(user_id: int, session: AsyncSession) -> bool:
@@ -357,21 +362,33 @@ async def cmd_setconfig(message: Message, session: AsyncSession):
 
 @admin_router.callback_query(F.data == "admin:config")
 async def cb_admin_config(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
-    """Render the runtime-config screen: one tappable button per editable key."""
+    """Render the settings home: one button per section (not one giant list)."""
     if not await _is_admin(callback.from_user.id, session):
         return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
     await state.clear()
     user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
     lang = _lang(user)
-    snapshot = await RuntimeConfig.snapshot(session)
-    text_items = [
-        {"key": key, "value": (await RuntimeConfig.get_text(session, key))[:24]}
-        for key in RuntimeConfig.TEXT_REGISTRY
-    ]
     await callback.message.edit_text(
         t(lang, "admin.config.menu_hint"),
         parse_mode="HTML",
-        reply_markup=get_admin_config_kb(snapshot, lang, text_items=text_items),
+        reply_markup=get_admin_config_kb(lang),
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin:config:cat:"))
+async def cb_admin_config_cat(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    """Render the settings inside one section."""
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    await state.clear()
+    section = callback.data.split(":", 3)[3]
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    await callback.message.edit_text(
+        t(lang, "admin.config.section_hint", section=t(lang, f"admin.config.cat.{section}")),
+        parse_mode="HTML",
+        reply_markup=await _section_keyboard(session, lang, section),
     )
     await callback.answer()
 
@@ -448,18 +465,20 @@ async def process_config_value(message: Message, session: AsyncSession, state: F
     await message.answer(
         t(lang, "admin.config.saved", setting=key, value=value, old=old_value),
         parse_mode="HTML",
-        reply_markup=await _config_keyboard(session, lang),
+        reply_markup=await _section_keyboard(session, lang, section_for_key(key) or "limits"),
     )
 
 
-async def _config_keyboard(session: AsyncSession, lang: str):
-    """Build the settings keyboard with both numeric and text settings."""
+async def _section_keyboard(session: AsyncSession, lang: str, section: str):
+    """Build the keyboard for one settings section (numeric + any text items)."""
     snapshot = await RuntimeConfig.snapshot(session)
-    text_items = [
-        {"key": key, "value": (await RuntimeConfig.get_text(session, key))[:24]}
-        for key in RuntimeConfig.TEXT_REGISTRY
-    ]
-    return get_admin_config_kb(snapshot, lang, text_items=text_items)
+    text_items = None
+    if section == "payments":
+        text_items = [
+            {"key": key, "value": (await RuntimeConfig.get_text(session, key))[:24]}
+            for key in PAYMENTS_TEXT_KEYS
+        ]
+    return get_admin_config_section_kb(section, snapshot, lang, text_items=text_items)
 
 
 @admin_router.callback_query(F.data.startswith("admin:config:settext:"))
@@ -513,7 +532,7 @@ async def process_config_text(message: Message, session: AsyncSession, state: FS
     await message.answer(
         t(lang, "admin.config.text_saved", setting=key),
         parse_mode="HTML",
-        reply_markup=await _config_keyboard(session, lang),
+        reply_markup=await _section_keyboard(session, lang, section_for_key(key) or "payments"),
     )
 
 
@@ -542,15 +561,128 @@ async def cb_admin_config_fetchrate(callback: CallbackQuery, session: AsyncSessi
     else:
         await callback.answer(t(lang, "admin.config.rate_failed"), show_alert=True)
 
-    # Re-render the panel so the (possibly updated) usd_toman_rate is visible.
+    # Re-render the payments section so the (possibly updated) rate is visible.
     try:
         await callback.message.edit_text(
-            t(lang, "admin.config.menu_hint"),
+            t(lang, "admin.config.section_hint", section=t(lang, "admin.config.cat.payments")),
             parse_mode="HTML",
-            reply_markup=await _config_keyboard(session, lang),
+            reply_markup=await _section_keyboard(session, lang, "payments"),
         )
     except Exception:
         pass
+
+
+# ── Premium emoji manager (tap an emoji → send your premium one → auto-id) ────
+
+def _extract_custom_emoji_id(message: Message) -> str | None:
+    """Pull the first ``custom_emoji_id`` out of a message's entities. Works for
+    both normal and caption entities; needs no type check because only premium
+    (custom) emoji entities carry that field."""
+    for entities in (message.entities or [], getattr(message, "caption_entities", None) or []):
+        for entity in entities:
+            cid = getattr(entity, "custom_emoji_id", None)
+            if cid:
+                return cid
+    return None
+
+
+async def _emoji_manager_view(session: AsyncSession, lang: str):
+    from app.services.config.premium_emoji_store import EMOJI_REGISTRY, PremiumEmojiStore
+
+    enabled = (await RuntimeConfig.get_int(session, "premium_emoji_enabled")) == 1
+    mapping = await PremiumEmojiStore.get_map(session)  # {plain_emoji: id}
+    configured = {slug for slug, emoji, _ in EMOJI_REGISTRY if emoji in mapping}
+    status = t(lang, "admin.emoji.status_on" if enabled else "admin.emoji.status_off")
+    text = t(lang, "admin.emoji.hint", status=status)
+    kb = get_admin_emoji_kb(lang, enabled=enabled, configured_slugs=configured)
+    return text, kb
+
+
+@admin_router.callback_query(F.data == "admin:emoji")
+async def cb_admin_emoji(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    await state.clear()
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    text, kb = await _emoji_manager_view(session, lang)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin:emoji:toggle")
+async def cb_admin_emoji_toggle(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    current = await RuntimeConfig.get_int(session, "premium_emoji_enabled")
+    await RuntimeConfig.set_int(session, "premium_emoji_enabled", 0 if current == 1 else 1, updated_by=callback.from_user.id)
+    text, kb = await _emoji_manager_view(session, lang)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin:emoji:s:"))
+async def cb_admin_emoji_slug(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    from app.services.config.premium_emoji_store import PremiumEmojiStore, emoji_for_slug, is_valid_slug
+
+    slug = callback.data.split(":", 3)[3]
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    if not is_valid_slug(slug):
+        return await callback.answer(t(lang, "admin.config.unknown_key", setting=slug), show_alert=True)
+    emoji = emoji_for_slug(slug)
+    current = await PremiumEmojiStore.get_id(session, slug)
+    await state.update_data(emoji_slug=slug)
+    await state.set_state(AdminStates.waiting_for_premium_emoji)
+    await callback.message.edit_text(
+        t(lang, "admin.emoji.set_prompt", emoji=emoji, current=current or "—"),
+        parse_mode="HTML",
+        reply_markup=get_back_to_admin_kb(lang, back="admin:emoji"),
+    )
+    await callback.answer()
+
+
+@admin_router.message(AdminStates.waiting_for_premium_emoji)
+async def process_premium_emoji(message: Message, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(message.from_user.id, session):
+        return
+    admin_user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
+    lang = _lang(admin_user)
+    if not await _guard_admin_mutation(admin_id=message.from_user.id, lang=lang, action="setemoji", message=message):
+        return
+
+    from app.services.config.premium_emoji_store import PremiumEmojiStore, emoji_for_slug, is_valid_slug
+
+    data = await state.get_data()
+    slug = data.get("emoji_slug")
+    if not slug or not is_valid_slug(slug):
+        await state.clear()
+        return await message.answer(t(lang, "admin.config.unknown_key", setting=slug or "?"), parse_mode="HTML")
+    emoji = emoji_for_slug(slug)
+
+    raw = (message.text or "").strip()
+    if raw == "-":
+        await PremiumEmojiStore.set_id(session, slug, "", updated_by=message.from_user.id)
+        await state.clear()
+        text, kb = await _emoji_manager_view(session, lang)
+        await message.answer(t(lang, "admin.emoji.cleared", emoji=emoji), parse_mode="HTML")
+        return await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+    custom_id = _extract_custom_emoji_id(message)
+    if not custom_id:
+        # Keep the state so the admin can simply resend a correct premium emoji.
+        return await message.answer(t(lang, "admin.emoji.none_found"), parse_mode="HTML")
+
+    await PremiumEmojiStore.set_id(session, slug, custom_id, updated_by=message.from_user.id)
+    logger.info("Admin premium-emoji set admin_telegram_id=%s slug=%s", message.from_user.id, slug)
+    await state.clear()
+    text, kb = await _emoji_manager_view(session, lang)
+    await message.answer(t(lang, "admin.emoji.saved", emoji=emoji, id=custom_id), parse_mode="HTML")
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
 def _pack_label(lang: str, code: str | None) -> str:

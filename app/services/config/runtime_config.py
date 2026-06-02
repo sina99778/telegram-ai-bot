@@ -92,12 +92,8 @@ class RuntimeConfig:
         "card_number": ("CARD_TO_CARD_NUMBER", "Card-to-card destination card number"),
         "card_holder": ("CARD_TO_CARD_HOLDER", "Card-to-card account holder name"),
         "card_note":   ("CARD_TO_CARD_NOTE", "Card-to-card extra instructions shown to buyers"),
-        # Custom-emoji ids (only used when premium_emoji_enabled = 1)
-        "emoji_crown": ("CUSTOM_EMOJI_CROWN", "Custom emoji id for 👑"),
-        "emoji_coin":  ("CUSTOM_EMOJI_COIN", "Custom emoji id for 🪙"),
-        "emoji_spark": ("CUSTOM_EMOJI_SPARK", "Custom emoji id for ✨"),
-        "emoji_gem":   ("CUSTOM_EMOJI_GEM", "Custom emoji id for 💎"),
-        "emoji_fire":  ("CUSTOM_EMOJI_FIRE", "Custom emoji id for 🔥"),
+        # NOTE: premium custom-emoji ids are managed by PremiumEmojiStore (one
+        # row per emoji, set from the admin panel by sending the emoji), not here.
     }
 
     # ── Helpers ──────────────────────────────────────────────────────────────
