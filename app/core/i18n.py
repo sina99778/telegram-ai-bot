@@ -301,6 +301,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "inline.daily_limit_reached": "You've used all {limit} inline requests for today. Come back tomorrow or use the bot in private chat.",
         "abuse.inline_rate_limited": "⏳ You're sending inline requests too fast. Please wait a moment.",
         "webapp.image_only": "Right now I can read images; other file types aren't analyzed yet.",
+        "webapp.session_expired": "🔒 Your session expired. Please close this window and reopen the app from the bot's menu (🚀 Open App).",
+        "webapp.empty_message": "✍️ Type a message or attach an image first.",
+        "webapp.too_large": "📦 That file is too large. Please send a smaller one.",
+        "webapp.server_error": "⚠️ Something went wrong on our side. Please try again in a moment.",
     },
     "fa": {
         "buttons.open_app": "🚀 باز کردن اپ",
@@ -596,6 +600,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "inline.daily_limit_reached": "سقف {limit} درخواست اینلاین امروز شما تکمیل شده. فردا دوباره تلاش کنید یا از چت خصوصی استفاده کنید.",
         "abuse.inline_rate_limited": "⏳ درخواست‌های اینلاین خیلی سریع ارسال می‌شوند. لطفاً کمی صبر کنید.",
         "webapp.image_only": "فعلاً فقط می‌توانم عکس را بخوانم؛ سایر فایل‌ها هنوز تحلیل نمی‌شوند.",
+        "webapp.session_expired": "🔒 نشست شما منقضی شده. این پنجره را ببندید و اپ را دوباره از منوی ربات باز کنید (🚀 باز کردن اپ).",
+        "webapp.empty_message": "✍️ اول یک پیام بنویسید یا یک عکس ضمیمه کنید.",
+        "webapp.too_large": "📦 این فایل خیلی بزرگ است. لطفاً فایل کوچک‌تری بفرستید.",
+        "webapp.server_error": "⚠️ مشکلی از سمت ما پیش آمد. لطفاً کمی بعد دوباره تلاش کنید.",
     },
 }
 

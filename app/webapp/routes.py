@@ -10,6 +10,11 @@ FastAPI routes for the Telegram Mini App:
 
 Every API call must carry the Telegram ``initData`` in the
 ``X-Telegram-Init-Data`` header; it is verified by :func:`validate_init_data`.
+
+Design rule for this module: **an API call must never fail silently.** Every
+path returns a JSON body with a human-readable ``reply`` (and an ``error`` code),
+even on auth failure or an unexpected exception, so the Mini App can always show
+the user *why* something didn't work instead of a bare "No response".
 """
 
 from __future__ import annotations
@@ -17,8 +22,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile, status
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, File, Form, Header, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.core.config import settings
 from app.core.enums import FeatureName
@@ -37,12 +42,19 @@ try:
 except Exception:  # pragma: no cover
     _INDEX_HTML = "<!doctype html><title>Mini App</title><p>Mini app unavailable.</p>"
 
+# Telegram's in-app browser caches Mini App assets aggressively; without this a
+# user can keep seeing an old build after we ship a new one.
+_NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
 
-def _auth(init_data: str | None) -> WebAppUser:
-    wu = validate_init_data(init_data or "", settings.BOT_TOKEN, max_age_seconds=settings.WEBAPP_INITDATA_MAX_AGE_SECONDS)
-    if not wu:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Telegram initData")
-    return wu
+
+def _auth(init_data: str | None) -> WebAppUser | None:
+    """Validate initData. Returns the user or None (never raises). The reason for
+    a failure is logged by :func:`validate_init_data` for server-side diagnosis."""
+    return validate_init_data(
+        init_data or "",
+        settings.BOT_TOKEN,
+        max_age_seconds=settings.WEBAPP_INITDATA_MAX_AGE_SECONDS,
+    )
 
 
 def _build_orchestrator(session):
@@ -66,23 +78,40 @@ def _build_orchestrator(session):
 
 @webapp_router.get("/webapp", response_class=HTMLResponse)
 async def webapp_index() -> HTMLResponse:
-    return HTMLResponse(content=_INDEX_HTML)
+    return HTMLResponse(content=_INDEX_HTML, headers=_NO_CACHE)
 
 
 @webapp_router.get("/webapp/api/me")
-async def webapp_me(x_telegram_init_data: str | None = Header(default=None)) -> dict:
+async def webapp_me(x_telegram_init_data: str | None = Header(default=None)) -> JSONResponse:
     wu = _auth(x_telegram_init_data)
-    async with AsyncSessionLocal() as session:
-        repo = ChatRepository(session)
-        user = await repo.get_or_create_user(wu.telegram_id, wu.username, wu.first_name)
-        return {
-            "name": user.first_name or user.username or "user",
-            "telegram_id": user.telegram_id,
-            "normal_credits": user.normal_credits,
-            "vip_credits": user.vip_credits,
-            "has_vip": user.has_active_vip,
-            "lang": user.language or wu.language_code or "fa",
-        }
+    if not wu:
+        return JSONResponse(
+            {"error": "auth", "reply": t("fa", "webapp.session_expired")},
+            status_code=401,
+            headers=_NO_CACHE,
+        )
+    try:
+        async with AsyncSessionLocal() as session:
+            repo = ChatRepository(session)
+            user = await repo.get_or_create_user(wu.telegram_id, wu.username, wu.first_name)
+            return JSONResponse(
+                {
+                    "name": user.first_name or user.username or "user",
+                    "telegram_id": user.telegram_id,
+                    "normal_credits": user.normal_credits,
+                    "vip_credits": user.vip_credits,
+                    "has_vip": user.has_active_vip,
+                    "lang": user.language or wu.language_code or "fa",
+                },
+                headers=_NO_CACHE,
+            )
+    except Exception:
+        logger.exception("Mini app /me failed for telegram_id=%s", wu.telegram_id)
+        return JSONResponse(
+            {"error": "server", "reply": t(wu.language_code or "fa", "webapp.server_error")},
+            status_code=500,
+            headers=_NO_CACHE,
+        )
 
 
 @webapp_router.post("/webapp/api/chat")
@@ -90,57 +119,83 @@ async def webapp_chat(
     x_telegram_init_data: str | None = Header(default=None),
     message: str = Form(default=""),
     file: UploadFile | None = File(default=None),
-) -> dict:
+) -> JSONResponse:
     wu = _auth(x_telegram_init_data)
-    text = (message or "").strip()
+    if not wu:
+        # 200 (not 401) so the SPA reliably renders the message in the chat bubble.
+        return JSONResponse(
+            {"success": False, "reply": t("fa", "webapp.session_expired"), "error": "auth"},
+            headers=_NO_CACHE,
+        )
 
-    image_bytes: bytes | None = None
-    file_note: str | None = None
-    if file is not None:
-        data = await file.read()
-        if len(data) > settings.WEBAPP_CHAT_MAX_FILE_BYTES:
-            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
-        if (file.content_type or "").startswith("image/"):
-            image_bytes = data
-        else:
-            # Non-image files aren't understood by the vision model yet; keep
-            # the chat flowing and tell the user.
-            file_note = "unsupported_file"
+    lang = wu.language_code or "fa"
+    try:
+        text = (message or "").strip()
 
-    if not text and image_bytes is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty message")
+        image_bytes: bytes | None = None
+        file_note: str | None = None
+        if file is not None:
+            data = await file.read()
+            if len(data) > settings.WEBAPP_CHAT_MAX_FILE_BYTES:
+                return JSONResponse(
+                    {"success": False, "reply": t(lang, "webapp.too_large"), "error": "too_large"},
+                    headers=_NO_CACHE,
+                )
+            if (file.content_type or "").startswith("image/"):
+                image_bytes = data
+            else:
+                # Non-image files aren't understood by the vision model yet; keep
+                # the chat flowing and tell the user.
+                file_note = "unsupported_file"
 
-    async with AsyncSessionLocal() as session:
-        repo = ChatRepository(session)
-        user = await repo.get_or_create_user(wu.telegram_id, wu.username, wu.first_name)
-        lang = user.language or wu.language_code or "fa"
+        if not text and image_bytes is None:
+            return JSONResponse(
+                {"success": False, "reply": t(lang, "webapp.empty_message"), "error": "empty"},
+                headers=_NO_CACHE,
+            )
 
-        from app.services.security.abuse_guard import AbuseGuardService
-        from app.services.security.content_filter import ContentFilterService
+        async with AsyncSessionLocal() as session:
+            repo = ChatRepository(session)
+            user = await repo.get_or_create_user(wu.telegram_id, wu.username, wu.first_name)
+            lang = user.language or wu.language_code or "fa"
 
-        throttle = await AbuseGuardService.check_private_chat(user_id=user.id, lang=lang)
-        if not throttle.allowed:
-            return {"success": False, "reply": throttle.reason}
+            from app.services.security.abuse_guard import AbuseGuardService
+            from app.services.security.content_filter import ContentFilterService
 
-        prompt = text or t(lang, "chat.vision_default_prompt")
-        content = ContentFilterService.check_text_prompt(prompt)
-        if not content.allowed:
-            await AbuseGuardService.record_failure(subject="private_chat", subject_id=user.id)
-            return {"success": False, "reply": t(lang, "abuse.content_blocked")}
+            throttle = await AbuseGuardService.check_private_chat(user_id=user.id, lang=lang)
+            if not throttle.allowed:
+                return JSONResponse(
+                    {"success": False, "reply": throttle.reason, "error": "throttled"},
+                    headers=_NO_CACHE,
+                )
 
-        orchestrator = _build_orchestrator(session)
-        try:
+            prompt = text or t(lang, "chat.vision_default_prompt")
+            content = ContentFilterService.check_text_prompt(prompt)
+            if not content.allowed:
+                await AbuseGuardService.record_failure(subject="private_chat", subject_id=user.id)
+                return JSONResponse(
+                    {"success": False, "reply": t(lang, "abuse.content_blocked"), "error": "blocked"},
+                    headers=_NO_CACHE,
+                )
+
+            orchestrator = _build_orchestrator(session)
             result = await orchestrator.process_message(
                 user_id=user.id,
                 prompt=prompt,
                 feature_name=FeatureName.FLASH_TEXT,
                 image_bytes=image_bytes,
             )
-        except Exception:
-            logger.exception("Mini app chat failed for telegram_id=%s", wu.telegram_id)
-            return {"success": False, "reply": t(lang, "errors.delivery_failed")}
 
-        reply = result.text
-        if file_note == "unsupported_file" and result.success:
-            reply = "📎 " + t(lang, "webapp.image_only") + "\n\n" + reply
-        return {"success": result.success, "reply": reply, "error": result.error_message}
+            reply = result.text or t(lang, "webapp.server_error")
+            if file_note == "unsupported_file" and result.success:
+                reply = "📎 " + t(lang, "webapp.image_only") + "\n\n" + reply
+            return JSONResponse(
+                {"success": result.success, "reply": reply, "error": result.error_message},
+                headers=_NO_CACHE,
+            )
+    except Exception:
+        logger.exception("Mini app chat failed for telegram_id=%s", wu.telegram_id)
+        return JSONResponse(
+            {"success": False, "reply": t(lang, "webapp.server_error"), "error": "server"},
+            headers=_NO_CACHE,
+        )

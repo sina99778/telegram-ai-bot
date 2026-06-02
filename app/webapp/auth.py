@@ -40,20 +40,32 @@ def validate_init_data(init_data: str, bot_token: str, *, max_age_seconds: int =
     """Return the verified :class:`WebAppUser` or ``None`` if anything is off
     (bad signature, missing/garbled fields, stale auth_date)."""
     if not init_data or not bot_token:
+        # Empty initData almost always means the app was opened outside Telegram
+        # (e.g. a plain browser) or via a non-web_app button.
+        logger.info("Mini App auth: empty initData or bot_token (init_data_present=%s)", bool(init_data))
         return None
     try:
         pairs = dict(parse_qsl(init_data, keep_blank_values=True, strict_parsing=False))
     except Exception:
+        logger.info("Mini App auth: initData could not be parsed")
         return None
 
     received_hash = pairs.pop("hash", None)
     if not received_hash:
+        logger.info("Mini App auth: initData has no hash field")
         return None
 
     check_string = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
     secret_key = hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()
     computed = hmac.new(secret_key, check_string.encode("utf-8"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(computed, received_hash):
+        # Hash mismatch → the BOT_TOKEN on the server differs from the bot that
+        # opened the app, or a proxy altered the initData. Log field names only
+        # (never values) so we can diagnose without leaking the signature.
+        logger.warning(
+            "Mini App auth: hash mismatch (token may not match the bot). fields=%s",
+            sorted(pairs.keys()),
+        )
         return None
 
     # Freshness — reject replays of old initData.
@@ -72,6 +84,7 @@ def validate_init_data(init_data: str, bot_token: str, *, max_age_seconds: int =
         user = {}
     tg_id = user.get("id")
     if not isinstance(tg_id, int):
+        logger.info("Mini App auth: initData passed HMAC but has no numeric user id")
         return None
 
     return WebAppUser(

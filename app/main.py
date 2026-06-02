@@ -207,6 +207,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         # Continue startup so /health is reachable for diagnostics.
 
+    # Expose the Mini App via Telegram's official Menu Button. This is the most
+    # reliable way for users to open it WITH a signed initData (the reply-keyboard
+    # button works too, but the menu button is always present). Non-fatal.
+    try:
+        _webapp_url = settings.webapp_url
+        if _webapp_url.startswith("https://"):
+            from aiogram.types import MenuButtonWebApp, WebAppInfo
+
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(text="🚀 Open App", web_app=WebAppInfo(url=_webapp_url))
+            )
+            logger.info("Mini App menu button set  ·  url=%s", _webapp_url)
+    except Exception as mb_err:
+        logger.warning("Could not set Mini App menu button: %s", mb_err)
+
     if settings.BACKUP_ENABLED:
         backup_recipient = DailyBackupService.resolve_recipient_id()
         if backup_recipient is None:
