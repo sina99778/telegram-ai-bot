@@ -222,13 +222,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
 
     if settings.EXCHANGE_RATE_AUTO_ENABLED:
-        from app.services.exchange.rate_updater import ExchangeRateUpdater
-        exchange_rate_task = asyncio.create_task(ExchangeRateUpdater.run_scheduler(AsyncSessionLocal))
-        logger.info(
-            "Exchange-rate auto-updater launched provider=%s interval=%ss",
-            settings.EXCHANGE_RATE_PROVIDER,
-            settings.EXCHANGE_RATE_UPDATE_INTERVAL_SECONDS,
-        )
+        try:
+            from app.services.exchange.rate_updater import ExchangeRateUpdater
+            exchange_rate_task = asyncio.create_task(ExchangeRateUpdater.run_scheduler(AsyncSessionLocal))
+            logger.info(
+                "Exchange-rate auto-updater launched provider=%s interval=%ss",
+                settings.EXCHANGE_RATE_PROVIDER,
+                settings.EXCHANGE_RATE_UPDATE_INTERVAL_SECONDS,
+            )
+        except Exception:
+            # A background-task failure must never block startup / health.
+            logger.warning("Could not start exchange-rate updater", exc_info=True)
 
     yield  # ← application is running
 

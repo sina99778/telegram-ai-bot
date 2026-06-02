@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
@@ -280,7 +281,7 @@ async def process_card_receipt(message: Message, state: FSMContext, session: Asy
         currency="USD",
         credits_granted=0,
         status=TransactionStatus.PENDING,
-        idempotency_key=f"card_{db_user.telegram_id}_{int(datetime.now(timezone.utc).timestamp())}_{message.message_id}",
+        idempotency_key=f"card_{db_user.telegram_id}_{message.message_id}_{uuid.uuid4().hex[:8]}",
         raw_payload={
             "product_code": code,
             "receipt_file_id": receipt_file_id,

@@ -709,7 +709,7 @@ async def cb_admin_cardpay_approve(callback: CallbackQuery, session: AsyncSessio
         logger.warning("Could not notify buyer of approved card payment tx=%s", tx.id)
 
     await callback.answer(
-        t(lang, "admin.cardpay.approved", grant=grant_text, telegram_id=payload.get("telegram_id", buyer.telegram_id)),
+        t(lang, "admin.cardpay.approved", telegram_id=payload.get("telegram_id", buyer.telegram_id)),
         show_alert=True,
     )
     try:

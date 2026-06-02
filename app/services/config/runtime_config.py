@@ -138,7 +138,14 @@ class RuntimeConfig:
                     logger.warning("bot_settings has non-int value for key=%s value=%r; using default", key, row.value)
         except Exception as exc:
             # Never let a config read break the request path — fall back to env.
+            # On Postgres a failed read aborts the transaction, which would then
+            # poison the caller's SUBSEQUENT queries (e.g. the credit deduction)
+            # in this same session — so roll it back to restore a usable state.
             logger.warning("RuntimeConfig DB read failed for key=%s (%s); using default", key, exc)
+            try:
+                await session.rollback()
+            except Exception:
+                pass
 
         cls._cache[key] = (value, now + cls._CACHE_TTL)
         return value
@@ -208,6 +215,10 @@ class RuntimeConfig:
                 value = row.value
         except Exception as exc:
             logger.warning("RuntimeConfig text read failed for key=%s (%s); using default", key, exc)
+            try:
+                await session.rollback()
+            except Exception:
+                pass
         cls._cache[cache_key] = (value, now + cls._CACHE_TTL)
         return value
 

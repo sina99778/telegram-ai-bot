@@ -188,10 +188,25 @@ class Settings(BaseSettings):
 
     @property
     def admin_ids_list(self) -> list[int]:
-        """Parse ADMIN_IDS comma-separated string into a list of ints."""
+        """Parse ADMIN_IDS comma-separated string into a list of ints.
+
+        Tolerant of a stray non-numeric entry: it's skipped (with a log)
+        instead of raising — this property is read on every update via
+        is_configured_admin(), so a single typo must not break the whole bot.
+        """
         if not self.ADMIN_IDS:
             return []
-        return [int(x.strip()) for x in self.ADMIN_IDS.split(",") if x.strip()]
+        ids: list[int] = []
+        for part in self.ADMIN_IDS.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                ids.append(int(part))
+            except ValueError:
+                import logging
+                logging.getLogger(__name__).warning("Ignoring invalid ADMIN_IDS entry: %r", part)
+        return ids
 
     @property
     def database_url(self) -> str:
