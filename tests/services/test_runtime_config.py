@@ -58,9 +58,10 @@ async def test_quota_service_honors_runtime_override(db_session, setup_base_data
 
 @pytest.mark.asyncio
 async def test_snapshot_reports_override_flag(db_session):
-    await RuntimeConfig.set_int(db_session, "inline_daily", 3)
+    # Use a value that clearly differs from the env default so is_override holds.
+    await RuntimeConfig.set_int(db_session, "inline_daily", 99)
     snapshot = {item["key"]: item for item in await RuntimeConfig.snapshot(db_session)}
-    assert snapshot["inline_daily"]["value"] == 3
+    assert snapshot["inline_daily"]["value"] == 99
     assert snapshot["inline_daily"]["is_override"] is True
     # A key we didn't touch stays at its default and is not flagged as override
     assert snapshot["vip_message_cost"]["is_override"] is False

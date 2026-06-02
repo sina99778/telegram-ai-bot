@@ -47,23 +47,25 @@ class Settings(BaseSettings):
     IMAGE_CREDIT_COST: int = 60        # 1 image        (~€0.066)
     IMAGE_EDIT_CREDIT_COST: int = 60
     VIP_DEPLETION_BEHAVIOR: str = "fallback_to_normal"
-    DEFAULT_DAILY_NORMAL_CREDITS: int = 20
+    # Free tier is intentionally a small "taste" to drive conversion to paid:
+    # a few Flash messages a day, no free images (image is a premium feature).
+    DEFAULT_DAILY_NORMAL_CREDITS: int = 5
     VIP_DEFAULT_PLAN_NAME: str = "vip"
     # ── Daily usage caps ──────────────────────
     # NOTE: these are the conservative defaults. They are runtime-editable
     # by admins via /setconfig (see app/services/config/runtime_config.py),
     # which overrides them from the bot_settings table without a redeploy.
-    SEARCH_DAILY_FREE_LIMIT: int = 2
+    SEARCH_DAILY_FREE_LIMIT: int = 1
     SEARCH_DAILY_PAID_LIMIT: int = 8
     SEARCH_DAILY_VIP_LIMIT: int = 15
     SEARCH_DAILY_GROUP_LIMIT: int = 4
-    FREE_DAILY_IMAGE_LIMIT: int = 1
-    FREE_WEEKLY_IMAGE_EDIT_LIMIT: int = 1
+    FREE_DAILY_IMAGE_LIMIT: int = 0       # image is a premium (paid) feature
+    FREE_WEEKLY_IMAGE_EDIT_LIMIT: int = 0
     IMAGE_EDIT_MAX_PROMPT_LENGTH: int = 500
     IMAGE_EDIT_COMMAND_COOLDOWN_SECONDS: int = 30
     PRIVATE_MAX_PROMPT_LENGTH: int = 4000
     INLINE_MAX_PROMPT_LENGTH: int = 500
-    INLINE_DAILY_LIMIT: int = 6
+    INLINE_DAILY_LIMIT: int = 3
     INLINE_BURST_LIMIT: int = 3
     INLINE_BURST_WINDOW_SECONDS: int = 60
     SEARCH_MAX_QUERY_LENGTH: int = 500
