@@ -7,11 +7,13 @@ import logging
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove, URLInputFile
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.keyboards.inline import get_language_picker_keyboard
 from app.bot.keyboards.reply import get_main_menu
 from app.core.access import is_configured_admin
 from app.core.i18n import t
+from app.core import premium_emoji
 from app.db.models import User
 from app.db.repositories.chat_repo import ChatRepository
 
@@ -35,7 +37,7 @@ def _main_menu_text(lang: str, first_name: str, is_admin: bool) -> str:
 
 
 @base_router.message(CommandStart())
-async def cmd_start(message: Message, command: CommandObject, chat_repo: ChatRepository) -> None:
+async def cmd_start(message: Message, command: CommandObject, chat_repo: ChatRepository, session: AsyncSession) -> None:
     if message.from_user is None:
         return
 
@@ -73,31 +75,34 @@ async def cmd_start(message: Message, command: CommandObject, chat_repo: ChatRep
         return
 
     lang = user.language
+    kb = get_main_menu(lang, is_admin=is_admin)
     welcome_text = _main_menu_text(lang, message.from_user.first_name or "friend", is_admin)
-    try:
-        await asyncio.wait_for(
-            message.answer_photo(
-                photo=URLInputFile(BANNER_URL),
-                caption=welcome_text,
-                reply_markup=get_main_menu(lang, is_admin=is_admin),
-                parse_mode="HTML",
-            ),
-            timeout=BANNER_FETCH_TIMEOUT,
-        )
-    except asyncio.TimeoutError:
-        logger.warning("Start banner fetch timed out telegram_id=%s; falling back to text-only", message.from_user.id)
-        await message.answer(
-            welcome_text,
-            reply_markup=get_main_menu(lang, is_admin=is_admin),
-            parse_mode="HTML",
-        )
-    except Exception:
-        logger.warning("Start banner send failed telegram_id=%s; falling back to text-only", message.from_user.id, exc_info=True)
-        await message.answer(
-            welcome_text,
-            reply_markup=get_main_menu(lang, is_admin=is_admin),
-            parse_mode="HTML",
-        )
+    # Optional premium emoji; falls back to the plain text if rendering is
+    # rejected (e.g. bot owner has no Telegram Premium).
+    fancy_text = await premium_emoji.decorate(session, welcome_text)
+
+    async def _send(text: str) -> bool:
+        try:
+            await asyncio.wait_for(
+                message.answer_photo(photo=URLInputFile(BANNER_URL), caption=text, reply_markup=kb, parse_mode="HTML"),
+                timeout=BANNER_FETCH_TIMEOUT,
+            )
+            return True
+        except Exception:
+            # Banner slow/unavailable, or caption rejected → try text-only.
+            try:
+                await message.answer(text, reply_markup=kb, parse_mode="HTML")
+                return True
+            except Exception:
+                return False
+
+    if not await _send(fancy_text):
+        # Last resort: the plain (non-premium) text always works.
+        logger.warning("Start: premium/banner send failed telegram_id=%s; sending plain text", message.from_user.id)
+        try:
+            await message.answer(welcome_text, reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            logger.warning("Start: plain welcome send also failed telegram_id=%s", message.from_user.id, exc_info=True)
 
 
 @base_router.callback_query(F.data.startswith("lang:set:"))

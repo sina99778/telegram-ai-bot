@@ -80,6 +80,8 @@ class RuntimeConfig:
         "history_max_messages": ConfigSpec("HISTORY_MAX_MESSAGES", 2, 50, "Recent messages loaded as context"),
         # ── Card-to-card USD→Toman conversion ──
         "usd_toman_rate": ConfigSpec("USD_TOMAN_RATE", 0, 100_000_000, "Toman per 1 USD (card-to-card; 0 = hide Toman)"),
+        # ── Premium (custom) emoji ──
+        "premium_emoji_enabled": ConfigSpec("PREMIUM_EMOJI_ENABLED", 0, 1, "Render custom emoji (needs bot-owner Premium; 0/1)"),
     }
 
     # Free-text settings (stored in the same bot_settings table). Used for
@@ -90,6 +92,12 @@ class RuntimeConfig:
         "card_number": ("CARD_TO_CARD_NUMBER", "Card-to-card destination card number"),
         "card_holder": ("CARD_TO_CARD_HOLDER", "Card-to-card account holder name"),
         "card_note":   ("CARD_TO_CARD_NOTE", "Card-to-card extra instructions shown to buyers"),
+        # Custom-emoji ids (only used when premium_emoji_enabled = 1)
+        "emoji_crown": ("CUSTOM_EMOJI_CROWN", "Custom emoji id for 👑"),
+        "emoji_coin":  ("CUSTOM_EMOJI_COIN", "Custom emoji id for 🪙"),
+        "emoji_spark": ("CUSTOM_EMOJI_SPARK", "Custom emoji id for ✨"),
+        "emoji_gem":   ("CUSTOM_EMOJI_GEM", "Custom emoji id for 💎"),
+        "emoji_fire":  ("CUSTOM_EMOJI_FIRE", "Custom emoji id for 🔥"),
     }
 
     # ── Helpers ──────────────────────────────────────────────────────────────

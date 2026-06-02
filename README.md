@@ -140,6 +140,21 @@ on demand and see whether any source is reachable. Disable auto-update with
 (`app/services/exchange/providers.py`) is pluggable — adding another source
 is one more class in the registry.
 
+## Premium (custom) emoji
+
+Telegram renders animated **custom emoji** from a bot only when the **bot
+owner has Telegram Premium**. This is therefore opt-in and fully graceful:
+
+- `premium_emoji_enabled` (panel button, default off) — master switch.
+- `emoji_crown` / `emoji_coin` / `emoji_spark` / `emoji_gem` / `emoji_fire`
+  (panel text settings) — paste the `custom_emoji_id` for 👑/🪙/✨/💎/🔥.
+
+When enabled and a slot has an id, the matching plain emoji is wrapped in
+`<tg-emoji emoji-id="…">`. If the owner isn't actually Premium (Telegram
+rejects the entity) or the feature is off, the bot transparently falls back
+to the plain emoji — it can never break a message
+(`app/core/premium_emoji.py`). Currently applied to the `/start` welcome.
+
 ## Pricing & margin model
 
 Credit costs are calibrated to the **real provider cost** measured from the

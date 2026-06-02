@@ -154,6 +154,19 @@ class Settings(BaseSettings):
     BACKUP_LOCK_SECONDS: int = 3600
     SYSTEM_PROMPT: str = "You are a helpful AI assistant."
 
+    # ── Premium (custom) emoji ──
+    # Telegram lets a bot render animated custom emoji ONLY if the bot owner
+    # has Telegram Premium. Off by default; when enabled, marked emojis in
+    # key messages render as the custom emoji whose id is set in the slots
+    # below (admin sets them from the panel). Always falls back to the plain
+    # emoji, so nothing breaks when off or for non-premium viewers.
+    PREMIUM_EMOJI_ENABLED: bool = False
+    CUSTOM_EMOJI_CROWN: str = ""   # 👑
+    CUSTOM_EMOJI_COIN: str = ""    # 🪙
+    CUSTOM_EMOJI_SPARK: str = ""   # ✨
+    CUSTOM_EMOJI_GEM: str = ""     # 💎
+    CUSTOM_EMOJI_FIRE: str = ""    # 🔥
+
     # ── PostgreSQL ────────────────────────────
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
