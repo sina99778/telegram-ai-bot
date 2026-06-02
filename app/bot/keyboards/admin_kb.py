@@ -100,6 +100,7 @@ def get_admin_config_kb(lang: str) -> object:
             ],
             [
                 InlineKeyboardButton(text=t(lang, "admin.config.cat.emoji"), callback_data="admin:emoji"),
+                InlineKeyboardButton(text=t(lang, "admin.config.cat.join"), callback_data="admin:join"),
             ],
             [
                 InlineKeyboardButton(text=t(lang, "buttons.refresh"), callback_data="admin:config"),
@@ -107,6 +108,30 @@ def get_admin_config_kb(lang: str) -> object:
             ],
         ]
     )
+
+
+def get_admin_join_kb(lang: str, *, enabled: bool, has_channel: bool) -> object:
+    """Forced-join manager: toggle + set/clear channel."""
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=t(lang, "admin.join.toggle_off" if enabled else "admin.join.toggle_on"),
+                callback_data="admin:join:toggle",
+            )
+        ],
+        [
+            InlineKeyboardButton(text=t(lang, "admin.join.set_channel_btn"), callback_data="admin:join:setchannel"),
+        ],
+    ]
+    if has_channel:
+        rows.append([InlineKeyboardButton(text=t(lang, "admin.join.clear_btn"), callback_data="admin:join:clear")])
+    rows.append(
+        [
+            InlineKeyboardButton(text=t(lang, "buttons.back"), callback_data="admin:config"),
+            InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"),
+        ]
+    )
+    return markup(rows)
 
 
 def get_admin_config_section_kb(

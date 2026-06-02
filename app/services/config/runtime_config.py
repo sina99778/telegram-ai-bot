@@ -82,6 +82,8 @@ class RuntimeConfig:
         "usd_toman_rate": ConfigSpec("USD_TOMAN_RATE", 0, 100_000_000, "Toman per 1 USD (card-to-card; 0 = hide Toman)"),
         # ── Premium (custom) emoji ──
         "premium_emoji_enabled": ConfigSpec("PREMIUM_EMOJI_ENABLED", 0, 1, "Render custom emoji (needs bot-owner Premium; 0/1)"),
+        # ── Forced channel join ──
+        "forced_join_enabled": ConfigSpec("FORCED_JOIN_REQUIRED", 0, 1, "Require channel membership before using the bot (0/1)"),
     }
 
     # Free-text settings (stored in the same bot_settings table). Used for
@@ -92,6 +94,7 @@ class RuntimeConfig:
         "card_number": ("CARD_TO_CARD_NUMBER", "Card-to-card destination card number"),
         "card_holder": ("CARD_TO_CARD_HOLDER", "Card-to-card account holder name"),
         "card_note":   ("CARD_TO_CARD_NOTE", "Card-to-card extra instructions shown to buyers"),
+        "forced_join_channel": ("FORCED_JOIN_CHANNEL", "Channel users must join (@username)"),
         # NOTE: premium custom-emoji ids are managed by PremiumEmojiStore (one
         # row per emoji, set from the admin panel by sending the emoji), not here.
     }

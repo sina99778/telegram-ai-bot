@@ -37,6 +37,32 @@ def _cache_key(user_id: int) -> str:
     return f"forced_join:{user_id}"
 
 
+async def _resolve_config(session: AsyncSession | None) -> tuple[bool, str]:
+    """Effective (enabled, channel), read from the admin-editable RuntimeConfig
+    and falling back to the env defaults if the DB isn't reachable."""
+    if session is not None:
+        try:
+            from app.services.config.runtime_config import RuntimeConfig
+
+            enabled = (await RuntimeConfig.get_int(session, "forced_join_enabled")) == 1
+            channel = (await RuntimeConfig.get_text(session, "forced_join_channel") or "").strip()
+            return enabled, channel
+        except Exception:
+            pass
+    return bool(settings.FORCED_JOIN_REQUIRED), (settings.FORCED_JOIN_CHANNEL or "").strip()
+
+
+async def clear_membership_cache() -> None:
+    """Drop all cached membership verdicts — call when the channel/toggle changes
+    so a new requirement is enforced immediately (not after the 12h TTL)."""
+    try:
+        redis = await _get_redis()
+        async for key in redis.scan_iter(match="forced_join:*"):
+            await redis.delete(key)
+    except Exception:
+        logger.warning("Could not clear forced-join membership cache", exc_info=True)
+
+
 class CheckUserStatusMiddleware(BaseMiddleware):
     async def __call__(
         self,
@@ -58,7 +84,8 @@ class CheckUserStatusMiddleware(BaseMiddleware):
         if getattr(event, "chat", None) and event.chat.type != "private":
             return await handler(event, data)
 
-        if not settings.FORCED_JOIN_REQUIRED or not settings.FORCED_JOIN_CHANNEL:
+        enabled, channel = await _resolve_config(session)
+        if not enabled or not channel:
             return await handler(event, data)
 
         user_id = event.from_user.id
@@ -83,12 +110,12 @@ class CheckUserStatusMiddleware(BaseMiddleware):
         lang = db_user.language if db_user and db_user.language else "fa"
 
         try:
-            member = await bot.get_chat_member(chat_id=settings.FORCED_JOIN_CHANNEL, user_id=user_id)
+            member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
         except TelegramAPIError as exc:
             logger.warning(
                 "Forced-join check failed telegram_id=%s channel=%s error=%s",
                 user_id,
-                settings.FORCED_JOIN_CHANNEL,
+                channel,
                 exc,
                 exc_info=True,
             )
@@ -97,19 +124,20 @@ class CheckUserStatusMiddleware(BaseMiddleware):
             logger.error(
                 "Unexpected forced-join middleware error telegram_id=%s channel=%s error=%s",
                 user_id,
-                settings.FORCED_JOIN_CHANNEL,
+                channel,
                 exc,
                 exc_info=True,
             )
             return await handler(event, data)
 
         if member.status in {"left", "kicked", "banned"}:
+            join_url = channel if channel.startswith("http") else f"https://t.me/{channel.lstrip('@')}"
             kb = colorize_inline_markup(InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
                             text=t(lang, "forced_join.join_button"),
-                            url=f"https://t.me/{settings.FORCED_JOIN_CHANNEL.lstrip('@')}",
+                            url=join_url,
                         )
                     ]
                 ]
@@ -119,7 +147,7 @@ class CheckUserStatusMiddleware(BaseMiddleware):
                 reply_markup=kb,
                 parse_mode="HTML",
             )
-            logger.info("Forced-join blocked telegram_id=%s channel=%s", user_id, settings.FORCED_JOIN_CHANNEL)
+            logger.info("Forced-join blocked telegram_id=%s channel=%s", user_id, channel)
             return None
 
         # ── 3. Verified member — cache in Redis ──────────────────────

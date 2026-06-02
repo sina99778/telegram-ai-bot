@@ -22,6 +22,7 @@ from app.bot.keyboards.admin_kb import (
     get_admin_config_kb,
     get_admin_config_section_kb,
     get_admin_emoji_kb,
+    get_admin_join_kb,
     get_admin_main_kb,
     get_admin_users_kb,
     get_back_to_admin_kb,
@@ -68,6 +69,7 @@ class AdminStates(StatesGroup):
     waiting_for_config_value = State()
     waiting_for_config_text = State()
     waiting_for_premium_emoji = State()
+    waiting_for_join_channel = State()
 
 
 async def _is_admin(user_id: int, session: AsyncSession) -> bool:
@@ -682,6 +684,129 @@ async def process_premium_emoji(message: Message, session: AsyncSession, state: 
     await state.clear()
     text, kb = await _emoji_manager_view(session, lang)
     await message.answer(t(lang, "admin.emoji.saved", emoji=emoji, id=custom_id), parse_mode="HTML")
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+
+# ── Forced channel join manager ───────────────────────────────────────────────
+
+def _normalize_channel(raw: str) -> str:
+    """Accept @username, bare username, a t.me link, or a numeric id; return the
+    form Telegram's get_chat_member understands (@username or -100… id)."""
+    raw = (raw or "").strip()
+    for prefix in ("https://t.me/", "http://t.me/", "t.me/", "telegram.me/"):
+        if raw.lower().startswith(prefix):
+            raw = "@" + raw[len(prefix):].strip("/")
+            break
+    if raw and not raw.startswith("@") and not raw.startswith("http") and not raw.lstrip("-").isdigit():
+        raw = "@" + raw
+    return raw
+
+
+async def _join_manager_view(session: AsyncSession, lang: str):
+    enabled = (await RuntimeConfig.get_int(session, "forced_join_enabled")) == 1
+    channel = (await RuntimeConfig.get_text(session, "forced_join_channel") or "").strip()
+    status = t(lang, "admin.join.status_on" if enabled else "admin.join.status_off")
+    shown = channel or t(lang, "admin.join.none")
+    text = t(lang, "admin.join.hint", status=status, channel=shown)
+    kb = get_admin_join_kb(lang, enabled=enabled, has_channel=bool(channel))
+    return text, kb
+
+
+async def _refresh_join_cache() -> None:
+    from app.bot.middlewares.forced_join import clear_membership_cache
+
+    await clear_membership_cache()
+
+
+@admin_router.callback_query(F.data == "admin:join")
+async def cb_admin_join(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    await state.clear()
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    text, kb = await _join_manager_view(session, lang)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin:join:toggle")
+async def cb_admin_join_toggle(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    current = await RuntimeConfig.get_int(session, "forced_join_enabled")
+    if current != 1:
+        channel = (await RuntimeConfig.get_text(session, "forced_join_channel") or "").strip()
+        if not channel:
+            return await callback.answer(t(lang, "admin.join.need_channel"), show_alert=True)
+    await RuntimeConfig.set_int(session, "forced_join_enabled", 0 if current == 1 else 1, updated_by=callback.from_user.id)
+    await _refresh_join_cache()
+    text, kb = await _join_manager_view(session, lang)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin:join:setchannel")
+async def cb_admin_join_setchannel(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    current = (await RuntimeConfig.get_text(session, "forced_join_channel") or "").strip() or t(lang, "admin.join.none")
+    await state.set_state(AdminStates.waiting_for_join_channel)
+    await callback.message.edit_text(
+        t(lang, "admin.join.set_prompt", channel=current),
+        parse_mode="HTML",
+        reply_markup=get_back_to_admin_kb(lang, back="admin:join"),
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin:join:clear")
+async def cb_admin_join_clear(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    await RuntimeConfig.set_text(session, "forced_join_channel", "", updated_by=callback.from_user.id)
+    await RuntimeConfig.set_int(session, "forced_join_enabled", 0, updated_by=callback.from_user.id)
+    await _refresh_join_cache()
+    text, kb = await _join_manager_view(session, lang)
+    await callback.answer(t(lang, "admin.join.cleared"), show_alert=False)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+
+
+@admin_router.message(AdminStates.waiting_for_join_channel)
+async def process_join_channel(message: Message, session: AsyncSession, state: FSMContext):
+    if not await _is_admin(message.from_user.id, session):
+        return
+    admin_user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
+    lang = _lang(admin_user)
+    if not await _guard_admin_mutation(admin_id=message.from_user.id, lang=lang, action="setjoin", message=message):
+        return
+
+    raw = (message.text or "").strip()
+    if raw == "-":
+        await RuntimeConfig.set_text(session, "forced_join_channel", "", updated_by=message.from_user.id)
+        await RuntimeConfig.set_int(session, "forced_join_enabled", 0, updated_by=message.from_user.id)
+        await _refresh_join_cache()
+        await state.clear()
+        text, kb = await _join_manager_view(session, lang)
+        await message.answer(t(lang, "admin.join.cleared"), parse_mode="HTML")
+        return await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+    channel = _normalize_channel(raw)
+    try:
+        await RuntimeConfig.set_text(session, "forced_join_channel", channel, updated_by=message.from_user.id)
+    except ValueError:
+        return await message.answer(t(lang, "admin.config.bad_value"), parse_mode="HTML")
+    await _refresh_join_cache()
+    logger.info("Admin set forced-join channel admin_telegram_id=%s channel=%s", message.from_user.id, channel)
+    await state.clear()
+    text, kb = await _join_manager_view(session, lang)
+    await message.answer(t(lang, "admin.join.saved", channel=channel), parse_mode="HTML")
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 

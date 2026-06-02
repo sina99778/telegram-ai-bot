@@ -80,6 +80,7 @@ def test_config_home_shows_section_buttons():
     assert "admin:config:cat:context" in cbs
     assert "admin:config:cat:payments" in cbs
     assert "admin:emoji" in cbs          # premium-emoji manager entry
+    assert "admin:join" in cbs           # forced-join manager entry
     assert "admin:main" in cbs           # home
 
 
@@ -180,7 +181,7 @@ def test_config_set_callback_roundtrips_through_registry():
 def test_every_registry_key_appears_in_some_section():
     """No runtime-config key should be orphaned out of the sectioned UI."""
     sectioned = {k for keys in CONFIG_SECTIONS.values() for k in keys}
-    # premium_emoji_enabled is managed in the dedicated emoji screen, not a section.
-    expected = set(RuntimeConfig.REGISTRY) - {"premium_emoji_enabled"}
+    # These have their own dedicated admin screens, not a settings section.
+    expected = set(RuntimeConfig.REGISTRY) - {"premium_emoji_enabled", "forced_join_enabled"}
     missing = expected - sectioned
     assert not missing, f"keys missing from CONFIG_SECTIONS: {missing}"
