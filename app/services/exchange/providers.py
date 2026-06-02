@@ -20,7 +20,15 @@ import re
 
 import aiohttp
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
+
+
+def _rial_to_toman_if_needed(value: int) -> int:
+    """Many Iranian feeds quote in Rial (≈10× Toman). If the number is far
+    above any plausible Toman/USD rate, treat it as Rial and divide by 10."""
+    return value // 10 if value > 200_000 else value
 
 _TIMEOUT = aiohttp.ClientTimeout(total=10)
 _BROWSER_HEADERS = {
@@ -102,7 +110,101 @@ class BonbastProvider:
             return None
 
 
+class TgjuProvider:
+    """Reads the USD price from tgju.org's public ajax feed.
+
+    tgju quotes the dollar in Rial (``price_dollar_rl``); we convert to Toman.
+    Structure can drift, so the parser is flexible and yields None on trouble.
+    Usually reachable from inside Iran (unlike bonbast).
+    """
+
+    name = "tgju"
+    URL = "https://call1.tgju.org/ajax.json"
+
+    @staticmethod
+    def parse_usd(data: dict) -> int | None:
+        if not isinstance(data, dict):
+            return None
+        current = data.get("current")
+        if not isinstance(current, dict):
+            return None
+        node = None
+        for key in ("price_dollar_rl", "price_dollar", "usd"):
+            if key in current:
+                node = current[key]
+                break
+        if node is None:  # last resort: any key mentioning "dollar"
+            for k, v in current.items():
+                if "dollar" in k.lower():
+                    node = v
+                    break
+        if node is None:
+            return None
+        raw = node.get("p") if isinstance(node, dict) else node
+        try:
+            value = int(float(str(raw).replace(",", "").strip()))
+        except (TypeError, ValueError):
+            return None
+        return _rial_to_toman_if_needed(value)
+
+    async def fetch_usd_toman(self) -> int | None:
+        try:
+            async with aiohttp.ClientSession(timeout=_TIMEOUT, headers=_BROWSER_HEADERS) as session:
+                async with session.get(self.URL) as resp:
+                    if resp.status != 200:
+                        logger.warning("tgju returned HTTP %s", resp.status)
+                        return None
+                    data = await resp.json(content_type=None)
+            return self.parse_usd(data)
+        except Exception as exc:
+            logger.warning("tgju fetch failed: %s", exc)
+            return None
+
+
+class NavasanProvider:
+    """navasan.tech — a paid but cheap API that quotes directly in Toman.
+
+    Requires NAVASAN_API_KEY; without it the provider is skipped (returns None).
+    """
+
+    name = "navasan"
+    URL = "http://api.navasan.tech/latest/"
+
+    @staticmethod
+    def parse_usd(data: dict) -> int | None:
+        if not isinstance(data, dict):
+            return None
+        for key in ("usd_sell", "usd", "usd_buy"):
+            node = data.get(key)
+            if node is None:
+                continue
+            raw = node.get("value") if isinstance(node, dict) else node
+            try:
+                return int(float(str(raw).replace(",", "").strip()))
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    async def fetch_usd_toman(self) -> int | None:
+        key = (settings.NAVASAN_API_KEY or "").strip()
+        if not key:
+            return None  # no key configured → skip silently
+        try:
+            async with aiohttp.ClientSession(timeout=_TIMEOUT, headers=_BROWSER_HEADERS) as session:
+                async with session.get(self.URL, params={"api_key": key, "item": "usd_sell"}) as resp:
+                    if resp.status != 200:
+                        logger.warning("navasan returned HTTP %s", resp.status)
+                        return None
+                    data = await resp.json(content_type=None)
+            return self.parse_usd(data)
+        except Exception as exc:
+            logger.warning("navasan fetch failed: %s", exc)
+            return None
+
+
 # Registry — add new sources here.
 PROVIDERS: dict[str, type] = {
     BonbastProvider.name: BonbastProvider,
+    TgjuProvider.name: TgjuProvider,
+    NavasanProvider.name: NavasanProvider,
 }

@@ -101,7 +101,10 @@ class Settings(BaseSettings):
     # On any failure or an out-of-range value, the existing (admin-set) rate
     # is left untouched, so the bot never shows a wrong/zero rate.
     EXCHANGE_RATE_AUTO_ENABLED: bool = True
-    EXCHANGE_RATE_PROVIDER: str = "bonbast"
+    # Comma-separated fallback chain: the first source returning a sane value wins.
+    # tgju is listed first because it is usually reachable from inside Iran.
+    EXCHANGE_RATE_PROVIDER: str = "tgju,bonbast,navasan"
+    NAVASAN_API_KEY: str = ""  # optional; navasan source is skipped without it
     EXCHANGE_RATE_UPDATE_INTERVAL_SECONDS: int = 1800  # 30 minutes
     EXCHANGE_RATE_MIN_TOMAN: int = 20000   # sanity floor (reject below)
     EXCHANGE_RATE_MAX_TOMAN: int = 500000  # sanity ceiling (reject above)

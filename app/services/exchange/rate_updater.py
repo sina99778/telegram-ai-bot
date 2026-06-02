@@ -29,13 +29,20 @@ logger = logging.getLogger(__name__)
 
 class ExchangeRateUpdater:
     @staticmethod
-    def get_provider(name: str | None = None):
-        key = (name or settings.EXCHANGE_RATE_PROVIDER or "bonbast").lower()
-        provider_cls = PROVIDERS.get(key)
-        if provider_cls is None:
-            logger.error("Unknown exchange-rate provider '%s'; falling back to bonbast", key)
-            provider_cls = PROVIDERS["bonbast"]
-        return provider_cls()
+    def get_providers(names: str | None = None) -> list:
+        """Resolve the configured comma-separated fallback chain into instances."""
+        raw = names if names is not None else (settings.EXCHANGE_RATE_PROVIDER or "bonbast")
+        out = []
+        for token in raw.split(","):
+            key = token.strip().lower()
+            if not key:
+                continue
+            provider_cls = PROVIDERS.get(key)
+            if provider_cls is None:
+                logger.warning("Unknown exchange-rate provider '%s' (ignored)", key)
+                continue
+            out.append(provider_cls())
+        return out or [PROVIDERS["bonbast"]()]
 
     @classmethod
     def _is_sane(cls, rate: int) -> bool:
@@ -46,24 +53,39 @@ class ExchangeRateUpdater:
         cls,
         session_factory: async_sessionmaker[AsyncSession],
         *,
+        providers=None,
         provider=None,
     ) -> int | None:
-        """Fetch once and persist if sane. Returns the applied rate or None."""
-        provider = provider or cls.get_provider()
-        rate = await provider.fetch_usd_toman()
-        if rate is None:
-            logger.info("Exchange-rate update skipped: provider returned no value (keeping manual rate)")
-            return None
-        if not cls._is_sane(rate):
-            logger.warning(
-                "Exchange-rate update rejected out-of-range value rate=%s bounds=[%s,%s] (keeping manual rate)",
-                rate, settings.EXCHANGE_RATE_MIN_TOMAN, settings.EXCHANGE_RATE_MAX_TOMAN,
-            )
-            return None
-        async with session_factory() as session:
-            await RuntimeConfig.set_int(session, "usd_toman_rate", rate)
-        logger.info("USD→Toman rate auto-updated to %s via %s", rate, provider.name)
-        return rate
+        """Try each provider in order; persist the first sane value. None if all fail.
+
+        ``provider`` (singular) is accepted for convenience/tests; otherwise the
+        configured ``providers`` chain is used.
+        """
+        if providers is None:
+            providers = [provider] if provider is not None else cls.get_providers()
+
+        for prov in providers:
+            name = getattr(prov, "name", "?")
+            try:
+                rate = await prov.fetch_usd_toman()
+            except Exception:
+                logger.warning("Exchange-rate provider %s raised; trying next", name, exc_info=True)
+                continue
+            if rate is None:
+                continue  # source unavailable/blocked → next in chain
+            if not cls._is_sane(rate):
+                logger.warning(
+                    "Provider %s gave out-of-range rate=%s bounds=[%s,%s]; trying next",
+                    name, rate, settings.EXCHANGE_RATE_MIN_TOMAN, settings.EXCHANGE_RATE_MAX_TOMAN,
+                )
+                continue
+            async with session_factory() as session:
+                await RuntimeConfig.set_int(session, "usd_toman_rate", rate)
+            logger.info("USD→Toman rate auto-updated to %s via %s", rate, name)
+            return rate
+
+        logger.info("All exchange-rate providers failed; keeping the manual rate")
+        return None
 
     @classmethod
     async def run_scheduler(cls, session_factory: async_sessionmaker[AsyncSession]) -> None:

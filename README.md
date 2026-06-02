@@ -117,16 +117,28 @@ rate is the `usd_toman_rate` button in **Admin → 🎚 Limits & Prices** (Toman
 per 1 USD); every pack's Toman price recomputes instantly. Set it to `0` to
 show USD only.
 
-A background updater refreshes that rate from a free-market source
-(`EXCHANGE_RATE_PROVIDER`, default **bonbast**) every
-`EXCHANGE_RATE_UPDATE_INTERVAL_SECONDS` (default 30 min). It only applies a
-value that passes a sanity range (`EXCHANGE_RATE_MIN_TOMAN` …
+A background updater refreshes that rate from a **fallback chain** of
+free-market sources (`EXCHANGE_RATE_PROVIDER`, a comma list; default
+`tgju,bonbast,navasan`) every `EXCHANGE_RATE_UPDATE_INTERVAL_SECONDS`
+(default 30 min). It tries each source in order and applies the first value
+that passes a sanity range (`EXCHANGE_RATE_MIN_TOMAN` …
 `EXCHANGE_RATE_MAX_TOMAN`); on any failure, parse error, or out-of-range
-value the **admin-set rate is kept untouched** — the bot never shows a wrong
-or zero rate. Disable with `EXCHANGE_RATE_AUTO_ENABLED=false` to run purely on
-the manual button. The provider layer (`app/services/exchange/providers.py`)
-is pluggable — adding navasan/alanchand is one more class. bonbast has no
-official API, so its adapter is intentionally defensive.
+value it moves to the next source, and if all fail the **admin-set rate is
+kept untouched** — the bot never shows a wrong or zero rate.
+
+Built-in sources:
+
+- **tgju** — tgju.org public feed, usually reachable from inside Iran (quotes
+  Rial → auto-converted to Toman). Listed first.
+- **bonbast** — bonbast.com (no official API; often blocked from Iran).
+- **navasan** — paid API quoting Toman directly; set `NAVASAN_API_KEY` to
+  enable, otherwise skipped.
+
+Admins can also tap **🔄 Fetch USD→Toman rate now** in the panel to refresh
+on demand and see whether any source is reachable. Disable auto-update with
+`EXCHANGE_RATE_AUTO_ENABLED=false`. The provider layer
+(`app/services/exchange/providers.py`) is pluggable — adding another source
+is one more class in the registry.
 
 ## Pricing & margin model
 
