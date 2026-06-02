@@ -80,10 +80,12 @@ class ImageOrchestrator:
             free_status = await self.quota_service.get_free_image_status_for_user(user.id)
             if free_status.exhausted:
                 logger.warning("Free image quota exhausted user_id=%s used=%s limit=%s", user_id, free_status.used, free_status.limit)
+                # limit==0 means images are paid-only → a sales message, not a "quota used" one.
+                msg = t(lang, "image.paid_only") if free_status.limit <= 0 else t(lang, "image.free_quota_exhausted", limit=free_status.limit)
                 return ImageResult(
                     image_bytes=None,
                     success=False,
-                    error_message=t(lang, "image.free_quota_exhausted", limit=free_status.limit),
+                    error_message=msg,
                     error_code="free_quota_exhausted",
                     quota_limit=free_status.limit,
                     quota_used=free_status.used,
@@ -208,10 +210,11 @@ class ImageOrchestrator:
             free_status = await self.quota_service.get_free_image_edit_status_for_user(user.id)
             if free_status.exhausted:
                 logger.warning("Free image edit quota exhausted user_id=%s used=%s limit=%s", user_id, free_status.used, free_status.limit)
+                msg = t(lang, "image.edit_paid_only") if free_status.limit <= 0 else t(lang, "image.edit_free_quota_exhausted", limit=free_status.limit)
                 return ImageResult(
                     image_bytes=None,
                     success=False,
-                    error_message=t(lang, "image.edit_free_quota_exhausted", limit=free_status.limit),
+                    error_message=msg,
                     error_code="free_quota_exhausted",
                     quota_limit=free_status.limit,
                     quota_used=free_status.used,

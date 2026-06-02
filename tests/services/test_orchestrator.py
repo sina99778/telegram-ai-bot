@@ -76,7 +76,7 @@ async def test_orchestrator_insufficient_balance(db_session, setup_base_data, mo
     
     res = await orchestrator.process_message(setup_base_data["user_id"], "hi", FeatureName.FLASH_TEXT)
     assert res.success is False
-    assert "not have enough normal credits" in res.text
+    assert "out of normal credits" in res.text  # insufficient-funds upsell copy
 
 @pytest.mark.asyncio
 async def test_orchestrator_ai_failure_refunds_credits(db_session, setup_base_data, mock_router):
