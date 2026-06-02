@@ -114,6 +114,18 @@ def get_vip_access_packs_keyboard(lang: str) -> object:
     return markup(rows)
 
 
+def get_topup_keyboard(lang: str, wallet_type=None) -> object:
+    """A single strong CTA shown when a user runs out of credits mid-action —
+    routes straight to the relevant buy screen for one-tap conversion."""
+    is_vip = getattr(wallet_type, "value", wallet_type) == "VIP"
+    if is_vip:
+        rows = [[InlineKeyboardButton(text=t(lang, "buttons.buy_vip"), callback_data="wallet:buy_vip")]]
+    else:
+        rows = [[InlineKeyboardButton(text=t(lang, "buttons.buy_normal"), callback_data="wallet:buy_normal")]]
+    rows.append([InlineKeyboardButton(text=t(lang, "buttons.top_up"), callback_data="wallet:open")])
+    return markup(rows)
+
+
 def get_payment_method_keyboard(lang: str, code: str) -> object:
     rows = [
         [InlineKeyboardButton(text=t(lang, "buttons.pay_card"), callback_data=f"pay:card:{code}")],

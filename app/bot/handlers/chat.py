@@ -7,6 +7,7 @@ import logging
 from aiogram import Bot, F, Router
 from aiogram.types import Message, ReplyKeyboardRemove
 
+from app.bot.keyboards.inline import get_topup_keyboard
 from app.core.config import settings
 from app.core.enums import FeatureName
 from app.core.i18n import t
@@ -36,13 +37,13 @@ async def send_chunked_message(message: Message, text: str, parse_mode: str = "H
             await message.answer(chunk)
 
 
-async def _safe_edit(message: Message, text: str, *, parse_mode: str = "HTML") -> None:
+async def _safe_edit(message: Message, text: str, *, parse_mode: str = "HTML", reply_markup=None) -> None:
     try:
-        await message.edit_text(text, parse_mode=parse_mode)
+        await message.edit_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
     except Exception as exc:
         logger.warning("HTML edit failed; retrying as plain text chat_id=%s err=%s", message.chat.id, exc)
         try:
-            await message.edit_text(text)
+            await message.edit_text(text, reply_markup=reply_markup)
         except Exception:
             logger.warning("Plain-text edit also failed chat_id=%s", message.chat.id, exc_info=True)
 
@@ -119,6 +120,17 @@ def _lang(user: User | None) -> str:
     return user.language if user and user.language else "fa"
 
 
+_BILLING_ERRORS = {"insufficient_funds", "vip_credits_depleted"}
+
+
+def _failure_markup(result, lang: str):
+    """Attach a one-tap top-up CTA when a private reply failed for billing
+    reasons; otherwise no keyboard."""
+    if getattr(result, "error_message", None) in _BILLING_ERRORS:
+        return get_topup_keyboard(lang, getattr(result, "wallet_type", None))
+    return None
+
+
 @chat_router.message(F.text & ~F.text.startswith("/") & (F.chat.type == "private"))
 async def handle_user_message(message: Message, db_user: User, chat_orchestrator: ChatOrchestrator):
     lang = _lang(db_user)
@@ -173,7 +185,11 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
     try:
         if not result.success:
             await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
-            await _safe_edit(processing_msg, result.text or result.error_message or t(lang, "errors.delivery_failed"))
+            await _safe_edit(
+                processing_msg,
+                result.text or result.error_message or t(lang, "errors.delivery_failed"),
+                reply_markup=_failure_markup(result, lang),
+            )
             return
 
         if len(result.text) <= 4050:
@@ -328,7 +344,11 @@ async def handle_user_photo(message: Message, db_user: User, chat_orchestrator: 
     try:
         if not result.success:
             await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
-            await _safe_edit(processing_msg, result.text or result.error_message or t(lang, "errors.delivery_failed"))
+            await _safe_edit(
+                processing_msg,
+                result.text or result.error_message or t(lang, "errors.delivery_failed"),
+                reply_markup=_failure_markup(result, lang),
+            )
             return
 
         if len(result.text) <= 4050:

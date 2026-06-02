@@ -110,6 +110,32 @@ def test_config_kb_renders_text_settings_as_buttons():
     assert any("card_holder" in lbl and "—" in lbl for lbl in labels)
 
 
+def test_topup_keyboard_routes_to_correct_buy_screen():
+    from app.bot.keyboards.inline import get_topup_keyboard
+    from app.core.enums import WalletType
+
+    normal = _flatten(get_topup_keyboard("en", WalletType.NORMAL))
+    vip = _flatten(get_topup_keyboard("en", WalletType.VIP))
+    assert any(b.callback_data == "wallet:buy_normal" for b in normal)
+    assert any(b.callback_data == "wallet:buy_vip" for b in vip)
+    # both also offer the general wallet entry, and stay byte-safe
+    for kb in (normal, vip):
+        assert any(b.callback_data == "wallet:open" for b in kb)
+        for b in kb:
+            assert len((b.callback_data or "").encode("utf-8")) <= 64
+
+
+def test_failure_markup_only_on_billing_errors():
+    from types import SimpleNamespace
+    from app.bot.handlers.chat import _failure_markup
+    from app.core.enums import WalletType
+
+    insufficient = SimpleNamespace(error_message="insufficient_funds", wallet_type=WalletType.NORMAL)
+    safety = SimpleNamespace(error_message="safety_blocked", wallet_type=None)
+    assert _failure_markup(insufficient, "en") is not None
+    assert _failure_markup(safety, "en") is None
+
+
 def test_config_set_callback_roundtrips_through_registry():
     """The key embedded in the callback must be parseable back to a valid key."""
     from app.services.config.runtime_config import RuntimeConfig
