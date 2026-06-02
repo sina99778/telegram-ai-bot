@@ -80,11 +80,29 @@ def test_premium_icons_on_moves_emoji_to_icon(monkeypatch):
     PremiumEmojiStore.clear_cache()
 
 
-def test_reply_buttons_get_colored():
+def test_reply_buttons_colored_by_function():
+    from app.core.i18n import t
+
     mk = colorize_reply_markup(
-        ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="🪙 Wallet"), KeyboardButton(text="👑 VIP")]])
+        ReplyKeyboardMarkup(keyboard=[[
+            KeyboardButton(text=t("en", "buttons.wallet")),   # money → green
+            KeyboardButton(text=t("en", "buttons.support")),  # help → red
+            KeyboardButton(text=t("en", "buttons.chat")),     # tool → blue
+        ]])
     )
-    assert all(b.style == "primary" for row in mk.keyboard for b in row)
+    by_label = {b.text: b.style for row in mk.keyboard for b in row}
+    assert by_label[t("en", "buttons.wallet")] == "success"
+    assert by_label[t("en", "buttons.support")] == "danger"
+    assert by_label[t("en", "buttons.chat")] == "primary"
+
+
+def test_reply_buttons_colored_in_persian_too():
+    from app.core.i18n import t
+
+    mk = colorize_reply_markup(
+        ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=t("fa", "buttons.vip"))]])
+    )
+    assert mk.keyboard[0][0].style == "success"
 
 
 def test_install_global_coloring_patches_builder():

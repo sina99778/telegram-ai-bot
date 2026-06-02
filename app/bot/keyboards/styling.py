@@ -133,6 +133,37 @@ def colorize_inline_markup(markup: InlineKeyboardMarkup) -> InlineKeyboardMarkup
     return markup
 
 
+# Reply-keyboard buttons carry no callback_data, so they're coloured by their
+# FUNCTION, matched on the emoji-stripped i18n label (both languages). Anything
+# not listed → primary (blue).
+_REPLY_STYLE_BY_KEY: dict[str, str] = {
+    "buttons.wallet": "success",   # money / credits
+    "buttons.vip": "success",      # upgrade
+    "buttons.invite": "success",   # earn rewards
+    "buttons.codes": "success",    # gift codes
+    "buttons.support": "danger",   # help / urgent (🆘)
+    "buttons.admin": "danger",     # sensitive / restricted area
+}
+
+_reply_style_lookup: dict[str, str] | None = None
+
+
+def _reply_style_for_text(text: str) -> str:
+    """Pick a colour for a reply button from its label (emoji-insensitive)."""
+    global _reply_style_lookup
+    if _reply_style_lookup is None:
+        from app.core.i18n import t
+
+        lookup: dict[str, str] = {}
+        for key, style in _REPLY_STYLE_BY_KEY.items():
+            for lang in ("fa", "en"):
+                norm = strip_leading_emoji(t(lang, key))
+                if norm:
+                    lookup[norm] = style
+        _reply_style_lookup = lookup
+    return _reply_style_lookup.get(strip_leading_emoji(text or ""), "primary")
+
+
 def _is_plain_text_reply_button(button) -> bool:
     """A reply button that just sends its text (no web_app / request_* action).
     We only restyle these — colouring the special-action buttons (e.g. the
@@ -157,7 +188,7 @@ def colorize_reply_markup(markup: ReplyKeyboardMarkup) -> ReplyKeyboardMarkup:
                 if not _is_plain_text_reply_button(button):
                     continue
                 if not getattr(button, "style", None):
-                    button.style = "primary"
+                    button.style = _reply_style_for_text(button.text)
                 _apply_premium_icon(button)
     except Exception:
         pass
