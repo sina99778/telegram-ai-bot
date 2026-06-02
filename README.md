@@ -48,24 +48,38 @@ Production-focused Telegram bot built with FastAPI, aiogram, SQLAlchemy, Redis/A
 - Broadcasts run in batches with failure abort protection and an explicit stop control
 - Forced-join checks are configuration-driven instead of hardcoded and log operational failures clearly
 
-## Daily Owner Backup
+## Automatic Owner Backup
 
-- Daily PostgreSQL backups can run automatically in the app process
-- Backups are compressed to `.sql.gz` and sent only to `BACKUP_RECIPIENT_TELEGRAM_ID`
-- If no dedicated backup recipient is configured, the first configured admin in `ADMIN_IDS` is used
-- Backups use Redis lock/day markers to avoid duplicate sends across multiple instances
-- Retention cleanup keeps only the most recent `BACKUP_RETENTION_COUNT` local backup files
-- Raw `.env` and other secret files are not included by default
+- A full PostgreSQL backup runs automatically **every `BACKUP_INTERVAL_HOURS`**
+  (default **12h**) in the app process — set `BACKUP_ENABLED=true`.
+- Backups are compressed to `.sql.gz` and sent only to
+  `BACKUP_RECIPIENT_TELEGRAM_ID` (falls back to the first `ADMIN_IDS` entry).
+- **The local file is deleted after a successful send** (`BACKUP_DELETE_AFTER_SEND=true`)
+  so the server disk never fills — the backup lives in your Telegram chat.
+  `BACKUP_RETENTION_COUNT` then only caps leftovers from *failed* sends.
+- A Redis lock + per-window marker prevents duplicate sends across restarts
+  and multiple instances; the schedule is interval-based (no fixed clock time).
+- Raw `.env` and other secret files are never included.
 
-### Restore Guide
+### Restore
 
-Start with a staging or maintenance window first, then restore from a dump like this:
+A restore helper is built into `install.sh`. Download the `.sql.gz` the bot
+sent you, put it on the server, then:
 
 ```bash
-gunzip -c backup_2026-04-01_03-00.sql.gz | psql -h <host> -p <port> -U <user> -d <database>
+./install.sh restore /path/to/backup_2026-06-01_03-00.sql.gz
+# or, interactively (lists local files / prompts for a path):
+./install.sh restore
 ```
 
-Always verify the target database before restoring, because the dump is created with `--clean --if-exists`.
+It double-confirms before running (the dump uses `--clean --if-exists`, so it
+DROPs and recreates objects). Manual equivalent:
+
+```bash
+gunzip -c backup_…sql.gz | docker compose exec -T db psql -U <user> -d <database>
+```
+
+Take a fresh backup (`./install.sh backup`) before restoring into a live DB.
 
 ## Help UX
 

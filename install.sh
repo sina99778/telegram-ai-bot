@@ -376,6 +376,7 @@ ${BOLD}Commands:${NC}
   logs [SVC]         Tail logs (default: web; try: worker, db, redis)
   migrate            Run alembic upgrade head
   backup             Take a manual gzipped pg_dump backup into ./backups/
+  restore [FILE]     Restore the DB from a .sql.gz/.sql file (interactive if omitted)
   shell [SVC]        Open a shell inside a container (default: web)
   env-setup          Bootstrap or rebuild .env from .env.example
   help               Show this help
@@ -1010,55 +1011,88 @@ menu_list_backups() {
     ls -lh --time=ctime "$dir" 2>/dev/null || ls -lh "$dir"
 }
 
+# Restore a single backup file (.sql.gz or .sql) into the running db.
+# Used by both the menu and `./install.sh restore <file>`.
+_do_restore() {
+    local file="$1"
+    if [ ! -f "$file" ]; then
+        err "Backup file not found: $file"
+        return 1
+    fi
+    warn "About to restore $(basename "$file") into the running database."
+    warn "This DROPs and recreates existing objects (--clean --if-exists in the dump)."
+    warn "It is wise to take a fresh backup first ($0 backup)."
+    if ! menu_confirm "Proceed with restore?"; then
+        info "Cancelled"
+        return 0
+    fi
+    local pg_user pg_db
+    pg_user="$(env_get POSTGRES_USER || echo postgres)"
+    pg_db="$(env_get POSTGRES_DB     || echo postgres)"
+    info "Restoring into database '$pg_db'…"
+    local rc=0
+    if [[ "$file" == *.gz ]]; then
+        gunzip -c "$file" | dc exec -T db psql -U "$pg_user" -d "$pg_db" >/dev/null || rc=$?
+    else
+        dc exec -T db psql -U "$pg_user" -d "$pg_db" < "$file" >/dev/null || rc=$?
+    fi
+    if [ "$rc" -eq 0 ]; then
+        ok "Restore complete."
+    else
+        err "Restore failed (exit $rc); the database may be in a partial state."
+        return 1
+    fi
+}
+
 menu_restore_backup() {
     section "Restore from backup"
     local dir="$PROJECT_ROOT/backups"
-    if [ ! -d "$dir" ]; then
-        err "No backups directory at $dir"
-        return 1
-    fi
     local files=()
-    while IFS= read -r line; do
-        [ -n "$line" ] && files+=("$line")
-    done < <(ls -1t "$dir"/*.sql.gz 2>/dev/null || true)
+    if [ -d "$dir" ]; then
+        while IFS= read -r line; do
+            [ -n "$line" ] && files+=("$line")
+        done < <(ls -1t "$dir"/*.sql.gz 2>/dev/null || true)
+    fi
 
     if [ "${#files[@]}" -eq 0 ]; then
-        info "No .sql.gz backups found in $dir"
-        return 0
+        # Normal when delete-after-send is on: the backup lives in Telegram.
+        info "No local backups found. Download the .sql.gz the bot sent you,"
+        info "put it on the server, and give its full path here."
+        printf "Path to a .sql.gz / .sql file (empty to cancel): "
+        local path; read -r path || return 0
+        [ -z "$path" ] && { info "Cancelled"; return 0; }
+        _do_restore "$path"
+        return $?
     fi
 
-    echo "Available backups (newest first):"
+    echo "Available local backups (newest first):"
     local idx=1
     for f in "${files[@]}"; do
         printf "  %s%2d)%s %s  (%s)\n" "$BOLD" "$idx" "$NC" "$(basename "$f")" "$(du -h "$f" | cut -f1)"
         idx=$((idx + 1))
     done
     echo
-    printf "Pick a number (or 0 to cancel): "
+    printf "Pick a number, or paste a path (0 to cancel): "
     local pick; read -r pick || return 0
     [ "$pick" = "0" ] && { info "Cancelled"; return 0; }
-    if ! [[ "$pick" =~ ^[0-9]+$ ]] || [ "$pick" -lt 1 ] || [ "$pick" -gt "${#files[@]}" ]; then
-        err "Invalid selection"
-        return 1
-    fi
-    local chosen="${files[$((pick - 1))]}"
-    warn "About to restore $(basename "$chosen") into the running database."
-    warn "This will DROP and recreate existing objects (--clean --if-exists in the dump)."
-    if ! menu_confirm "Proceed with restore?"; then
-        info "Cancelled"
-        return 0
-    fi
-
-    local pg_user pg_db
-    pg_user="$(env_get POSTGRES_USER || echo postgres)"
-    pg_db="$(env_get POSTGRES_DB     || echo postgres)"
-    info "Restoring…"
-    if gunzip -c "$chosen" | dc exec -T db psql -U "$pg_user" -d "$pg_db" >/dev/null; then
-        ok "Restore complete"
+    if [[ "$pick" =~ ^[0-9]+$ ]] && [ "$pick" -ge 1 ] && [ "$pick" -le "${#files[@]}" ]; then
+        _do_restore "${files[$((pick - 1))]}"
+    elif [ -f "$pick" ]; then
+        _do_restore "$pick"
     else
-        err "Restore failed; database may be in a partial state"
+        err "Invalid selection / path"
         return 1
     fi
+}
+
+cmd_restore() {
+    section "Restore"
+    local file="${1:-}"
+    if [ -n "$file" ]; then
+        _do_restore "$file"
+        return $?
+    fi
+    menu_restore_backup
 }
 
 menu_advanced() {
@@ -1189,6 +1223,7 @@ main() {
         logs)       cmd_logs        "$@" ;;
         migrate)    cmd_migrate     "$@" ;;
         backup)     cmd_backup      "$@" ;;
+        restore)    cmd_restore     "$@" ;;
         shell)      cmd_shell       "$@" ;;
         env-setup)  cmd_env_setup   "$@" ;;
         menu)       cmd_menu        "$@" ;;

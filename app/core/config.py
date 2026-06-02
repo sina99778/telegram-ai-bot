@@ -151,9 +151,17 @@ class Settings(BaseSettings):
     BROADCAST_FAILURE_THRESHOLD: int = 50
     BROADCAST_MAX_RECIPIENTS: int = 5000
     BACKUP_ENABLED: bool = False
+    # Interval mode: a full backup runs once per BACKUP_INTERVAL_HOURS window
+    # (deduped across instances via Redis). BACKUP_SCHEDULE_TIME/TIMEZONE are
+    # kept only for the filename timestamp; they no longer gate the schedule.
+    BACKUP_INTERVAL_HOURS: int = 12
     BACKUP_SCHEDULE_TIME: str = "03:00"
     BACKUP_TIMEZONE: str = "UTC"
-    BACKUP_RETENTION_COUNT: int = 7
+    # After a successful send the local .sql.gz is deleted so the server disk
+    # never fills up (the backup lives in Telegram). Retention only caps any
+    # leftovers from FAILED sends.
+    BACKUP_DELETE_AFTER_SEND: bool = True
+    BACKUP_RETENTION_COUNT: int = 3
     BACKUP_DIRECTORY: str = "./backups"
     BACKUP_RECIPIENT_TELEGRAM_ID: int = 0
     BACKUP_PGDUMP_PATH: str = "pg_dump"

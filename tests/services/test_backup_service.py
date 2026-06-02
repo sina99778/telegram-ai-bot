@@ -108,3 +108,42 @@ async def test_scheduler_marks_day_after_success(monkeypatch):
     assert ran_first is True
     assert ran_second is False
     assert calls == [999]
+
+
+@pytest.mark.asyncio
+async def test_interval_buckets_advance_every_window(monkeypatch):
+    # Two timestamps in different 12h windows must map to different buckets;
+    # within the same window the bucket is identical (→ deduped).
+    monkeypatch.setattr(settings, "BACKUP_INTERVAL_HOURS", 12)
+    half_day = 12 * 3600
+    base = half_day * 44000  # a window-aligned epoch second
+    t0 = datetime.fromtimestamp(base, tz=timezone.utc)
+    same = datetime.fromtimestamp(base + half_day - 1, tz=timezone.utc)
+    nxt = datetime.fromtimestamp(base + half_day, tz=timezone.utc)
+
+    b0 = DailyBackupService._current_bucket(t0)
+    assert DailyBackupService._current_bucket(same) == b0       # within the window
+    assert DailyBackupService._current_bucket(nxt) == b0 + 1    # next window
+    assert DailyBackupService._interval_seconds() == half_day
+
+
+@pytest.mark.asyncio
+async def test_delete_after_send_removes_local_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "BACKUP_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr(settings, "BACKUP_DELETE_AFTER_SEND", True)
+
+    f = tmp_path / "backup_x.sql.gz"
+    f.write_bytes(b"data")
+    result = BackupResult(path=f, size_bytes=4, created_at=datetime.now(timezone.utc))
+
+    async def fake_create_database_backup(*, created_at):
+        return result
+
+    async def fake_send_backup(*, bot, recipient_id, result):
+        return None  # pretend Telegram accepted it
+
+    monkeypatch.setattr(DailyBackupService, "create_database_backup", fake_create_database_backup)
+    monkeypatch.setattr(DailyBackupService, "send_backup", fake_send_backup)
+
+    await DailyBackupService.create_and_send_backup(bot=object(), recipient_id=1)
+    assert not f.exists()  # local copy removed after a successful send

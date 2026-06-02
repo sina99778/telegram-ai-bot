@@ -72,8 +72,19 @@ class DailyBackupService:
             return time(hour=3, minute=0)
 
     @classmethod
-    def _marker_key(cls, backup_date: str) -> str:
-        return f"ops:backup:daily:{backup_date}"
+    def _interval_seconds(cls) -> int:
+        return max(1, settings.BACKUP_INTERVAL_HOURS) * 3600
+
+    @classmethod
+    def _current_bucket(cls, now: datetime | None = None) -> int:
+        """A monotonically increasing window index, one per interval. The same
+        bucket value across instances/restarts means 'already backed up'."""
+        ts = (now or datetime.now(timezone.utc)).timestamp()
+        return int(ts // cls._interval_seconds())
+
+    @classmethod
+    def _marker_key(cls, bucket: int) -> str:
+        return f"ops:backup:period:{bucket}"
 
     @classmethod
     def _lock_key(cls) -> str:
@@ -82,10 +93,10 @@ class DailyBackupService:
     @classmethod
     async def run_scheduler(cls, bot: Bot) -> None:
         logger.info(
-            "Daily backup scheduler started enabled=%s time=%s timezone=%s",
+            "Backup scheduler started enabled=%s every=%sh delete_after_send=%s",
             settings.BACKUP_ENABLED,
-            settings.BACKUP_SCHEDULE_TIME,
-            settings.BACKUP_TIMEZONE,
+            settings.BACKUP_INTERVAL_HOURS,
+            settings.BACKUP_DELETE_AFTER_SEND,
         )
         while True:
             try:
@@ -93,7 +104,7 @@ class DailyBackupService:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("Daily backup scheduler loop failed")
+                logger.exception("Backup scheduler loop failed")
             await asyncio.sleep(max(settings.BACKUP_CHECK_INTERVAL_SECONDS, 10))
 
     @classmethod
@@ -103,18 +114,14 @@ class DailyBackupService:
 
         recipient_id = cls.resolve_recipient_id()
         if recipient_id is None:
-            logger.warning("Daily backup is enabled but no backup recipient is configured")
+            logger.warning("Backup is enabled but no backup recipient is configured")
             return False
 
-        tz = cls.get_timezone()
-        now_local = datetime.now(tz)
-        scheduled = cls.get_scheduled_time()
-        if now_local.time().replace(second=0, microsecond=0) < scheduled:
-            return False
-
-        backup_date = now_local.date().isoformat()
+        # One backup per interval window. The Redis marker (keyed by the window
+        # bucket) makes this safe across restarts and multiple app instances.
+        bucket = cls._current_bucket()
         client = await cls.get_client()
-        marker_key = cls._marker_key(backup_date)
+        marker_key = cls._marker_key(bucket)
         if await client.exists(marker_key):
             return False
 
@@ -125,8 +132,10 @@ class DailyBackupService:
         try:
             if await client.exists(marker_key):
                 return False
+            now_local = datetime.now(cls.get_timezone())
             result = await cls.create_and_send_backup(bot=bot, recipient_id=recipient_id, now_local=now_local)
-            await client.set(marker_key, result.path.name, ex=int(timedelta(days=3).total_seconds()))
+            # Mark this window done; expire after ~3 windows so Redis stays tidy.
+            await client.set(marker_key, result.path.name, ex=cls._interval_seconds() * 3)
             return True
         finally:
             try:
@@ -155,15 +164,23 @@ class DailyBackupService:
             await cls.send_backup(bot=bot, recipient_id=recipient_id, result=result)
         except Exception:
             logger.exception(
-                "Daily backup delivery failed recipient_id=%s file=%s",
+                "Backup delivery failed recipient_id=%s file=%s (file kept locally for retry)",
                 recipient_id,
                 result.path,
             )
             raise
+        # Delivered to Telegram → drop the local copy so the disk doesn't fill.
+        if settings.BACKUP_DELETE_AFTER_SEND:
+            try:
+                result.path.unlink(missing_ok=True)
+                logger.info("Local backup removed after successful send file=%s", result.path.name)
+            except Exception:
+                logger.warning("Could not remove local backup after send file=%s", result.path, exc_info=True)
+        # Backstop: trim any leftovers from previous FAILED sends.
         await cls.cleanup_old_backups()
         logger.info(
-            "Daily backup completed file=%s size_bytes=%s",
-            result.path,
+            "Backup completed file=%s size_bytes=%s",
+            result.path.name,
             result.size_bytes,
         )
         return result
