@@ -8,6 +8,7 @@ DEFAULT_LANGUAGE = "fa"
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "en": {
+        "buttons.open_app": "🚀 Open App",
         "buttons.chat": "💬 Chat",
         "buttons.search": "🔎 Online Search",
         "buttons.image": "🖼 Image Lab",
@@ -299,8 +300,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "inline.start_required": "⚠️ Please start the bot first by tapping the button below.",
         "inline.daily_limit_reached": "You've used all {limit} inline requests for today. Come back tomorrow or use the bot in private chat.",
         "abuse.inline_rate_limited": "⏳ You're sending inline requests too fast. Please wait a moment.",
+        "webapp.image_only": "Right now I can read images; other file types aren't analyzed yet.",
     },
     "fa": {
+        "buttons.open_app": "🚀 باز کردن اپ",
         "buttons.chat": "💬 چت",
         "buttons.search": "🔎 جستجوی آنلاین",
         "buttons.image": "🖼 آزمایشگاه تصویر",
@@ -592,6 +595,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "inline.start_required": "⚠️ لطفاً ابتدا ربات را با کلیک روی دکمه زیر استارت بزنید.",
         "inline.daily_limit_reached": "سقف {limit} درخواست اینلاین امروز شما تکمیل شده. فردا دوباره تلاش کنید یا از چت خصوصی استفاده کنید.",
         "abuse.inline_rate_limited": "⏳ درخواست‌های اینلاین خیلی سریع ارسال می‌شوند. لطفاً کمی صبر کنید.",
+        "webapp.image_only": "فعلاً فقط می‌توانم عکس را بخوانم؛ سایر فایل‌ها هنوز تحلیل نمی‌شوند.",
     },
 }
 

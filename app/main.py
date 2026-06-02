@@ -281,6 +281,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Telegram Mini App (web UI + its API)
+from app.webapp.routes import webapp_router
+app.include_router(webapp_router)
+
 
 # ──────────────────────────────────────────────
 #  Webhook endpoint

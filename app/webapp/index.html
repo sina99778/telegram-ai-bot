@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>AI Assistant</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg: var(--tg-theme-bg-color, #17212b);
+    --secbg: var(--tg-theme-secondary-bg-color, #232e3c);
+    --text: var(--tg-theme-text-color, #ffffff);
+    --hint: var(--tg-theme-hint-color, #8a9bb0);
+    --link: var(--tg-theme-link-color, #5eb5f7);
+    --btn: var(--tg-theme-button-color, #3390ec);
+    --btntext: var(--tg-theme-button-text-color, #ffffff);
+    --radius: 16px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
+    display:flex;flex-direction:column;height:100vh;overflow:hidden;
+  }
+  .tabs{display:flex;gap:6px;padding:10px;background:var(--secbg)}
+  .tab{flex:1;text-align:center;padding:10px;border-radius:12px;color:var(--hint);font-weight:600;font-size:14px;cursor:pointer;transition:.15s}
+  .tab.active{background:var(--btn);color:var(--btntext)}
+  .page{flex:1;overflow-y:auto;padding:14px;display:none}
+  .page.active{display:block}
+  #chatPage{display:none;flex-direction:column;flex:1;overflow:hidden;padding:0}
+  #chatPage.active{display:flex}
+  #messages{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+  .msg{max-width:82%;padding:10px 13px;border-radius:var(--radius);font-size:15px;line-height:1.45;white-space:pre-wrap;word-wrap:break-word}
+  .msg.me{align-self:flex-end;background:var(--btn);color:var(--btntext);border-bottom-right-radius:5px}
+  .msg.ai{align-self:flex-start;background:var(--secbg);border-bottom-left-radius:5px}
+  .msg.sys{align-self:center;background:transparent;color:var(--hint);font-size:13px}
+  .msg img{max-width:100%;border-radius:10px;margin-bottom:6px;display:block}
+  .composer{display:flex;gap:8px;align-items:flex-end;padding:10px;background:var(--secbg)}
+  .composer textarea{flex:1;resize:none;max-height:120px;min-height:24px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:10px 14px;font-size:15px;font-family:inherit}
+  .iconbtn{width:44px;height:44px;border:none;border-radius:50%;background:var(--btn);color:var(--btntext);font-size:20px;cursor:pointer;flex:0 0 auto;display:flex;align-items:center;justify-content:center}
+  .iconbtn.ghost{background:var(--bg);color:var(--text)}
+  .card{background:var(--secbg);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+  .card h3{margin:0 0 10px;font-size:16px}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+  .row:last-child{border-bottom:none}
+  .row .v{font-weight:700}
+  .bigbtn{display:block;width:100%;padding:14px;border:none;border-radius:14px;background:var(--btn);color:var(--btntext);font-size:15px;font-weight:700;cursor:pointer;margin-top:8px}
+  .muted{color:var(--hint);font-size:13px}
+  .preview{padding:0 10px 8px;background:var(--secbg);display:none}
+  .preview.show{display:flex;align-items:center;gap:10px}
+  .preview img{height:48px;border-radius:8px}
+  .typing{align-self:flex-start;color:var(--hint);font-size:13px;padding:4px 8px}
+  .pill{display:inline-block;background:var(--btn);color:var(--btntext);border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700}
+</style>
+</head>
+<body>
+  <div class="tabs">
+    <div class="tab active" data-tab="chat">💬 Chat</div>
+    <div class="tab" data-tab="wallet">🪙 Wallet</div>
+    <div class="tab" data-tab="profile">👤 Profile</div>
+  </div>
+
+  <!-- CHAT -->
+  <div id="chatPage" class="page active">
+    <div id="messages"></div>
+    <div id="preview" class="preview"></div>
+    <div class="composer">
+      <button class="iconbtn ghost" id="attachBtn" title="Attach">📎</button>
+      <input type="file" id="fileInput" accept="image/*,application/pdf" style="display:none">
+      <textarea id="input" rows="1" placeholder="Message…"></textarea>
+      <button class="iconbtn" id="sendBtn" title="Send">➤</button>
+    </div>
+  </div>
+
+  <!-- WALLET -->
+  <div id="walletPage" class="page">
+    <div class="card">
+      <h3>🪙 Your Wallet</h3>
+      <div class="row"><span>💬 Normal credits</span><span class="v" id="wNormal">…</span></div>
+      <div class="row"><span>👑 VIP credits</span><span class="v" id="wVip">…</span></div>
+      <div class="row"><span>VIP access</span><span class="v" id="wVipStatus">…</span></div>
+    </div>
+    <div class="card">
+      <h3>✨ Get more</h3>
+      <p class="muted">Top up to keep chatting, unlock the Pro model, and generate images.</p>
+      <button class="bigbtn" id="buyBtn">🛒 Open Store</button>
+    </div>
+  </div>
+
+  <!-- PROFILE -->
+  <div id="profilePage" class="page">
+    <div class="card">
+      <h3 id="pName">…</h3>
+      <div class="row"><span>ID</span><span class="v" id="pId">…</span></div>
+      <div class="row"><span>💬 Normal credits</span><span class="v" id="pNormal">…</span></div>
+      <div class="row"><span>👑 VIP credits</span><span class="v" id="pVip">…</span></div>
+      <div class="row"><span>Plan</span><span class="v" id="pPlan">…</span></div>
+    </div>
+    <p class="muted" style="text-align:center">Powered by your AI Assistant ✨</p>
+  </div>
+
+<script>
+(function(){
+  const tg = window.Telegram ? window.Telegram.WebApp : null;
+  if (tg) { tg.ready(); tg.expand(); }
+  const initData = tg ? tg.initData : "";
+
+  const headers = () => ({ "X-Telegram-Init-Data": initData });
+
+  // ── Tabs ──
+  const pages = { chat:"chatPage", wallet:"walletPage", profile:"profilePage" };
+  document.querySelectorAll(".tab").forEach(t=>{
+    t.onclick = ()=>{
+      document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+      t.classList.add("active");
+      Object.values(pages).forEach(id=>document.getElementById(id).classList.remove("active"));
+      document.getElementById(pages[t.dataset.tab]).classList.add("active");
+      if (t.dataset.tab !== "chat") loadMe();
+    };
+  });
+
+  // ── Messages ──
+  const messages = document.getElementById("messages");
+  function addMsg(text, cls, imgUrl){
+    const d = document.createElement("div");
+    d.className = "msg " + cls;
+    if (imgUrl){ const im=document.createElement("img"); im.src=imgUrl; d.appendChild(im); }
+    if (text){ const sp=document.createElement("span"); sp.textContent=text; d.appendChild(sp); }
+    messages.appendChild(d);
+    messages.scrollTop = messages.scrollHeight;
+    return d;
+  }
+  addMsg("👋 Hi! Send a message — or attach an image with 📎 and ask about it.", "sys");
+
+  // ── Attach / preview ──
+  const fileInput = document.getElementById("fileInput");
+  const preview = document.getElementById("preview");
+  let pendingFile = null;
+  document.getElementById("attachBtn").onclick = ()=> fileInput.click();
+  fileInput.onchange = ()=>{
+    pendingFile = fileInput.files[0] || null;
+    preview.innerHTML = "";
+    if (pendingFile){
+      preview.classList.add("show");
+      if (pendingFile.type.startsWith("image/")){
+        const im=document.createElement("img"); im.src=URL.createObjectURL(pendingFile); preview.appendChild(im);
+      }
+      const name=document.createElement("span"); name.className="muted"; name.textContent=pendingFile.name; preview.appendChild(name);
+      const x=document.createElement("button"); x.className="iconbtn ghost"; x.textContent="✕"; x.style.width="32px"; x.style.height="32px";
+      x.onclick=clearFile; preview.appendChild(x);
+    } else { preview.classList.remove("show"); }
+  };
+  function clearFile(){ pendingFile=null; fileInput.value=""; preview.classList.remove("show"); preview.innerHTML=""; }
+
+  // ── Send ──
+  const input = document.getElementById("input");
+  const sendBtn = document.getElementById("sendBtn");
+  input.addEventListener("input", ()=>{ input.style.height="auto"; input.style.height=Math.min(input.scrollHeight,120)+"px"; });
+
+  async function send(){
+    const text = input.value.trim();
+    if (!text && !pendingFile) return;
+    sendBtn.disabled = true;
+    const imgUrl = (pendingFile && pendingFile.type.startsWith("image/")) ? URL.createObjectURL(pendingFile) : null;
+    addMsg(text, "me", imgUrl);
+    input.value=""; input.style.height="auto";
+    const fd = new FormData();
+    fd.append("message", text);
+    if (pendingFile) fd.append("file", pendingFile);
+    clearFile();
+    const typing = addMsg("💭 thinking…", "typing");
+    try{
+      const r = await fetch("/webapp/api/chat", { method:"POST", headers: headers(), body: fd });
+      const j = await r.json().catch(()=>({reply:"⚠️ Network error"}));
+      typing.remove();
+      addMsg(j.reply || "⚠️ No response", "ai");
+      if (j.success === false && (j.error==="insufficient_funds" || j.error==="vip_credits_depleted")){
+        addMsg("🪙 Tap Wallet above to top up.", "sys");
+      }
+    }catch(e){ typing.remove(); addMsg("⚠️ Could not reach the server.", "ai"); }
+    finally{ sendBtn.disabled=false; }
+  }
+  sendBtn.onclick = send;
+  input.addEventListener("keydown", e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(); }});
+
+  // ── Wallet / profile ──
+  async function loadMe(){
+    try{
+      const r = await fetch("/webapp/api/me", { headers: headers() });
+      if(!r.ok) return;
+      const m = await r.json();
+      document.getElementById("wNormal").textContent = m.normal_credits;
+      document.getElementById("wVip").textContent = m.vip_credits;
+      document.getElementById("wVipStatus").textContent = m.has_vip ? "✅ Active" : "—";
+      document.getElementById("pName").textContent = "👤 " + m.name;
+      document.getElementById("pId").textContent = m.telegram_id;
+      document.getElementById("pNormal").textContent = m.normal_credits;
+      document.getElementById("pVip").textContent = m.vip_credits;
+      document.getElementById("pPlan").textContent = m.has_vip ? "👑 VIP" : "Free";
+    }catch(e){}
+  }
+  // The store lives in the bot chat (payments), so close the app and point there.
+  document.getElementById("buyBtn").onclick = ()=>{ if(tg){ tg.close(); } };
+
+  loadMe();
+})();
+</script>
+</body>
+</html>

@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     BOT_TOKEN: str = ""
     WEBHOOK_URL: str = ""
     WEBHOOK_SECRET: str = ""
+
+    # ── Mini App (Telegram Web App) ──
+    # Public HTTPS URL of the mini app. If empty it is derived from WEBHOOK_URL
+    # (same host, /webapp path). The "Open App" button shows only when set.
+    WEBAPP_URL: str = ""
+    WEBAPP_CHAT_MAX_FILE_BYTES: int = 8 * 1024 * 1024  # 8 MB upload cap
+    WEBAPP_INITDATA_MAX_AGE_SECONDS: int = 86400       # reject stale initData (replay)
     
     # ── Payments ──────────────────────────────
     NOWPAYMENTS_API_KEY: str = ""
@@ -198,6 +205,19 @@ class Settings(BaseSettings):
     @property
     def backup_directory_path(self) -> Path:
         return Path(self.BACKUP_DIRECTORY).expanduser()
+
+    @property
+    def webapp_url(self) -> str:
+        """Public URL of the mini app — explicit WEBAPP_URL, else derived from
+        the webhook host (same scheme+host, /webapp path)."""
+        if self.WEBAPP_URL:
+            return self.WEBAPP_URL.rstrip("/")
+        if self.WEBHOOK_URL:
+            from urllib.parse import urlsplit, urlunsplit
+            p = urlsplit(self.WEBHOOK_URL)
+            if p.scheme and p.netloc:
+                return urlunsplit((p.scheme, p.netloc, "/webapp", "", ""))
+        return ""
 
     # ── Pydantic configuration ────────────────
     model_config = SettingsConfigDict(

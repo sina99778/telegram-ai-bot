@@ -140,6 +140,29 @@ on demand and see whether any source is reachable. Disable auto-update with
 (`app/services/exchange/providers.py`) is pluggable — adding another source
 is one more class in the registry.
 
+## Mini App (Telegram Web App)
+
+A built-in Web App (`app/webapp/`) gives a modern, theme-aware UI right
+inside Telegram — with a **chat page that supports image/file upload**,
+plus Wallet and Profile tabs.
+
+- **Open button**: a `🚀 Open App` button appears in the main menu when a
+  public HTTPS url is available (`WEBAPP_URL`, or auto-derived from
+  `WEBHOOK_URL` as `https://<host>/webapp`).
+- **Pages**: 💬 Chat (send text, attach an image and ask about it),
+  🪙 Wallet (live balances), 👤 Profile.
+- **Auth**: every API call carries Telegram `initData`, verified server-side
+  by HMAC-SHA256 against the bot token with a freshness window
+  (`app/webapp/auth.py`) — the only thing that authenticates the caller.
+- **Endpoints**: `GET /webapp` (the app), `GET /webapp/api/me` (balances),
+  `POST /webapp/api/chat` (multipart text + optional image → AI reply,
+  billed through the same `ChatOrchestrator`, so credits/limits apply).
+- The UI uses Telegram theme variables, so it matches the user's app theme
+  and looks native (real colored buttons — impossible in plain chat).
+
+Image uploads go to the vision model; non-image files are accepted but not
+analyzed yet. Requires `python-multipart`.
+
 ## Premium (custom) emoji
 
 Telegram renders animated **custom emoji** from a bot only when the **bot
