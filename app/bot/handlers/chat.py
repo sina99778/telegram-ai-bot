@@ -120,6 +120,20 @@ def _lang(user: User | None) -> str:
     return user.language if user and user.language else "fa"
 
 
+async def _record_failure_safe(subject_id: int) -> None:
+    """Record an abuse-guard failure WITHOUT ever blocking the reply path.
+
+    The user must always get feedback in the placeholder; a slow/unavailable
+    Redis here must never leave them staring at a frozen 'thinking…'."""
+    try:
+        await asyncio.wait_for(
+            AbuseGuardService.record_failure(subject="private_chat", subject_id=subject_id),
+            timeout=5,
+        )
+    except Exception:
+        logger.warning("record_failure was slow/failed (ignored)", exc_info=True)
+
+
 _BILLING_ERRORS = {"insufficient_funds", "vip_credits_depleted"}
 
 
@@ -171,25 +185,25 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
         )
     except asyncio.TimeoutError:
         logger.warning("Private chat: AI timeout user_id=%s chat_id=%s", db_user.id, message.chat.id)
-        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
         await _safe_edit(processing_msg, t(lang, "errors.ai_timeout"))
+        await _record_failure_safe(db_user.id)
         return
     except Exception:
         # Any non-timeout failure must still update the placeholder — never
         # leave the user staring at a frozen "thinking…" message.
         logger.exception("Private chat: unexpected error user_id=%s chat_id=%s", db_user.id, message.chat.id)
-        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
         await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
+        await _record_failure_safe(db_user.id)
         return
 
     try:
         if not result.success:
-            await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
             await _safe_edit(
                 processing_msg,
                 result.text or result.error_message or t(lang, "errors.delivery_failed"),
                 reply_markup=_failure_markup(result, lang),
             )
+            await _record_failure_safe(db_user.id)
             return
 
         if len(result.text) <= 4050:
@@ -198,8 +212,8 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
             await processing_msg.delete()
             await send_chunked_message(message, result.text)
     except Exception:
-        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
         await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
+        await _record_failure_safe(db_user.id)
 
 
 @chat_router.message(F.text & ~F.text.startswith("/") & F.chat.type.in_({"group", "supergroup"}))
@@ -332,23 +346,23 @@ async def handle_user_photo(message: Message, db_user: User, chat_orchestrator: 
         )
     except asyncio.TimeoutError:
         logger.warning("Vision: AI timeout user_id=%s chat_id=%s", db_user.id, message.chat.id)
-        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
         await _safe_edit(processing_msg, t(lang, "errors.ai_timeout"))
+        await _record_failure_safe(db_user.id)
         return
     except Exception:
         logger.exception("Vision: unexpected error user_id=%s chat_id=%s", db_user.id, message.chat.id)
-        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
         await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
+        await _record_failure_safe(db_user.id)
         return
 
     try:
         if not result.success:
-            await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
             await _safe_edit(
                 processing_msg,
                 result.text or result.error_message or t(lang, "errors.delivery_failed"),
                 reply_markup=_failure_markup(result, lang),
             )
+            await _record_failure_safe(db_user.id)
             return
 
         if len(result.text) <= 4050:
@@ -357,8 +371,8 @@ async def handle_user_photo(message: Message, db_user: User, chat_orchestrator: 
             await processing_msg.delete()
             await send_chunked_message(message, result.text)
     except Exception:
-        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
         await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
+        await _record_failure_safe(db_user.id)
 
 
 @chat_router.message(F.photo & F.chat.type.in_({"group", "supergroup"}))
