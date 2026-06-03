@@ -71,6 +71,62 @@ def _extract_total_tokens(response) -> int:
     return int(prompt) + int(candidates)
 
 
+def _build_gemini_contents(messages: List[AIMessage], image_bytes: Optional[bytes] = None):
+    """Convert internal AIMessages into Gemini ``contents`` + extra system text.
+
+    Enforces Gemini's hard rules so a request can't 400 (which used to make the
+    chat appear "frozen" until /new):
+
+    * ``system`` messages (e.g. an injected conversation summary) are pulled out
+      — Gemini takes system text via ``config.system_instruction``, NOT as a
+      content turn. (Mapping them to a ``model`` turn was the freeze bug.)
+    * The first turn MUST be ``user`` — any leading ``model`` turns (which happen
+      when the sliding window trims the oldest user message) are dropped.
+    * Consecutive same-role turns are merged so roles strictly alternate.
+
+    Returns ``(contents, extra_system_text)``.
+    """
+    system_chunks: list[str] = []
+    turns: list[list] = []  # [role, content, image_bytes|None]
+    for msg in messages:
+        role_raw = (msg.role or "").lower()
+        if role_raw == "system":
+            if msg.content:
+                system_chunks.append(msg.content)
+            continue
+        role = "user" if role_raw == "user" else "model"
+        turns.append([role, msg.content or "", getattr(msg, "image_bytes", None)])
+
+    # Attach the top-level image to the most recent user turn.
+    if image_bytes:
+        for turn in reversed(turns):
+            if turn[0] == "user":
+                turn[2] = turn[2] or image_bytes
+                break
+
+    # Gemini requires the conversation to start with a user turn.
+    while turns and turns[0][0] != "user":
+        turns.pop(0)
+
+    # Merge consecutive same-role turns (keep images on their own turn).
+    merged: list[list] = []
+    for role, content, img in turns:
+        if merged and merged[-1][0] == role and not img and not merged[-1][2]:
+            merged[-1][1] = (merged[-1][1] + "\n\n" + content).strip()
+        else:
+            merged.append([role, content, img])
+
+    contents = []
+    for role, content, img in merged:
+        parts = []
+        if img:
+            parts.append(types.Part.from_bytes(data=img, mime_type="image/jpeg"))
+        parts.append(types.Part.from_text(text=content))
+        contents.append(types.Content(role=role, parts=parts))
+
+    return contents, ("\n\n".join(system_chunks) if system_chunks else "")
+
+
 def _check_response_safety(response) -> None:
     """Check the Gemini response for safety blocks and raise SafetyBlockedError if found."""
     # Check prompt-level block
@@ -154,22 +210,9 @@ class AntigravityProvider(BaseAIProvider):
         if not self.client:
             raise RuntimeError("GEMINI_API_KEY is missing in .env")
 
-        contents = []
-        for i, msg in enumerate(messages):
-            role = "user" if msg.role.lower() == "user" else "model"
-            parts = []
-
-            # Check for inline image_bytes on the message itself
-            msg_image = getattr(msg, "image_bytes", None)
-            # For the LAST user message, also accept the top-level image_bytes param
-            is_last_user = (role == "user" and i == len(messages) - 1)
-            effective_image = msg_image or (image_bytes if is_last_user else None)
-
-            if effective_image:
-                parts.append(types.Part.from_bytes(data=effective_image, mime_type="image/jpeg"))
-
-            parts.append(types.Part.from_text(text=msg.content))
-            contents.append(types.Content(role=role, parts=parts))
+        contents, extra_system = _build_gemini_contents(messages, image_bytes)
+        if extra_system:
+            system_instruction = f"{system_instruction}\n\n{extra_system}" if system_instruction else extra_system
 
         config = types.GenerateContentConfig()
         if system_instruction:
