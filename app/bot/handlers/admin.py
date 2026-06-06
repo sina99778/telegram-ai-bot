@@ -810,6 +810,50 @@ async def process_join_channel(message: Message, session: AsyncSession, state: F
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
+# ── AI connection diagnostic ──────────────────────────────────────────────────
+
+@admin_router.callback_query(F.data == "admin:diag:ai")
+async def cb_admin_diag_ai(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    """Call the model with a tiny prompt and surface the RESULT or the EXACT
+    error right in Telegram — so the cause (bad model name, API key, quota, or
+    no network route to Google) is visible without shell/log access."""
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    model = settings.GEMINI_MODEL_NORMAL
+
+    await callback.answer()
+    await callback.message.edit_text(t(lang, "admin.diag.testing", model=model), parse_mode="HTML")
+
+    from app.services.ai.antigravity import AntigravityProvider
+    from app.services.ai.provider import AIMessage
+
+    try:
+        provider = AntigravityProvider()
+        response = await asyncio.wait_for(
+            provider.generate_text(
+                model_name=model,
+                messages=[AIMessage(role="user", content="Reply with the single word: OK")],
+                system_instruction="You are a health check. Reply with one short word.",
+                max_tokens=20,
+            ),
+            timeout=30,
+        )
+        reply_preview = (response.text or "").strip()[:80] or "—"
+        text = t(lang, "admin.diag.ok", model=model, tokens=response.tokens_used, reply=html.escape(reply_preview))
+    except Exception as exc:  # noqa: BLE001 — we WANT to show whatever broke
+        err = f"{type(exc).__name__}: {exc}"
+        logger.warning("Admin AI diagnostic failed model=%s err=%s", model, err)
+        text = t(lang, "admin.diag.fail", model=model, error=html.escape(err[:600]))
+
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=get_back_to_admin_kb(lang, back="admin:config"),
+    )
+
+
 def _pack_label(lang: str, code: str | None) -> str:
     if not code:
         return "?"

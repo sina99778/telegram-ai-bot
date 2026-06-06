@@ -103,6 +103,9 @@ def get_admin_config_kb(lang: str) -> object:
                 InlineKeyboardButton(text=t(lang, "admin.config.cat.join"), callback_data="admin:join"),
             ],
             [
+                InlineKeyboardButton(text=t(lang, "admin.diag.ai_btn"), callback_data="admin:diag:ai"),
+            ],
+            [
                 InlineKeyboardButton(text=t(lang, "buttons.refresh"), callback_data="admin:config"),
                 InlineKeyboardButton(text=t(lang, "buttons.home"), callback_data="admin:main"),
             ],
