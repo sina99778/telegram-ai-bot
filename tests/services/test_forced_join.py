@@ -25,8 +25,22 @@ def test_normalize_channel_variants():
     assert _normalize_channel("@mychannel") == "@mychannel"
     assert _normalize_channel("https://t.me/mychannel") == "@mychannel"
     assert _normalize_channel("t.me/mychannel/") == "@mychannel"
+    assert _normalize_channel("t.me/mychannel?start=x") == "@mychannel"  # path/query dropped
     assert _normalize_channel("-1001234567890") == "-1001234567890"  # numeric id kept
     assert _normalize_channel("   ") == ""
+    # Private invite links can't be used for membership checks → rejected.
+    assert _normalize_channel("https://t.me/+AbCdEf123") == ""
+    assert _normalize_channel("t.me/joinchat/XXXX") == ""
+
+
+def test_is_valid_channel():
+    from app.bot.handlers.admin import _is_valid_channel, _normalize_channel
+
+    assert _is_valid_channel(_normalize_channel("mychannel")) is True
+    assert _is_valid_channel(_normalize_channel("-1001234567890")) is True
+    assert _is_valid_channel(_normalize_channel("https://t.me/+AbCdEf123")) is False  # ""
+    assert _is_valid_channel("@a") is False  # too short
+    assert _is_valid_channel("@1bad") is False  # must start with a letter
 
 
 def test_join_kb_shows_clear_only_when_channel_set():

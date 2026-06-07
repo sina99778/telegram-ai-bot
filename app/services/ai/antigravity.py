@@ -79,7 +79,7 @@ def _extract_total_tokens(response) -> int:
     if not meta:
         return 0
     total = getattr(meta, "total_token_count", None)
-    if total:
+    if total is not None:
         return int(total)
     prompt = getattr(meta, "prompt_token_count", 0) or 0
     candidates = getattr(meta, "candidates_token_count", 0) or 0
@@ -286,7 +286,7 @@ class AntigravityProvider(BaseAIProvider):
             # Check for safety blocks
             _check_response_safety(result)
 
-            for candidate in result.candidates:
+            for candidate in (result.candidates or []):
                 if candidate.content and candidate.content.parts:
                     for part in candidate.content.parts:
                         if part.inline_data and part.inline_data.data:
@@ -319,7 +319,7 @@ class AntigravityProvider(BaseAIProvider):
             # Check for safety blocks
             _check_response_safety(result)
 
-            for candidate in result.candidates:
+            for candidate in (result.candidates or []):
                 if candidate.content and candidate.content.parts:
                     for part in candidate.content.parts:
                         if part.inline_data and part.inline_data.data:

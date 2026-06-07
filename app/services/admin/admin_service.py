@@ -58,7 +58,7 @@ class AdminService:
             amount=amount,
             entry_type=LedgerEntryType.ADMIN_ADJUSTMENT,
             reference_type="admin_grant",
-            reference_id=f"admin_{admin_telegram_id}_{wallet_type.value.lower()}_{uuid.uuid4().hex[:8]}",
+            reference_id=f"admin_{admin_telegram_id}_{wallet_type.value.lower()}_{uuid.uuid4().hex}",
             description=f"Admin {admin_telegram_id} granted {amount} {wallet_type.value.lower()} credits",
             wallet_type=wallet_type,
         )
@@ -75,7 +75,7 @@ class AdminService:
             user_id=user.id,
             days=days,
             reference_type="admin_vip_grant",
-            reference_id=f"vip_{admin_telegram_id}_{uuid.uuid4().hex[:8]}",
+            reference_id=f"vip_{admin_telegram_id}_{uuid.uuid4().hex}",
             description=f"Admin {admin_telegram_id} granted VIP access for {days} days",
         )
 

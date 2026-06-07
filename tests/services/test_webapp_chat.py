@@ -133,3 +133,56 @@ def test_index_served_with_no_store(client):
     assert r.status_code == 200
     assert "no-store" in r.headers.get("cache-control", "")
     assert "<html" in r.text.lower()
+
+
+def test_looks_like_image_sniffs_bytes_not_content_type():
+    assert webapp_routes._looks_like_image(b"\xff\xd8\xff\xe0JFIF") is True   # JPEG
+    assert webapp_routes._looks_like_image(b"\x89PNG\r\n\x1a\n....") is True  # PNG
+    assert webapp_routes._looks_like_image(b"RIFF\x00\x00\x00\x00WEBP") is True
+    assert webapp_routes._looks_like_image(b"#!/bin/bash\nrm -rf /") is False  # spoofed script
+    assert webapp_routes._looks_like_image(b"") is False
+
+
+def test_safe_error_never_leaks_raw_exception_text():
+    # Known codes pass through; anything else collapses to a generic code.
+    assert webapp_routes._safe_error("insufficient_funds") == "insufficient_funds"
+    assert webapp_routes._safe_error("quota_exhausted") == "quota_exhausted"
+    assert webapp_routes._safe_error("RuntimeError: AI Generation failed: 500 boom") == "ai_error"
+    assert webapp_routes._safe_error(None) is None
+
+
+def test_chat_blocks_banned_user(client, monkeypatch):
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class BannedUser:
+        id = 1
+        telegram_id = 777
+        username = None
+        first_name = "T"
+        language = "en"
+        is_banned = True
+
+    class FakeRepo:
+        def __init__(self, _s):
+            pass
+
+        async def get_or_create_user(self, *a, **k):
+            return BannedUser()
+
+    monkeypatch.setattr(webapp_routes, "AsyncSessionLocal", lambda: FakeSession())
+    monkeypatch.setattr(webapp_routes, "ChatRepository", FakeRepo)
+
+    r = client.post(
+        "/webapp/api/chat",
+        headers={"X-Telegram-Init-Data": _init()},
+        data={"message": "hi"},
+    )
+    j = r.json()
+    assert j["success"] is False
+    assert j["error"] == "banned"
+    assert j["reply"]

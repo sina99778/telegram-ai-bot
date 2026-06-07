@@ -15,11 +15,10 @@
     --btn: var(--tg-theme-button-color, #3390ec);
     --btntext: var(--tg-theme-button-text-color, #ffffff);
     --radius: 18px;
-    /* Brand gradients — these give real, controllable colour the native
-       Telegram keyboard can never have. */
     --grad-brand: linear-gradient(135deg,#7b5cff 0%,#3390ec 55%,#27c4ff 100%);
     --grad-accent: linear-gradient(135deg,#ff7a59 0%,#ff4d8d 100%);
     --grad-gold: linear-gradient(135deg,#f7b733 0%,#fc4a1a 100%);
+    --code-bg: #0c1118;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%}
@@ -28,12 +27,11 @@
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
     display:flex;flex-direction:column;height:100vh;overflow:hidden;
   }
-  /* ── Header ── */
   .appbar{display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--grad-brand);color:#fff;box-shadow:0 2px 14px rgba(0,0,0,.25)}
   .appbar .logo{width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font-size:17px}
   .appbar .title{font-weight:800;font-size:16px;letter-spacing:.2px}
-  .appbar .ver{margin-left:auto;font-size:10px;opacity:.8;background:rgba(255,255,255,.16);padding:3px 8px;border-radius:20px}
-  /* ── Tabs ── */
+  .appbar .credits{margin-left:auto;font-size:12px;font-weight:700;background:rgba(255,255,255,.16);padding:4px 10px;border-radius:20px;white-space:nowrap}
+  .appbar .ver{font-size:10px;opacity:.75;padding-left:4px}
   .tabs{display:flex;gap:6px;padding:10px;background:var(--secbg)}
   .tab{flex:1;text-align:center;padding:11px 8px;border-radius:13px;color:var(--hint);font-weight:700;font-size:14px;cursor:pointer;transition:.18s;border:1px solid transparent}
   .tab.active{background:var(--grad-brand);color:#fff;box-shadow:0 4px 14px rgba(51,144,236,.4)}
@@ -42,13 +40,20 @@
   #chatPage{display:none;flex-direction:column;flex:1;overflow:hidden;padding:0}
   #chatPage.active{display:flex}
   #messages{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
-  .msg{max-width:84%;padding:11px 14px;border-radius:var(--radius);font-size:15px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;animation:pop .18s ease}
+  .msg{max-width:84%;padding:11px 14px;border-radius:var(--radius);font-size:15px;line-height:1.5;word-wrap:break-word;overflow-wrap:anywhere;animation:pop .18s ease}
   @keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-  .msg.me{align-self:flex-end;background:var(--grad-brand);color:#fff;border-bottom-right-radius:6px;box-shadow:0 3px 12px rgba(51,144,236,.35)}
+  .msg.me{align-self:flex-end;background:var(--grad-brand);color:#fff;border-bottom-right-radius:6px;box-shadow:0 3px 12px rgba(51,144,236,.35);white-space:pre-wrap}
   .msg.ai{align-self:flex-start;background:var(--secbg);border-bottom-left-radius:6px}
-  .msg.sys{align-self:center;background:transparent;color:var(--hint);font-size:13px;text-align:center;max-width:92%}
+  .msg.sys{align-self:center;background:transparent;color:var(--hint);font-size:13px;text-align:center;max-width:92%;white-space:pre-wrap}
   .msg.err{align-self:center;background:rgba(255,77,141,.14);color:#ff9bbb;font-size:13px;border:1px solid rgba(255,77,141,.3);max-width:92%}
   .msg img{max-width:100%;border-radius:12px;margin-bottom:6px;display:block}
+  .msg b{font-weight:800}
+  .inlinecode{background:rgba(255,255,255,.10);padding:1px 6px;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+  .codewrap{position:relative;margin:8px 0}
+  .codewrap pre{margin:0;background:var(--code-bg);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:12px 12px 12px;overflow-x:auto}
+  .codewrap code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;color:#e6edf3;white-space:pre}
+  .copybtn{position:absolute;top:6px;right:6px;border:none;border-radius:8px;background:rgba(255,255,255,.12);color:#fff;font-size:12px;padding:4px 8px;cursor:pointer}
+  .copybtn:active{transform:scale(.92)}
   .composer{display:flex;gap:8px;align-items:flex-end;padding:10px;background:var(--secbg)}
   .composer textarea{flex:1;resize:none;max-height:120px;min-height:24px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,.10);border-radius:20px;padding:11px 15px;font-size:15px;font-family:inherit}
   .iconbtn{width:46px;height:46px;border:none;border-radius:50%;background:var(--grad-brand);color:#fff;font-size:20px;cursor:pointer;flex:0 0 auto;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(51,144,236,.4);transition:transform .12s}
@@ -61,9 +66,7 @@
   .row:last-child{border-bottom:none}
   .row .v{font-weight:800}
   .chip{display:inline-block;padding:3px 10px;border-radius:20px;font-size:13px;font-weight:800;color:#fff}
-  .chip.blue{background:var(--grad-brand)}
-  .chip.gold{background:var(--grad-gold)}
-  .chip.mut{background:rgba(255,255,255,.12);color:var(--hint)}
+  .chip.blue{background:var(--grad-brand)}.chip.gold{background:var(--grad-gold)}.chip.mut{background:rgba(255,255,255,.12);color:var(--hint)}
   .bigbtn{display:block;width:100%;padding:15px;border:none;border-radius:15px;background:var(--grad-accent);color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-top:8px;box-shadow:0 5px 16px rgba(255,77,141,.4);transition:transform .12s}
   .bigbtn:active{transform:scale(.98)}
   .muted{color:var(--hint);font-size:13px;line-height:1.5}
@@ -82,7 +85,8 @@
   <div class="appbar">
     <div class="logo">🤖</div>
     <div class="title">AI Assistant</div>
-    <div class="ver" id="ver">v2</div>
+    <div class="credits" id="credits">…</div>
+    <div class="ver" id="ver">v3</div>
   </div>
 
   <div class="tabs">
@@ -99,7 +103,7 @@
     <div id="preview" class="preview"></div>
     <div class="composer">
       <button class="iconbtn ghost" id="attachBtn" title="Attach">📎</button>
-      <input type="file" id="fileInput" accept="image/*,application/pdf" style="display:none">
+      <input type="file" id="fileInput" accept="image/*" style="display:none">
       <textarea id="input" rows="1" placeholder="Message…"></textarea>
       <button class="iconbtn" id="sendBtn" title="Send">➤</button>
     </div>
@@ -135,18 +139,30 @@
 <script>
 (function(){
   const tg = window.Telegram ? window.Telegram.WebApp : null;
-  if (tg) { tg.ready(); tg.expand(); }
+  if (tg) {
+    tg.ready(); tg.expand();
+    try { tg.setHeaderColor && tg.setHeaderColor("#5b6cff"); } catch(e){}
+  }
   const initData = tg ? (tg.initData || "") : "";
   const headers = () => ({ "X-Telegram-Init-Data": initData });
 
+  function haptic(kind){
+    try{
+      if(!tg || !tg.HapticFeedback) return;
+      if(kind==="success"||kind==="error"||kind==="warning") tg.HapticFeedback.notificationOccurred(kind);
+      else tg.HapticFeedback.impactOccurred(kind||"light");
+    }catch(e){}
+  }
+
   const banner = document.getElementById("banner");
-  function showBanner(text){ banner.textContent = text; banner.classList.add("show"); }
-  function hideBanner(){ banner.classList.remove("show"); }
+  const showBanner = t => { banner.textContent = t; banner.classList.add("show"); };
+  const hideBanner = () => banner.classList.remove("show");
 
   // ── Tabs ──
   const pages = { chat:"chatPage", wallet:"walletPage", profile:"profilePage" };
   document.querySelectorAll(".tab").forEach(t=>{
     t.onclick = ()=>{
+      haptic("light");
       document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
       t.classList.add("active");
       Object.values(pages).forEach(id=>document.getElementById(id).classList.remove("active"));
@@ -155,50 +171,84 @@
     };
   });
 
+  // ── Safe markdown rendering (code fences, inline code, **bold**) ──
+  // Everything is built with textContent / text nodes → no HTML injection.
+  function appendInline(parent, line){
+    const re = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+    let last = 0, m;
+    while ((m = re.exec(line)) !== null){
+      if (m.index > last) parent.appendChild(document.createTextNode(line.slice(last, m.index)));
+      const tok = m[0];
+      if (tok[0] === "`"){ const c=document.createElement("code"); c.className="inlinecode"; c.textContent=tok.slice(1,-1); parent.appendChild(c); }
+      else { const b=document.createElement("b"); b.textContent=tok.slice(2,-2); parent.appendChild(b); }
+      last = m.index + tok.length;
+    }
+    if (last < line.length) parent.appendChild(document.createTextNode(line.slice(last)));
+  }
+  function appendInlineBlock(parent, text){
+    const lines = text.split("\n");
+    lines.forEach((ln, i)=>{ appendInline(parent, ln); if (i < lines.length-1) parent.appendChild(document.createElement("br")); });
+  }
+  function renderMarkdown(container, text){
+    const parts = String(text).split("```");
+    parts.forEach((part, idx)=>{
+      if (idx % 2 === 1){
+        // fenced code block — drop an optional leading language label line
+        let code = part;
+        const m = part.match(/^([A-Za-z0-9_+#.\-]{1,20})\n([\s\S]*)$/);
+        if (m) code = m[2];
+        code = code.replace(/\n$/, "");
+        const wrap = document.createElement("div"); wrap.className="codewrap";
+        const pre = document.createElement("pre"); const c = document.createElement("code");
+        c.textContent = code; pre.appendChild(c); wrap.appendChild(pre);
+        const btn = document.createElement("button"); btn.className="copybtn"; btn.textContent="📋 copy";
+        btn.onclick = ()=>{
+          try{ navigator.clipboard && navigator.clipboard.writeText(code); }catch(e){}
+          btn.textContent="✓ copied"; haptic("success");
+          setTimeout(()=>btn.textContent="📋 copy", 1200);
+        };
+        wrap.appendChild(btn); container.appendChild(wrap);
+      } else if (part){
+        const span = document.createElement("span"); appendInlineBlock(span, part); container.appendChild(span);
+      }
+    });
+  }
+
   // ── Messages ──
   const messages = document.getElementById("messages");
   function addMsg(text, cls, imgUrl){
     const d = document.createElement("div");
     d.className = "msg " + cls;
     if (imgUrl){ const im=document.createElement("img"); im.src=imgUrl; d.appendChild(im); }
-    if (text){ const sp=document.createElement("span"); sp.textContent=text; d.appendChild(sp); }
+    if (text){
+      if (cls === "ai") renderMarkdown(d, text);
+      else { const sp=document.createElement("span"); sp.textContent=text; d.appendChild(sp); }
+    }
     messages.appendChild(d);
     messages.scrollTop = messages.scrollHeight;
     return d;
   }
   function addTyping(){
-    const d = document.createElement("div");
-    d.className = "typing";
-    d.innerHTML = "<b></b><b></b><b></b>";
-    messages.appendChild(d);
-    messages.scrollTop = messages.scrollHeight;
-    return d;
+    const d = document.createElement("div"); d.className="typing"; d.innerHTML="<b></b><b></b><b></b>";
+    messages.appendChild(d); messages.scrollTop = messages.scrollHeight; return d;
   }
   addMsg("👋 Hi! Send a message — or attach an image with 📎 and ask about it.", "sys");
-
-  // If we have no initData, every API call will 401. Tell the user up-front
-  // instead of letting them hit a wall on the first message.
-  if (!initData){
-    showBanner("⚠️ Open this app from the bot (tap 🚀 Open App) so it can sign you in.");
-  }
+  if (!initData) showBanner("⚠️ Open this app from the bot (tap 🚀 Open App) so it can sign you in.");
 
   // ── Attach / preview ──
   const fileInput = document.getElementById("fileInput");
   const preview = document.getElementById("preview");
   let pendingFile = null;
-  document.getElementById("attachBtn").onclick = ()=> fileInput.click();
+  document.getElementById("attachBtn").onclick = ()=>{ haptic("light"); fileInput.click(); };
   fileInput.onchange = ()=>{
     pendingFile = fileInput.files[0] || null;
     preview.innerHTML = "";
     if (pendingFile){
       preview.classList.add("show");
-      if (pendingFile.type.startsWith("image/")){
-        const im=document.createElement("img"); im.src=URL.createObjectURL(pendingFile); preview.appendChild(im);
-      }
+      if (pendingFile.type.startsWith("image/")){ const im=document.createElement("img"); im.src=URL.createObjectURL(pendingFile); preview.appendChild(im); }
       const name=document.createElement("span"); name.className="muted"; name.textContent=pendingFile.name; preview.appendChild(name);
-      const x=document.createElement("button"); x.className="iconbtn ghost"; x.textContent="✕"; x.style.width="32px"; x.style.height="32px";
-      x.onclick=clearFile; preview.appendChild(x);
-    } else { preview.classList.remove("show"); }
+      const x=document.createElement("button"); x.className="iconbtn ghost"; x.textContent="✕"; x.style.width="32px"; x.style.height="32px"; x.onclick=clearFile; preview.appendChild(x);
+    } else preview.classList.remove("show");
   };
   function clearFile(){ pendingFile=null; fileInput.value=""; preview.classList.remove("show"); preview.innerHTML=""; }
 
@@ -210,6 +260,7 @@
   async function send(){
     const text = input.value.trim();
     if (!text && !pendingFile) return;
+    haptic("light");
     sendBtn.disabled = true;
     const imgUrl = (pendingFile && pendingFile.type.startsWith("image/")) ? URL.createObjectURL(pendingFile) : null;
     addMsg(text, "me", imgUrl);
@@ -221,39 +272,42 @@
     const typing = addTyping();
     try{
       const r = await fetch("/webapp/api/chat", { method:"POST", headers: headers(), body: fd });
-      let j = null;
-      try { j = await r.json(); } catch(_) { j = null; }
+      let j = null; try { j = await r.json(); } catch(_) { j = null; }
       typing.remove();
       if (j && j.reply){
-        addMsg(j.reply, j.success === false ? "ai" : "ai");
-        if (j.error === "auth"){ showBanner("⚠️ Open this app from the bot (tap 🚀 Open App) to sign in."); }
-        if (j.success === false && (j.error==="insufficient_funds" || j.error==="vip_credits_depleted")){
+        addMsg(j.reply, "ai");
+        haptic(j.success === false ? "error" : "success");
+        if (j.error === "auth") showBanner("⚠️ Open this app from the bot (tap 🚀 Open App) to sign in.");
+        if (j.success === false && (j.error==="insufficient_funds" || j.error==="vip_credits_depleted"))
           addMsg("🪙 Tap Wallet above to top up.", "sys");
-        }
+        loadMe(); // refresh the live credit badge after a charge
       } else {
-        // No reply field → surface the real reason instead of a silent failure.
         const detail = (j && (j.detail || j.error)) ? (j.detail || j.error) : ("HTTP " + r.status);
         addMsg("⚠️ Couldn't get a reply (" + detail + "). Please try again.", "err");
+        haptic("error");
       }
     }catch(e){
       typing.remove();
       addMsg("⚠️ Could not reach the server. Check your connection and try again.", "err");
+      haptic("error");
     }
     finally{ sendBtn.disabled=false; }
   }
   sendBtn.onclick = send;
   input.addEventListener("keydown", e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(); }});
 
-  // ── Wallet / profile ──
+  // ── Wallet / profile / live credit badge ──
+  function setCredits(m){
+    const cr = document.getElementById("credits");
+    if (m && typeof m.normal_credits !== "undefined") cr.textContent = "🪙 " + m.normal_credits + " · 👑 " + m.vip_credits;
+  }
   async function loadMe(){
     try{
       const r = await fetch("/webapp/api/me", { headers: headers() });
-      if(!r.ok){
-        if (r.status === 401){ showBanner("⚠️ Session expired. Reopen the app from the bot (🚀 Open App)."); }
-        return;
-      }
+      if(!r.ok){ if (r.status === 401) showBanner("⚠️ Session expired. Reopen the app from the bot (🚀 Open App)."); return; }
       hideBanner();
       const m = await r.json();
+      setCredits(m);
       document.getElementById("wNormal").textContent = m.normal_credits;
       document.getElementById("wVip").textContent = m.vip_credits;
       document.getElementById("wVipStatus").textContent = m.has_vip ? "✅ Active" : "—";
@@ -261,16 +315,12 @@
       document.getElementById("pId").textContent = m.telegram_id;
       document.getElementById("pNormal").textContent = m.normal_credits;
       document.getElementById("pVip").textContent = m.vip_credits;
-      const plan = document.getElementById("pPlan");
-      plan.innerHTML = "";
-      const chip = document.createElement("span");
-      chip.className = "chip " + (m.has_vip ? "gold" : "mut");
-      chip.textContent = m.has_vip ? "👑 VIP" : "Free";
-      plan.appendChild(chip);
+      const plan = document.getElementById("pPlan"); plan.innerHTML = "";
+      const chip = document.createElement("span"); chip.className = "chip " + (m.has_vip ? "gold" : "mut");
+      chip.textContent = m.has_vip ? "👑 VIP" : "Free"; plan.appendChild(chip);
     }catch(e){}
   }
-  // The store lives in the bot chat (payments), so close the app and point there.
-  document.getElementById("buyBtn").onclick = ()=>{ if(tg){ tg.close(); } };
+  document.getElementById("buyBtn").onclick = ()=>{ haptic("light"); if(tg){ tg.close(); } };
 
   loadMe();
 })();

@@ -23,6 +23,12 @@ class CallbackThrottleMiddleware(BaseMiddleware):
         if db_user and getattr(db_user, "language", None):
             lang = db_user.language
 
+        # Banned users are blocked on the message path; enforce it on inline
+        # button taps too, so a ban can't be sidestepped via callbacks.
+        if db_user is not None and getattr(db_user, "is_banned", False):
+            await event.answer("", show_alert=False)
+            return None
+
         decision = await AbuseGuardService.check_callback(user_id=event.from_user.id, lang=lang)
         if not decision.allowed:
             await event.answer(decision.reason or "", show_alert=False)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -689,17 +690,33 @@ async def process_premium_emoji(message: Message, session: AsyncSession, state: 
 
 # ── Forced channel join manager ───────────────────────────────────────────────
 
+_CHANNEL_USERNAME_RE = re.compile(r"^@[A-Za-z][A-Za-z0-9_]{3,31}$")
+_CHANNEL_NUMERIC_RE = re.compile(r"^-100\d{5,}$")
+
+
 def _normalize_channel(raw: str) -> str:
-    """Accept @username, bare username, a t.me link, or a numeric id; return the
-    form Telegram's get_chat_member understands (@username or -100… id)."""
+    """Accept @username, bare username, a public t.me link, or a numeric -100… id
+    and return the form Telegram's get_chat_member understands. Returns "" for
+    things we can't enforce membership on (private invite links)."""
     raw = (raw or "").strip()
-    for prefix in ("https://t.me/", "http://t.me/", "t.me/", "telegram.me/"):
-        if raw.lower().startswith(prefix):
-            raw = "@" + raw[len(prefix):].strip("/")
+    low = raw.lower()
+    for prefix in ("https://t.me/", "http://t.me/", "https://telegram.me/", "t.me/", "telegram.me/"):
+        if low.startswith(prefix):
+            rest = raw[len(prefix):].strip("/")
+            # Private invite links (t.me/+xxxx, t.me/joinchat/xxxx) have no public
+            # @username — get_chat_member can't use them, so reject.
+            if rest.startswith("+") or rest.lower().startswith("joinchat"):
+                return ""
+            rest = rest.split("/")[0].split("?")[0]  # drop any path/query
+            raw = "@" + rest
             break
-    if raw and not raw.startswith("@") and not raw.startswith("http") and not raw.lstrip("-").isdigit():
+    if raw and not raw.startswith("@") and not raw.lstrip("-").isdigit():
         raw = "@" + raw
     return raw
+
+
+def _is_valid_channel(channel: str) -> bool:
+    return bool(_CHANNEL_USERNAME_RE.match(channel) or _CHANNEL_NUMERIC_RE.match(channel))
 
 
 async def _join_manager_view(session: AsyncSession, lang: str):
@@ -798,6 +815,10 @@ async def process_join_channel(message: Message, session: AsyncSession, state: F
         return await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
     channel = _normalize_channel(raw)
+    if not _is_valid_channel(channel):
+        # Reject invite links / garbled input so forced-join can't be silently
+        # broken (a bad channel makes the membership check fail-open = no-op).
+        return await message.answer(t(lang, "admin.join.bad_channel"), parse_mode="HTML")
     try:
         await RuntimeConfig.set_text(session, "forced_join_channel", channel, updated_by=message.from_user.id)
     except ValueError:
@@ -821,6 +842,9 @@ async def cb_admin_diag_ai(callback: CallbackQuery, session: AsyncSession, state
         return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
     user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
     lang = _lang(user)
+    # Rate-limit this — it makes a real (billable) provider call on each tap.
+    if not await _guard_admin_mutation(admin_id=callback.from_user.id, lang=lang, action="diag_ai", callback=callback):
+        return
     model = settings.GEMINI_MODEL_NORMAL
 
     await callback.answer()

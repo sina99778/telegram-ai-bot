@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import html
-import uuid
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
@@ -33,7 +32,7 @@ from app.services.admin.admin_service import AdminService
 from app.services.billing.billing_service import BillingService
 from app.services.config.runtime_config import RuntimeConfig
 from app.services.payment_service import NowPaymentsService
-from app.services.purchase.catalog import build_order_id, get_product
+from app.services.purchase.catalog import build_card_idempotency_key, build_order_id, get_product
 
 callback_router = Router(name="callbacks")
 
@@ -281,7 +280,7 @@ async def process_card_receipt(message: Message, state: FSMContext, session: Asy
         currency="USD",
         credits_granted=0,
         status=TransactionStatus.PENDING,
-        idempotency_key=f"card_{db_user.telegram_id}_{message.message_id}_{uuid.uuid4().hex[:8]}",
+        idempotency_key=build_card_idempotency_key(db_user.telegram_id, message.message_id),
         raw_payload={
             "product_code": code,
             "receipt_file_id": receipt_file_id,

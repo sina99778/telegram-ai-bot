@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
@@ -89,6 +90,19 @@ def get_product(code: str) -> PurchaseProduct | None:
 
 def build_order_id(product_code: str, telegram_id: int, timestamp: int) -> str:
     return f"p:{product_code}:u:{telegram_id}:t:{timestamp}"
+
+
+def build_card_idempotency_key(telegram_id: int, message_id: int) -> str:
+    """Unique key for one card-to-card receipt upload.
+
+    Stored in ``PaymentTransaction.idempotency_key``, which is a UNIQUE column,
+    so the key must differ for *every* upload — even two receipts that arrive in
+    the same second under the same ``message_id`` (a rapid re-send / double-tap).
+    The suffix is the *full* uuid4 hex (128 bits) on purpose: truncating it to a
+    handful of chars invites a birthday-paradox collision that the UNIQUE
+    constraint would surface as a rejected, legitimate payment.
+    """
+    return f"card_{telegram_id}_{message_id}_{uuid.uuid4().hex}"
 
 
 def parse_order_id(order_id: str) -> tuple[str, int] | None:

@@ -46,6 +46,33 @@ except Exception:  # pragma: no cover
 # user can keep seeing an old build after we ship a new one.
 _NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
 
+# Only these stable codes are ever sent to the client in the `error` field —
+# never a raw exception string (which can leak internal/provider details).
+_SAFE_ERROR_CODES = {
+    "auth", "banned", "empty", "too_large", "throttled", "blocked", "server",
+    "insufficient_funds", "vip_credits_depleted", "quota_exhausted", "safety_blocked",
+}
+
+
+def _safe_error(code: str | None) -> str | None:
+    if code in _SAFE_ERROR_CODES:
+        return code
+    return "ai_error" if code else None
+
+
+# Magic-byte signatures for the image formats the vision model accepts. We trust
+# the actual bytes, not the client-supplied multipart content_type.
+_IMAGE_SIGNATURES = (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"GIF87a", b"GIF89a", b"BM")
+
+
+def _looks_like_image(data: bytes) -> bool:
+    if not data:
+        return False
+    head = data[:16]
+    if head.startswith(b"RIFF") and b"WEBP" in head:
+        return True
+    return any(head.startswith(sig) for sig in _IMAGE_SIGNATURES)
+
 
 def _auth(init_data: str | None) -> WebAppUser | None:
     """Validate initData. Returns the user or None (never raises). The reason for
@@ -94,6 +121,12 @@ async def webapp_me(x_telegram_init_data: str | None = Header(default=None)) -> 
         async with AsyncSessionLocal() as session:
             repo = ChatRepository(session)
             user = await repo.get_or_create_user(wu.telegram_id, wu.username, wu.first_name)
+            if getattr(user, "is_banned", False):
+                return JSONResponse(
+                    {"error": "banned", "reply": t(user.language or wu.language_code or "fa", "webapp.banned")},
+                    status_code=403,
+                    headers=_NO_CACHE,
+                )
             return JSONResponse(
                 {
                     "name": user.first_name or user.username or "user",
@@ -135,17 +168,25 @@ async def webapp_chat(
         image_bytes: bytes | None = None
         file_note: str | None = None
         if file is not None:
+            # Reject oversize uploads before reading the whole body into memory.
+            declared_size = getattr(file, "size", None)
+            if declared_size and declared_size > settings.WEBAPP_CHAT_MAX_FILE_BYTES:
+                return JSONResponse(
+                    {"success": False, "reply": t(lang, "webapp.too_large"), "error": "too_large"},
+                    headers=_NO_CACHE,
+                )
             data = await file.read()
             if len(data) > settings.WEBAPP_CHAT_MAX_FILE_BYTES:
                 return JSONResponse(
                     {"success": False, "reply": t(lang, "webapp.too_large"), "error": "too_large"},
                     headers=_NO_CACHE,
                 )
-            if (file.content_type or "").startswith("image/"):
+            # Trust the actual bytes, not the client-supplied content_type.
+            if _looks_like_image(data):
                 image_bytes = data
             else:
-                # Non-image files aren't understood by the vision model yet; keep
-                # the chat flowing and tell the user.
+                # Non-image (or spoofed) files aren't understood by the vision
+                # model yet; keep the chat flowing and tell the user.
                 file_note = "unsupported_file"
 
         if not text and image_bytes is None:
@@ -158,6 +199,12 @@ async def webapp_chat(
             repo = ChatRepository(session)
             user = await repo.get_or_create_user(wu.telegram_id, wu.username, wu.first_name)
             lang = user.language or wu.language_code or "fa"
+
+            if getattr(user, "is_banned", False):
+                return JSONResponse(
+                    {"success": False, "reply": t(lang, "webapp.banned"), "error": "banned"},
+                    headers=_NO_CACHE,
+                )
 
             from app.services.security.abuse_guard import AbuseGuardService
             from app.services.security.content_filter import ContentFilterService
@@ -190,7 +237,7 @@ async def webapp_chat(
             if file_note == "unsupported_file" and result.success:
                 reply = "📎 " + t(lang, "webapp.image_only") + "\n\n" + reply
             return JSONResponse(
-                {"success": result.success, "reply": reply, "error": result.error_message},
+                {"success": result.success, "reply": reply, "error": _safe_error(result.error_message)},
                 headers=_NO_CACHE,
             )
     except Exception:

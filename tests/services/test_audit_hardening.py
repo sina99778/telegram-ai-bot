@@ -4,6 +4,7 @@ import pytest
 
 from app.core.config import Settings
 from app.services.config.runtime_config import RuntimeConfig
+from app.services.purchase.catalog import build_card_idempotency_key
 
 
 @pytest.fixture(autouse=True)
@@ -38,8 +39,18 @@ async def test_runtime_config_recovers_session_on_read_error():
     assert rolled["count"] == 1  # and recovered the session
 
 
-def test_card_idempotency_key_is_unique_per_call(monkeypatch):
-    # Two receipts in the same second / same message id must not collide.
-    import uuid
-    keys = {f"card_1_99_{uuid.uuid4().hex[:8]}" for _ in range(1000)}
+def test_card_idempotency_key_is_unique_per_call():
+    # Two receipts with the SAME (telegram_id, message_id) — same second, a
+    # double-tap re-send — must still get distinct idempotency_keys, because the
+    # column is UNIQUE and a collision would reject a legitimate payment.
+    #
+    # This calls the real production builder (not a re-implementation) so the
+    # guard tracks the actual key format. It is hermetic and order-independent:
+    # uuid4 draws from os.urandom, which test ordering / random.seed cannot
+    # touch. The full uuid4 hex makes 1000 distinct keys a practical certainty
+    # (P(collision) ~= 1e-33). The earlier version truncated the suffix to 8 hex
+    # chars (32 bits), so ~1 run in 8600 hit a birthday collision here — a flake
+    # that looked order-dependent only because re-running the suite enough times
+    # eventually drew the unlucky sample.
+    keys = {build_card_idempotency_key(telegram_id=1, message_id=99) for _ in range(1000)}
     assert len(keys) == 1000

@@ -188,6 +188,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as color_err:  # cosmetics must never block startup
         logger.warning("Could not install global button coloring: %s", color_err)
 
+    # Safety net: if a configured premium-emoji icon is unusable, retry the send
+    # with icons stripped instead of letting the whole keyboard fail to deliver.
+    try:
+        from app.bot.middlewares.premium_icon_fallback import PremiumIconFallbackMiddleware
+
+        bot.session.middleware(PremiumIconFallbackMiddleware())
+    except Exception as mw_err:
+        logger.warning("Could not install premium-icon fallback middleware: %s", mw_err)
+
     # Ensure all tables exist (safe on subsequent runs — it's a no-op if they already exist)
     try:
         async with engine.begin() as conn:

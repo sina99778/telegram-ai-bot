@@ -26,6 +26,9 @@ from app.services.config.runtime_config import RuntimeConfig
 logger = logging.getLogger(__name__)
 
 SUMMARIZATION_TOKEN_THRESHOLD = 3000
+# If a summarization was requested but never finished within this window, treat
+# the pending flag as stale and re-enqueue (prevents a permanent latch).
+SUMMARIZATION_STALE_SECONDS = 1800
 
 
 @dataclass
@@ -322,20 +325,24 @@ class ChatOrchestrator:
                 )
             actual_cost = self._metered_cost(response.tokens_used or 0, rate, min_charge)
             actual_cost = min(actual_cost, balance)  # never overdraw
-            try:
-                await self.billing.deduct_credits(
-                    user_id=user_id,
-                    amount=actual_cost,
-                    reference_type="chat_message_payg",
-                    reference_id=reference_id,
-                    description=f"PAYG {policy.feature_name.value} {response.tokens_used or 0}tok",
-                    wallet_type=policy.wallet_type,
-                )
-            except Exception as exc:
-                # Pre-checked balance makes this unlikely; never fail the reply
-                # over a billing hiccup — log and serve the answer.
-                logger.error("PAYG deduction failed ref=%s: %s", reference_id, exc, exc_info=True)
-                await self.session.rollback()
+            # Only deduct a positive amount — deduct_credits rejects 0/negative,
+            # and a raised+rolled-back deduction here would corrupt the session
+            # before the message-persist step below.
+            if actual_cost > 0:
+                try:
+                    await self.billing.deduct_credits(
+                        user_id=user_id,
+                        amount=actual_cost,
+                        reference_type="chat_message_payg",
+                        reference_id=reference_id,
+                        description=f"PAYG {policy.feature_name.value} {response.tokens_used or 0}tok",
+                        wallet_type=policy.wallet_type,
+                    )
+                except Exception as exc:
+                    # Pre-checked balance makes this unlikely; never fail the reply
+                    # over a billing hiccup — log and serve the answer.
+                    logger.error("PAYG deduction failed ref=%s: %s", reference_id, exc, exc_info=True)
+                    await self.session.rollback()
         else:
             # ── Flat per-message: reserve credits before generation, refund on failure ──
             try:
@@ -458,9 +465,22 @@ class ChatOrchestrator:
             logger.error("Failed to persist chat messages for %s: %s", reference_id, exc, exc_info=True)
             await self.session.rollback()
 
-        if conversation.total_tokens_used > SUMMARIZATION_TOKEN_THRESHOLD and not conversation.summarization_pending:
+        # Re-enqueue if summarization was requested but never completed (e.g. the
+        # request was cancelled between the commit and the enqueue, or the worker
+        # died) — otherwise the pending flag latches forever and context (and
+        # input-token cost) grows unbounded.
+        _now = datetime.now(timezone.utc)
+        _requested = conversation.summarization_requested_at
+        if _requested is not None and _requested.tzinfo is None:
+            _requested = _requested.replace(tzinfo=timezone.utc)
+        _stale = conversation.summarization_pending and (
+            _requested is None or (_now - _requested).total_seconds() > SUMMARIZATION_STALE_SECONDS
+        )
+        if conversation.total_tokens_used > SUMMARIZATION_TOKEN_THRESHOLD and (
+            not conversation.summarization_pending or _stale
+        ):
             conversation.summarization_pending = True
-            conversation.summarization_requested_at = datetime.now(timezone.utc)
+            conversation.summarization_requested_at = _now
             await self.session.commit()
 
             result = await self.queue_service.enqueue_summarization(conversation.id)

@@ -114,6 +114,18 @@ def test_install_global_coloring_patches_builder():
     assert mk.inline_keyboard[0][0].style == "success"
 
 
+def test_premium_icon_fallback_strips_icons():
+    from app.bot.middlewares.premium_icon_fallback import _strip_icons
+
+    btn = InlineKeyboardButton(text="Buy", callback_data="buy")
+    btn.icon_custom_emoji_id = "5301234567890123456"
+    mk = _inline(btn)
+    assert _strip_icons(mk) is True
+    assert mk.inline_keyboard[0][0].icon_custom_emoji_id is None
+    # second pass: nothing left to strip
+    assert _strip_icons(mk) is False
+
+
 def test_strip_leading_emoji_handles_all_menu_emojis():
     cases = {
         "💬 Chat": "Chat",
