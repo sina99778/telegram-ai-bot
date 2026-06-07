@@ -20,7 +20,7 @@ from app.services.billing.billing_service import BillingService
 from app.services.ai.provider import AIMessage
 from app.services.chat.memory import MemoryManager, TokenEstimator
 from app.services.queue.queue_service import QueueService
-from app.services.ai.antigravity import SafetyBlockedError
+from app.services.ai.antigravity import QuotaExhaustedError, SafetyBlockedError
 from app.services.config.runtime_config import RuntimeConfig
 
 logger = logging.getLogger(__name__)
@@ -306,6 +306,14 @@ class ChatOrchestrator:
                     text=t(lang, "abuse.content_blocked"), success=False, error_message="safety_blocked",
                     feature_name=policy.feature_name, wallet_type=policy.wallet_type,
                 )
+            except QuotaExhaustedError as exc:
+                # Provider out of credits/quota — nothing was charged (PAYG bills
+                # after success). Tell the user it's temporary, not their fault.
+                logger.error("AI quota exhausted (payg) user_id=%s: %s", user_id, exc)
+                return ChatResult(
+                    text=t(lang, "errors.service_unavailable"), success=False, error_message="quota_exhausted",
+                    feature_name=policy.feature_name, wallet_type=policy.wallet_type,
+                )
             except Exception as exc:
                 logger.error("AI generation failed (payg): %s", exc, exc_info=True)
                 return ChatResult(
@@ -380,6 +388,29 @@ class ChatOrchestrator:
                     text=t(lang, "abuse.content_blocked"),
                     success=False,
                     error_message="safety_blocked",
+                    feature_name=policy.feature_name,
+                    wallet_type=policy.wallet_type,
+                )
+            except QuotaExhaustedError as exc:
+                # Provider out of credits/quota — refund the reserved credits and
+                # tell the user it's a temporary service issue (not their wallet).
+                logger.error("AI quota exhausted user_id=%s ref=%s: %s", user_id, reference_id, exc)
+                await self.session.rollback()
+                try:
+                    await self.billing.refund_credits(
+                        user_id=user_id,
+                        original_reference_id=reference_id,
+                        amount=cost,
+                        description="Refund: AI service quota exhausted",
+                        wallet_type=policy.wallet_type,
+                    )
+                except Exception as refund_exc:
+                    logger.error("Quota refund failure for %s: %s", reference_id, refund_exc, exc_info=True)
+                    await self.session.rollback()
+                return ChatResult(
+                    text=t(lang, "errors.service_unavailable"),
+                    success=False,
+                    error_message="quota_exhausted",
                     feature_name=policy.feature_name,
                     wallet_type=policy.wallet_type,
                 )

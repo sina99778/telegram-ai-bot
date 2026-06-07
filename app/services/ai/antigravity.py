@@ -26,11 +26,23 @@ class SafetyBlockedError(Exception):
         super().__init__(message)
 
 
+class QuotaExhaustedError(Exception):
+    """Raised when Gemini rejects with 429 RESOURCE_EXHAUSTED — the project's
+    prepay credits/quota are depleted (a billing issue, not a transient one).
+    Not retried, and surfaced to the user as a clean 'temporarily unavailable'."""
+
+
+def _is_quota_error(exc: BaseException) -> bool:
+    text = str(exc).upper()
+    return "RESOURCE_EXHAUSTED" in text or "429" in text or "QUOTA" in text or "CREDITS ARE DEPLETED" in text
+
+
 # Tenacity exception predicate: retry only on transient/recoverable errors.
 # Never retry on safety blocks (user content issue, not transient), nor on
 # cancellation / system-exit style exceptions (those should propagate fast).
 _NON_RETRY_TYPES: tuple[type[BaseException], ...] = (
     SafetyBlockedError,
+    QuotaExhaustedError,
     asyncio.CancelledError,
     KeyboardInterrupt,
     SystemExit,
@@ -40,6 +52,9 @@ _NON_RETRY_TYPES: tuple[type[BaseException], ...] = (
 
 def _should_retry_gemini_error(exc: BaseException) -> bool:
     if isinstance(exc, _NON_RETRY_TYPES):
+        return False
+    # Quota/billing depletion is persistent — retrying just wastes time.
+    if _is_quota_error(exc):
         return False
     # asyncio.TimeoutError, ConnectionError, OSError, google.genai errors → retry
     return isinstance(exc, Exception)
@@ -247,7 +262,12 @@ class AntigravityProvider(BaseAIProvider):
             )
         except SafetyBlockedError:
             raise  # Don't wrap safety errors
+        except QuotaExhaustedError:
+            raise  # already specific
         except Exception as e:
+            if _is_quota_error(e):
+                logger.error("Gemini quota/billing exhausted: %s", e)
+                raise QuotaExhaustedError(str(e))
             logger.error("Gemini API Error (after retries): %s", e, exc_info=True)
             raise RuntimeError(f"AI Generation failed: {e}")
 

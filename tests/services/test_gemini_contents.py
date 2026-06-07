@@ -70,6 +70,25 @@ def test_top_level_image_attaches_to_last_user_turn():
     assert len(contents[0].parts) == 2
 
 
+def test_quota_error_is_detected_and_not_retried():
+    from app.services.ai.antigravity import (
+        QuotaExhaustedError,
+        _is_quota_error,
+        _should_retry_gemini_error,
+    )
+
+    real = Exception(
+        "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': "
+        "'Your prepayment credits are depleted.', 'status': 'RESOURCE_EXHAUSTED'}}"
+    )
+    assert _is_quota_error(real) is True
+    # quota / billing depletion is persistent → must NOT be retried
+    assert _should_retry_gemini_error(real) is False
+    assert _should_retry_gemini_error(QuotaExhaustedError("x")) is False
+    # a generic transient error is still retried
+    assert _should_retry_gemini_error(ConnectionError("reset")) is True
+
+
 def test_normal_alternating_history_is_unchanged_in_shape():
     messages = [
         AIMessage(role="user", content="u1"),
