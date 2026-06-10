@@ -119,6 +119,11 @@
   .heroCard .vip{position:absolute;top:16px;inset-inline-end:16px;background:rgba(0,0,0,.22);border-radius:30px;padding:6px 12px;font-size:12px;font-weight:800;color:#fff}
   .storebtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:15px;border:none;border-radius:16px;background:var(--grad-store);color:#fff;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(244,63,94,.4);transition:transform .12s;font-family:inherit}
   .storebtn:active{transform:scale(.97)}
+  .seg{display:flex;background:var(--card);border:1px solid var(--card-brd);border-radius:15px;padding:4px;gap:4px}
+  .seg button{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;border:none;background:none;color:var(--hint);font-weight:800;font-size:13.5px;padding:11px 6px;border-radius:12px;cursor:pointer;transition:.18s;font-family:inherit}
+  .seg button.active{background:var(--grad-brand);color:#fff;box-shadow:0 5px 16px rgba(99,102,241,.4)}
+  .seg button:active{transform:scale(.97)}
+  .seghint{color:var(--hint);font-size:12.5px;line-height:1.7;margin:10px 2px 0}
   .pchip{display:inline-block;padding:4px 12px;border-radius:30px;font-size:12.5px;font-weight:800;color:#fff}
   .pchip.gold{background:var(--grad-gold)}.pchip.mut{background:rgba(255,255,255,.12);color:var(--hint)}
   .avatar{width:72px;height:72px;border-radius:50%;background:var(--grad-brand);display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:900;color:#fff;margin:0 auto 10px;box-shadow:0 8px 28px rgba(99,102,241,.5)}
@@ -179,6 +184,14 @@
         <div class="lbl" id="tBalance">موجودی</div>
         <div class="big skel" id="wNormal">000</div>
         <div class="sub"><span id="tNormLbl">اعتبار عادی</span> · 👑 <span id="wVip" class="skel">00</span> <span id="tVipLbl">اعتبار VIP</span></div>
+      </div>
+      <div class="glass">
+        <h3 id="tModel">🧠 مدل گفتگو</h3>
+        <div class="seg" id="segModel">
+          <button data-m="flash" id="segFlash">⚡ <span id="tMFree">رایگان</span></button>
+          <button data-m="pro" id="segPro">💎 <span>Pro</span></button>
+        </div>
+        <p class="seghint" id="modelHint"></p>
       </div>
       <div class="glass">
         <h3 id="tGetMore">✨ ارتقا و شارژ</h3>
@@ -249,6 +262,9 @@
       noReply:"⚠️ پاسخی دریافت نشد", openFromBot:"⚠️ اپ را از داخل ربات باز کن (دکمه‌ی 🚀) تا ورود انجام شود.",
       sessionExp:"⚠️ نشست منقضی شد. اپ را دوباره از ربات باز کن.",
       copy:"📋 کپی", copied:"✓ کپی شد",
+      model:"🧠 مدل گفتگو", mFree:"رایگان",
+      hintFlash:"پاسخ‌ها با مدل سریع و رایگان (Flash) ساخته می‌شوند.",
+      hintPro:"پاسخ‌ها با مدل هوشمندتر Pro ساخته می‌شوند و اعتبار VIP مصرف می‌کنند.",
       chips:["✍️ یک کپشن جذاب بنویس","💡 ساده توضیح بده: ","🌐 ترجمه کن به انگلیسی: ","🧮 این را حل کن: "]
     },
     en: {
@@ -265,10 +281,14 @@
       noReply:"⚠️ No reply received", openFromBot:"⚠️ Open this app from the bot (🚀 button) to sign in.",
       sessionExp:"⚠️ Session expired. Reopen the app from the bot.",
       copy:"📋 copy", copied:"✓ copied",
+      model:"🧠 Chat model", mFree:"Free",
+      hintFlash:"Replies use the fast, free Flash model.",
+      hintPro:"Replies use the smarter Pro model and spend VIP credits.",
       chips:["✍️ Write a catchy caption","💡 Explain simply: ","🌐 Translate to English: ","🧮 Solve this: "]
     }
   };
   let L = STR.fa;
+  let currentModel = "flash";
   function applyLang(code){
     L = STR[(code||"fa").startsWith("fa") ? "fa" : "en"];
     const rtl = L === STR.fa;
@@ -289,6 +309,9 @@
     document.getElementById("tStatNorm").textContent = L.statNorm;
     document.getElementById("tStatVip").textContent = L.statVip;
     document.getElementById("tFooter").textContent = L.footer;
+    document.getElementById("tModel").textContent = L.model;
+    document.getElementById("tMFree").textContent = L.mFree;
+    setModelUI(currentModel, false);
     buildChips();
   }
   // first guess from Telegram client before /me answers
@@ -324,6 +347,32 @@
       c.onclick = ()=>{ haptic("light"); input.value = txt.replace(/^[^ ]+ /,""); input.focus(); autoGrow(); };
       box.appendChild(c);
     });
+  }
+
+  // ── Telegram-HTML → markdown-ish ──
+  // The bot formats replies with Telegram HTML (<b>, <code>, <pre>…) which the
+  // Telegram chat renders natively but would show as raw tags here. Convert the
+  // small allowed tag set to our markdown tokens and decode entities. Runs ONLY
+  // outside ``` fences so code samples the model wrote stay untouched.
+  function decodeEntities(s){
+    return s.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"')
+            .replace(/&#0?39;/g,"'").replace(/&amp;/g,"&");
+  }
+  function tgHtmlToMd(s){
+    s = s.replace(/<pre>\s*<code(?:\s+class="language-([^"]*)")?>([\s\S]*?)<\/code>\s*<\/pre>/gi,
+                  (m,l,c)=>"\n```"+(l||"")+"\n"+decodeEntities(c)+"\n```\n");
+    s = s.replace(/<pre>([\s\S]*?)<\/pre>/gi, (m,c)=>"\n```\n"+decodeEntities(c)+"\n```\n");
+    s = s.replace(/<br\s*\/?>/gi, "\n");
+    s = s.replace(/<\/?(?:b|strong)>/gi, "**");
+    s = s.replace(/<code>([\s\S]*?)<\/code>/gi, (m,c)=>"`"+decodeEntities(c).replace(/`/g,"'")+"`");
+    s = s.replace(/<a\s+href="[^"]*"[^>]*>([\s\S]*?)<\/a>/gi, "$1");
+    s = s.replace(/<\/?(?:i|em|u|s|ins|del|span|tg-spoiler|blockquote)[^>]*>/gi, "");
+    return decodeEntities(s);
+  }
+  function normalizeReply(text){
+    const parts = String(text).split("```");
+    for (let i = 0; i < parts.length; i += 2) parts[i] = tgHtmlToMd(parts[i]);
+    return parts.join("```");
   }
 
   // ── Safe markdown (code fences + inline code + **bold**) ──
@@ -381,7 +430,7 @@
       const row = document.createElement("div"); row.className="row-ai";
       const av = document.createElement("div"); av.className="ai-avatar"; av.textContent="🤖";
       const d = document.createElement("div"); d.className="msg ai"; d.setAttribute("dir","auto");
-      if (text) renderMarkdown(d, text);
+      if (text) renderMarkdown(d, normalizeReply(text));
       const st=document.createElement("span"); st.className="stamp"; st.textContent=now(); d.appendChild(st);
       row.appendChild(av); row.appendChild(d); messages.appendChild(row); node=d;
     } else {
@@ -462,6 +511,42 @@
   sendBtn.onclick = send;
   input.addEventListener("keydown", e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(); }});
 
+  // ── Model switcher (Free ⚡ / Pro 💎) ──
+  function setModelUI(model, withHint){
+    currentModel = model === "pro" ? "pro" : "flash";
+    const f = document.getElementById("segFlash"), p = document.getElementById("segPro");
+    if (!f || !p) return;
+    f.classList.toggle("active", currentModel === "flash");
+    p.classList.toggle("active", currentModel === "pro");
+    if (withHint !== false){
+      document.getElementById("modelHint").textContent =
+        currentModel === "pro" ? L.hintPro : L.hintFlash;
+    }
+  }
+  async function switchModel(model){
+    if (model === currentModel) return;
+    haptic("light");
+    const fd = new FormData(); fd.append("model", model);
+    try{
+      const r = await fetch("/webapp/api/model", { method:"POST", headers: headers(), body: fd });
+      const j = await r.json().catch(()=>null);
+      if (j && j.success){
+        setModelUI(j.model, false);
+        document.getElementById("modelHint").textContent = j.reply || "";
+        haptic("success");
+      } else {
+        haptic("error");
+        document.getElementById("modelHint").textContent = (j && j.reply) ? j.reply : L.noNet;
+        setModelUI((j && j.model) || currentModel, false);
+      }
+    }catch(e){
+      haptic("error");
+      document.getElementById("modelHint").textContent = L.noNet;
+    }
+  }
+  document.getElementById("segFlash").onclick = ()=>switchModel("flash");
+  document.getElementById("segPro").onclick = ()=>switchModel("pro");
+
   // ── /me ──
   function unskel(id, val){ const el=document.getElementById(id); el.classList.remove("skel"); el.textContent = val; }
   async function loadMe(){
@@ -471,6 +556,7 @@
       hideBanner();
       const m = await r.json();
       applyLang(m.lang);
+      setModelUI(m.preferred_model || "flash");
       document.getElementById("credits").textContent = "🪙 " + m.normal_credits + " · 👑 " + m.vip_credits;
       unskel("wNormal", m.normal_credits);
       unskel("wVip", m.vip_credits);

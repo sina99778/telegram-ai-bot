@@ -151,6 +151,93 @@ def test_safe_error_never_leaks_raw_exception_text():
     assert webapp_routes._safe_error(None) is None
 
 
+def _model_fakes(monkeypatch, *, has_vip: bool):
+    class FakeSession:
+        committed = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def commit(self):
+            FakeSession.committed = True
+
+    class FakeUser:
+        id = 1
+        telegram_id = 777
+        username = None
+        first_name = "T"
+        language = "en"
+        is_banned = False
+        has_active_vip = has_vip
+        preferred_text_model = "FLASH"
+
+    class FakeRepo:
+        last_user = None
+
+        def __init__(self, _s):
+            pass
+
+        async def get_or_create_user(self, *a, **k):
+            user = FakeUser()
+            FakeRepo.last_user = user
+            return user
+
+    monkeypatch.setattr(webapp_routes, "AsyncSessionLocal", lambda: FakeSession())
+    monkeypatch.setattr(webapp_routes, "ChatRepository", FakeRepo)
+    return FakeSession, FakeRepo
+
+
+def test_model_switch_requires_auth(client):
+    r = client.post("/webapp/api/model", data={"model": "pro"})
+    j = r.json()
+    assert j["success"] is False
+    assert j["error"] == "auth"
+    assert j["reply"]
+
+
+def test_model_switch_pro_requires_vip(client, monkeypatch):
+    _model_fakes(monkeypatch, has_vip=False)
+    r = client.post(
+        "/webapp/api/model",
+        headers={"X-Telegram-Init-Data": _init()},
+        data={"model": "pro"},
+    )
+    j = r.json()
+    assert j["success"] is False
+    assert j["error"] == "vip_required"
+    assert j["model"] == "flash"  # stays on the current model
+    assert j["reply"]
+
+
+def test_model_switch_pro_with_vip_persists(client, monkeypatch):
+    FakeSession, FakeRepo = _model_fakes(monkeypatch, has_vip=True)
+    r = client.post(
+        "/webapp/api/model",
+        headers={"X-Telegram-Init-Data": _init()},
+        data={"model": "pro"},
+    )
+    j = r.json()
+    assert j["success"] is True
+    assert j["model"] == "pro"
+    assert FakeRepo.last_user.preferred_text_model == "PRO"
+    assert FakeSession.committed is True
+
+
+def test_model_switch_invalid_value(client, monkeypatch):
+    _model_fakes(monkeypatch, has_vip=True)
+    r = client.post(
+        "/webapp/api/model",
+        headers={"X-Telegram-Init-Data": _init()},
+        data={"model": "turbo"},
+    )
+    j = r.json()
+    assert j["success"] is False
+    assert j["error"] == "invalid"
+
+
 def test_chat_blocks_banned_user(client, monkeypatch):
     class FakeSession:
         async def __aenter__(self):

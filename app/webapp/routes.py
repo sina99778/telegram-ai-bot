@@ -74,6 +74,12 @@ def _looks_like_image(data: bytes) -> bool:
     return any(head.startswith(sig) for sig in _IMAGE_SIGNATURES)
 
 
+def _preferred_model(user) -> str:
+    """'pro' or 'flash' — mirrors the bot's chat handler mapping."""
+    raw = (getattr(user, "preferred_text_model", None) or "flash").lower()
+    return "pro" if raw in ("pro", "premium") else "flash"
+
+
 def _auth(init_data: str | None) -> WebAppUser | None:
     """Validate initData. Returns the user or None (never raises). The reason for
     a failure is logged by :func:`validate_init_data` for server-side diagnosis."""
@@ -134,6 +140,7 @@ async def webapp_me(x_telegram_init_data: str | None = Header(default=None)) -> 
                     "normal_credits": user.normal_credits,
                     "vip_credits": user.vip_credits,
                     "has_vip": user.has_active_vip,
+                    "preferred_model": _preferred_model(user),
                     "lang": user.language or wu.language_code or "fa",
                 },
                 headers=_NO_CACHE,
@@ -225,11 +232,14 @@ async def webapp_chat(
                     headers=_NO_CACHE,
                 )
 
+            # Honour the user's chosen model, exactly like the bot's chat handler
+            # (the orchestrator's policy still gates Pro behind VIP/credits).
+            feature = FeatureName.PRO_TEXT if _preferred_model(user) == "pro" else FeatureName.FLASH_TEXT
             orchestrator = _build_orchestrator(session)
             result = await orchestrator.process_message(
                 user_id=user.id,
                 prompt=prompt,
-                feature_name=FeatureName.FLASH_TEXT,
+                feature_name=feature,
                 image_bytes=image_bytes,
             )
 
@@ -244,5 +254,60 @@ async def webapp_chat(
         logger.exception("Mini app chat failed for telegram_id=%s", wu.telegram_id)
         return JSONResponse(
             {"success": False, "reply": t(lang, "webapp.server_error"), "error": "server"},
+            headers=_NO_CACHE,
+        )
+
+
+@webapp_router.post("/webapp/api/model")
+async def webapp_set_model(
+    x_telegram_init_data: str | None = Header(default=None),
+    model: str = Form(default=""),
+) -> JSONResponse:
+    """Switch the user's preferred chat model (flash|pro). Mirrors the bot's
+    toggle_model callback: Pro requires an active VIP plan."""
+    wu = _auth(x_telegram_init_data)
+    if not wu:
+        return JSONResponse(
+            {"success": False, "reply": t("fa", "webapp.session_expired"), "error": "auth"},
+            headers=_NO_CACHE,
+        )
+
+    wanted = (model or "").strip().lower()
+    if wanted not in ("flash", "pro"):
+        return JSONResponse(
+            {"success": False, "reply": t("fa", "webapp.server_error"), "error": "invalid"},
+            headers=_NO_CACHE,
+        )
+
+    try:
+        async with AsyncSessionLocal() as session:
+            repo = ChatRepository(session)
+            user = await repo.get_or_create_user(wu.telegram_id, wu.username, wu.first_name)
+            lang = user.language or wu.language_code or "fa"
+
+            if getattr(user, "is_banned", False):
+                return JSONResponse(
+                    {"success": False, "reply": t(lang, "webapp.banned"), "error": "banned"},
+                    headers=_NO_CACHE,
+                )
+
+            if wanted == "pro" and not user.has_active_vip:
+                return JSONResponse(
+                    {"success": False, "reply": t(lang, "webapp.vip_required"), "error": "vip_required",
+                     "model": _preferred_model(user)},
+                    headers=_NO_CACHE,
+                )
+
+            user.preferred_text_model = "PRO" if wanted == "pro" else "FLASH"
+            await session.commit()
+            reply_key = "webapp.model_pro" if wanted == "pro" else "webapp.model_flash"
+            return JSONResponse(
+                {"success": True, "model": wanted, "reply": t(lang, reply_key)},
+                headers=_NO_CACHE,
+            )
+    except Exception:
+        logger.exception("Mini app model switch failed for telegram_id=%s", wu.telegram_id)
+        return JSONResponse(
+            {"success": False, "reply": t(wu.language_code or "fa", "webapp.server_error"), "error": "server"},
             headers=_NO_CACHE,
         )
