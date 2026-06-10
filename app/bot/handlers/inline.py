@@ -4,9 +4,9 @@ import asyncio
 import logging
 import html
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent, ChosenInlineResult, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent, ChosenInlineResult, InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.bot.keyboards.styling import colorize_inline_markup
 
@@ -32,6 +32,12 @@ def _user_has_started(user: User) -> bool:
     return bool(user.language)
 
 
+def _clip(text: str, limit: int = 4096) -> str:
+    """Telegram caps message text at 4096 chars; add an ellipsis ONLY when we
+    actually truncate (a stray '...' used to be appended to every reply)."""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 async def _safe_edit_inline(
     chosen_result: ChosenInlineResult, response_text: str, prompt: str | None = None, name: str | None = None
 ):
@@ -47,18 +53,14 @@ async def _safe_edit_inline(
         else:
             final_text = f"🤖 {response_text}"
 
-        # Max length for inline message text is 4096
-        if len(final_text) > 4096:
-            if prompt and name:
-                header = f"🗣 <b>{html.escape(name)}:</b> {html.escape(prompt)}\n\n🤖 "
-                allowed_len = 4090 - len(header)
-                final_text = header + response_text[:allowed_len] + "..."
-            else:
-                final_text = final_text[:4090] + "..."
+        # When too long, prefer keeping the header and clipping the body.
+        if len(final_text) > 4096 and prompt and name:
+            header = f"🗣 <b>{html.escape(name)}:</b> {html.escape(prompt)}\n\n🤖 "
+            final_text = header + response_text[: max(0, 4090 - len(header))] + "…"
 
         await chosen_result.bot.edit_message_text(
             inline_message_id=chosen_result.inline_message_id,
-            text=final_text[:4090] + "...",
+            text=_clip(final_text),
             parse_mode="HTML",
         )
     except TelegramBadRequest as tbre:
@@ -69,7 +71,7 @@ async def _safe_edit_inline(
             try:
                 await chosen_result.bot.edit_message_text(
                     inline_message_id=chosen_result.inline_message_id,
-                    text=fallback_text[:4090] + "...",
+                    text=_clip(fallback_text),
                     parse_mode="HTML",
                 )
             except Exception as e2:
@@ -91,6 +93,13 @@ async def _safe_edit_inline(
             )
         except Exception as absolute_exc:
             logger.error("Absolute fallback edit failed! inline_id=%s: %s", chosen_result.inline_message_id, absolute_exc)
+
+
+@inline_router.callback_query(F.data == "ignore")
+async def cb_ignore(callback: CallbackQuery):
+    """The ⏳ placeholder button on inline messages — just dismiss the tap so
+    the client doesn't show a loading spinner until timeout."""
+    await callback.answer()
 
 
 @inline_router.inline_query()
