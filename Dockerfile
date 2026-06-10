@@ -9,8 +9,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install curl (web healthcheck) and procps (worker healthcheck via pgrep)
-RUN apt-get update && apt-get install -y --no-install-recommends curl procps \
+# curl (web healthcheck), procps (worker healthcheck via pgrep),
+# postgresql-client (pg_dump for the 12h auto-backup — bookworm's client 15
+# matches the postgres:15 server in docker-compose).
+RUN apt-get update && apt-get install -y --no-install-recommends curl procps postgresql-client \
  && rm -rf /var/lib/apt/lists/*
 
 # ── Install dependencies first (cached layer) ──

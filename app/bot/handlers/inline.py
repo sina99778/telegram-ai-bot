@@ -172,11 +172,27 @@ async def handle_chosen_inline_result(
     lang = _lang(db_user)
     prompt = chosen_result.query.strip()
 
+    # Logged FIRST so server logs prove whether Telegram delivers this update at
+    # all — if this line never appears while inline messages stay on
+    # "thinking…", BotFather's /setinlinefeedback is off (it is off by default).
+    logger.info(
+        "Inline result chosen user_id=%s has_inline_message_id=%s query_len=%s",
+        db_user.id,
+        bool(chosen_result.inline_message_id),
+        len(prompt),
+    )
+
     if not prompt:
+        return
+
+    if not chosen_result.inline_message_id:
+        # Without an inline_message_id the posted message can never be edited.
+        logger.warning("Chosen inline result has no inline_message_id user_id=%s — cannot edit", db_user.id)
         return
 
     # ── Gate 1: Must have /start-ed ───────────────────────────
     if not _user_has_started(db_user):
+        logger.info("Inline gate: start required user_id=%s", db_user.id)
         return await _safe_edit_inline(
             chosen_result,
             t(lang, "inline.start_required"),
@@ -187,6 +203,7 @@ async def handle_chosen_inline_result(
     # ── Gate 2: Daily inline quota ────────────────────────────
     inline_status = await quota_service.get_inline_status_for_user(db_user.id)
     if inline_status.exhausted:
+        logger.info("Inline gate: daily quota exhausted user_id=%s limit=%s", db_user.id, inline_status.limit)
         return await _safe_edit_inline(
             chosen_result,
             t(lang, "inline.daily_limit_reached", limit=inline_status.limit),
@@ -197,6 +214,7 @@ async def handle_chosen_inline_result(
     # ── Gate 3: Content filter ────────────────────────────────
     content_check = ContentFilterService.check_text_prompt(prompt)
     if not content_check.allowed:
+        logger.info("Inline gate: content blocked user_id=%s", db_user.id)
         await AbuseGuardService.record_failure(subject="inline_chat", subject_id=db_user.id)
         msg = t(lang, "abuse.content_blocked")
         return await _safe_edit_inline(chosen_result, msg, prompt=prompt, name=chosen_result.from_user.first_name)
@@ -204,6 +222,7 @@ async def handle_chosen_inline_result(
     # ── Gate 4: Inline-specific burst rate limit ──────────────
     throttle = await AbuseGuardService.check_inline(user_id=db_user.id, lang=lang)
     if not throttle.allowed:
+        logger.info("Inline gate: rate limited user_id=%s", db_user.id)
         return await _safe_edit_inline(
             chosen_result, throttle.reason, prompt=prompt, name=chosen_result.from_user.first_name
         )

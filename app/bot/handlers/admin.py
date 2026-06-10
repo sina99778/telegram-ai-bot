@@ -878,6 +878,36 @@ async def cb_admin_diag_ai(callback: CallbackQuery, session: AsyncSession, state
     )
 
 
+@admin_router.callback_query(F.data == "admin:diag:webhook")
+async def cb_admin_diag_webhook(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    """Show getWebhookInfo right in Telegram — proves which update types
+    Telegram delivers (e.g. chosen_inline_result for inline mode) and surfaces
+    the last delivery error without needing shell access."""
+    if not await _is_admin(callback.from_user.id, session):
+        return await callback.answer(t("fa", "errors.access_denied"), show_alert=True)
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    lang = _lang(user)
+    await callback.answer()
+    try:
+        info = await callback.bot.get_webhook_info()
+        allowed = ", ".join(info.allowed_updates or []) or "(all)"
+        text = t(
+            lang,
+            "admin.diag.webhook",
+            url=html.escape(info.url or "—"),
+            pending=info.pending_update_count,
+            allowed=html.escape(allowed),
+            last_error=html.escape((info.last_error_message or "—")[:200]),
+        )
+    except Exception as exc:
+        text = t(lang, "admin.diag.fail", model="getWebhookInfo", error=html.escape(str(exc)[:400]))
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=get_back_to_admin_kb(lang, back="admin:config"),
+    )
+
+
 def _pack_label(lang: str, code: str | None) -> str:
     if not code:
         return "?"
