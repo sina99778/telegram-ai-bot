@@ -14,9 +14,10 @@ def get_main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
         keyboard.append([KeyboardButton(text=t(lang, "buttons.open_app"), web_app=WebAppInfo(url=webapp_url))])
 
     keyboard += [
-        [KeyboardButton(text=t(lang, "buttons.chat")), KeyboardButton(text=t(lang, "buttons.search"))],
-        [KeyboardButton(text=t(lang, "buttons.image")), KeyboardButton(text=t(lang, "buttons.image_edit"))],
-        [KeyboardButton(text=t(lang, "buttons.wallet")), KeyboardButton(text=t(lang, "buttons.vip"))],
+        [KeyboardButton(text=t(lang, "buttons.chat")), KeyboardButton(text=t(lang, "buttons.pro"))],
+        [KeyboardButton(text=t(lang, "buttons.search")), KeyboardButton(text=t(lang, "buttons.image"))],
+        [KeyboardButton(text=t(lang, "buttons.image_edit")), KeyboardButton(text=t(lang, "buttons.wallet"))],
+        [KeyboardButton(text=t(lang, "buttons.vip")), KeyboardButton(text=t(lang, "buttons.profile"))],
         [KeyboardButton(text=t(lang, "buttons.invite")), KeyboardButton(text=t(lang, "buttons.support"))],
         [KeyboardButton(text=t(lang, "buttons.guide")), KeyboardButton(text=t(lang, "buttons.language"))],
     ]

@@ -251,9 +251,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(text="🚀 Open App", web_app=WebAppInfo(url=_webapp_url))
             )
-            logger.info("Mini App menu button set  ·  url=%s", _webapp_url)
-    except Exception as mb_err:
-        logger.warning("Could not set Mini App menu button: %s", mb_err)
+    try:
+        from aiogram.types import BotCommand, BotCommandScopeDefault
+
+        commands_fa = [
+            BotCommand(command="start", description="🏠 منوی اصلی و شروع مجدد"),
+            BotCommand(command="pro", description="🧠 هوش مصنوعی پیشرفته (Gemini 3.7)"),
+            BotCommand(command="search", description="🔎 جستجوی زنده در وب"),
+            BotCommand(command="image", description="🖼 ساخت تصویر با هوش مصنوعی"),
+            BotCommand(command="image_edit", description="✏️ ویرایش تصویر با هوش مصنوعی"),
+            BotCommand(command="wallet", description="🪙 کیف پول و خرید اعتبار"),
+            BotCommand(command="vip", description="👑 اشتراک و مزایای VIP"),
+            BotCommand(command="profile", description="👤 پروفایل و تنظیمات"),
+            BotCommand(command="invite", description="👥 دعوت دوستان و پاداش"),
+            BotCommand(command="help", description="📘 راهنمای جامع ربات"),
+            BotCommand(command="support", description="🆘 پشتیبانی"),
+        ]
+        commands_en = [
+            BotCommand(command="start", description="🏠 Start & Main Menu"),
+            BotCommand(command="pro", description="🧠 Advanced Pro AI (Gemini 3.7)"),
+            BotCommand(command="search", description="🔎 Live Web Search"),
+            BotCommand(command="image", description="🖼 AI Image Generation"),
+            BotCommand(command="image_edit", description="✏️ AI Image Editing"),
+            BotCommand(command="wallet", description="🪙 Wallet & Credits"),
+            BotCommand(command="vip", description="👑 VIP Plan & Benefits"),
+            BotCommand(command="profile", description="👤 Profile & Settings"),
+            BotCommand(command="invite", description="👥 Invite Friends & Rewards"),
+            BotCommand(command="help", description="📘 Help & Guide"),
+            BotCommand(command="support", description="🆘 Support"),
+        ]
+        await bot.set_my_commands(commands_fa, scope=BotCommandScopeDefault(), language_code="fa")
+        await bot.set_my_commands(commands_en, scope=BotCommandScopeDefault(), language_code="en")
+        await bot.set_my_commands(commands_fa, scope=BotCommandScopeDefault())
+        logger.info("Bot commands menu registered successfully")
+    except Exception as cmd_err:
+        logger.warning("Could not set bot commands menu: %s", cmd_err)
 
     if settings.BACKUP_ENABLED:
         backup_recipient = DailyBackupService.resolve_recipient_id()

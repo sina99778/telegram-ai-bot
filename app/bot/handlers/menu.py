@@ -65,7 +65,9 @@ def _labels(key: str) -> set[str]:
     return raw | {strip_leading_emoji(label) for label in raw}
 
 
-PROFILE_BTNS = _labels("buttons.wallet")
+WALLET_BTNS = _labels("buttons.wallet")
+PROFILE_BTNS = _labels("buttons.profile")
+PRO_BTNS = _labels("buttons.pro")
 INVITE_BTNS = _labels("buttons.invite")
 VIP_BTNS = _labels("buttons.vip")
 SUPPORT_BTNS = _labels("buttons.support")
@@ -74,7 +76,9 @@ CODES_BTNS = _labels("buttons.codes")
 ADMIN_BTNS = _labels("buttons.admin")
 LANG_BTNS = _labels("buttons.language")
 SEARCH_BTNS = _labels("buttons.search")
-TOOLS_BTNS = _labels("buttons.chat") | _labels("buttons.image") | _labels("buttons.image_edit")
+IMAGE_BTNS = _labels("buttons.image")
+IMAGE_EDIT_BTNS = _labels("buttons.image_edit")
+TOOLS_BTNS = _labels("buttons.chat")
 
 
 def _user_lang(user: User | None) -> str:
@@ -158,7 +162,7 @@ async def menu_invite(message: Message, chat_repo: ChatRepository) -> None:
     )
 
 
-@menu_router.message(F.text.in_(PROFILE_BTNS), F.chat.type == "private")
+@menu_router.message(F.text.in_(WALLET_BTNS), F.chat.type == "private")
 async def menu_wallet(message: Message, chat_repo: ChatRepository) -> None:
     user = await chat_repo.ensure_daily_credits(message.from_user.id)
     if not user:
@@ -169,6 +173,26 @@ async def menu_wallet(message: Message, chat_repo: ChatRepository) -> None:
         parse_mode="HTML",
         reply_markup=get_wallet_menu_keyboard(lang),
     )
+
+
+@menu_router.message(F.text.in_(PROFILE_BTNS), F.chat.type == "private")
+async def menu_profile(message: Message, chat_repo: ChatRepository) -> None:
+    user = await chat_repo.ensure_daily_credits(message.from_user.id)
+    if not user:
+        return
+    from app.bot.handlers.callbacks import _format_profile
+    from app.bot.keyboards.inline import get_profile_keyboard
+    await message.answer(
+        _format_profile(user),
+        parse_mode="HTML",
+        reply_markup=get_profile_keyboard(user),
+    )
+
+
+@menu_router.message(F.text.in_(PRO_BTNS), F.chat.type == "private")
+async def menu_pro(message: Message, db_user: User) -> None:
+    lang = _user_lang(db_user)
+    await message.answer(t(lang, "chat.pro_usage"), parse_mode="HTML")
 
 
 @menu_router.message(F.text.in_(VIP_BTNS), F.chat.type == "private")
@@ -199,29 +223,10 @@ async def menu_search_help(message: Message, db_user: User) -> None:
     await message.answer(t(lang, "search.helper"), parse_mode="HTML")
 
 
-@menu_router.message(F.text.in_(CODES_BTNS), F.chat.type == "private")
-async def menu_codes_legacy(message: Message, chat_repo: ChatRepository) -> None:
-    user = await chat_repo.ensure_daily_credits(message.from_user.id)
-    if not user:
-        return
-    lang = _user_lang(user)
-    await message.answer(
-        t(lang, "wallet.menu_intro"),
-        parse_mode="HTML",
-        reply_markup=get_wallet_menu_keyboard(lang),
-    )
-
-
-@menu_router.message(F.text.in_(TOOLS_BTNS), F.chat.type == "private")
-async def menu_tools(message: Message, chat_repo: ChatRepository) -> None:
+@menu_router.message(F.text.in_(IMAGE_BTNS), F.chat.type == "private")
+async def menu_image_help(message: Message, chat_repo: ChatRepository) -> None:
     user = await chat_repo.get_user_by_telegram_id(message.from_user.id)
     lang = _user_lang(user)
-    if message.text in _labels("buttons.chat"):
-        await message.answer(t(lang, "tools.chat_hint"))
-        return
-    if message.text in _labels("buttons.image_edit"):
-        await message.answer(t(lang, "image.edit_usage"), parse_mode="HTML")
-        return
     if user and (user.has_active_vip or user.is_premium or user.vip_credits > 0):
         await message.answer(
             t(lang, "tools.image_private"),
@@ -234,6 +239,31 @@ async def menu_tools(message: Message, chat_repo: ChatRepository) -> None:
             parse_mode="HTML",
             reply_markup=get_wallet_menu_keyboard(lang),
         )
+
+
+@menu_router.message(F.text.in_(IMAGE_EDIT_BTNS), F.chat.type == "private")
+async def menu_image_edit_help(message: Message, db_user: User) -> None:
+    lang = _user_lang(db_user)
+    await message.answer(t(lang, "image.edit_usage"), parse_mode="HTML")
+
+
+@menu_router.message(F.text.in_(TOOLS_BTNS), F.chat.type == "private")
+async def menu_chat_hint(message: Message, db_user: User) -> None:
+    lang = _user_lang(db_user)
+    await message.answer(t(lang, "tools.chat_hint"), parse_mode="HTML")
+
+
+@menu_router.message(F.text.in_(CODES_BTNS), F.chat.type == "private")
+async def menu_codes_legacy(message: Message, chat_repo: ChatRepository) -> None:
+    user = await chat_repo.ensure_daily_credits(message.from_user.id)
+    if not user:
+        return
+    lang = _user_lang(user)
+    await message.answer(
+        t(lang, "wallet.menu_intro"),
+        parse_mode="HTML",
+        reply_markup=get_wallet_menu_keyboard(lang),
+    )
 
 
 @menu_router.message(Command("ai"), F.chat.type.in_({"group", "supergroup"}))
