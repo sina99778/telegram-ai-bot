@@ -125,7 +125,7 @@ async def _ensure_feature_configs() -> None:
                 feature.model_name = settings.GEMINI_MODEL_IMAGE
             if not feature.provider:
                 feature.provider = values["provider"]
-            if feature.credit_cost is None:
+            if feature.credit_cost is None or (feature_name == FeatureName.PRO_TEXT and feature.credit_cost == 15):
                 feature.credit_cost = values["credit_cost"]
             # Backfill or upgrade output-token cap on text features so existing deployments
             # inherit generous limits without responses getting cut off.

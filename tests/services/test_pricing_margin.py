@@ -11,10 +11,10 @@ import pytest
 from app.core.config import settings
 from app.services.purchase.catalog import PRODUCTS
 
-# Measured from the May billing export (€). Conservative where uncertain.
+# Measured from the Gemini pricing table (€). Conservative where uncertain.
 REAL_COST_EUR = {
     "flash_msg": 0.0011,   # one Flash message (capped input + output)
-    "pro_msg": 0.020,      # one Pro message (no live data → priced high)
+    "pro_msg": 0.004,      # one Pro (3.7 Flash) message
     "image": 0.066,        # one generated image
 }
 USD_TO_EUR = 0.92

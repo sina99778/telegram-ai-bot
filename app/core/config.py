@@ -43,20 +43,21 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     # Final text models
     GEMINI_MODEL_NORMAL: str = "gemini-3.1-flash-lite"  # GA (stable) — same price as the preview
-    GEMINI_MODEL_PRO: str = "gemini-3.1-pro-preview"
+    GEMINI_MODEL_PRO: str = "gemini-3.7-flash"
     GEMINI_MODEL_IMAGE: str = "gemini-3.1-flash-image-preview"
     # ── Per-feature credit costs (calibrated to real provider cost) ──
     # 1 credit ≈ €0.0011 provider cost (one Flash message). Image and Pro are
     # priced to match their true cost so every pack keeps a healthy margin;
     # all are runtime-editable from the admin panel buttons.
     NORMAL_MESSAGE_COST: int = 1       # Flash message  (~€0.0011)
-    VIP_MESSAGE_COST: int = 15         # Pro message    (~€0.02, priced conservatively)
+    VIP_MESSAGE_COST: int = 4          # Pro (3.7 Flash) message (~€0.004, priced with healthy margin)
     IMAGE_CREDIT_COST: int = 60        # 1 image        (~€0.066)
     IMAGE_EDIT_CREDIT_COST: int = 60
     VIP_DEPLETION_BEHAVIOR: str = "fallback_to_normal"
     # Free tier is intentionally a small "taste" to drive conversion to paid:
-    # a few Flash messages a day, no free images (image is a premium feature).
+    # a few Flash messages a day, 3 free Pro messages, no free images.
     DEFAULT_DAILY_NORMAL_CREDITS: int = 8
+    FREE_DAILY_PRO_LIMIT: int = 3
     VIP_DEFAULT_PLAN_NAME: str = "vip"
     # ── Daily usage caps ──────────────────────
     # NOTE: these are the conservative defaults. They are runtime-editable
@@ -87,7 +88,7 @@ class Settings(BaseSettings):
     # Credits charged per 1000 tokens of real usage when a user opts into PAYG.
     # Pro is dearer than Flash, mirroring provider pricing. Tunable via /setconfig.
     PAYG_FLASH_PER_1K: int = 1
-    PAYG_PRO_PER_1K: int = 5
+    PAYG_PRO_PER_1K: int = 2
     PAYG_MIN_CHARGE: int = 1
 
     # ── Conversation context size (biggest input-token cost lever) ──

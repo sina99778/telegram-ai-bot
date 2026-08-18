@@ -335,8 +335,6 @@ async def cq_toggle_model(callback: CallbackQuery, chat_repo: ChatRepository, se
 
     current_model = str(user.preferred_text_model).upper() if user.preferred_text_model else "FLASH"
     next_model = "PRO" if current_model == "FLASH" else "FLASH"
-    if next_model == "PRO" and not user.has_active_vip:
-        return await callback.answer(t(lang, "profile.model_requires_vip"), show_alert=True)
 
     user.preferred_text_model = next_model
     await session.commit()

@@ -177,20 +177,49 @@ class ChatOrchestrator:
                 cost=vip_cost,
             )
 
-        if requested_is_pro and has_vip_access and vip_credits < vip_cost:
+        if requested_is_pro:
+            # Check free daily Pro quota (e.g. 3 free queries / day)
+            from app.services.usage.quota_service import QuotaService
+            pro_status = await QuotaService(self.session).get_free_pro_status_for_user(user.id)
+            if not pro_status.exhausted:
+                rem = pro_status.remaining
+                return RoutedChatPolicy(
+                    feature_name=FeatureName.PRO_TEXT,
+                    wallet_type=WalletType.NORMAL,
+                    cost=0,
+                    notice=t(lang, "chat.free_pro_notice", remaining=rem),
+                )
+
+            # Free Pro quota is exhausted
+            if has_vip_access:
+                if settings.VIP_DEPLETION_BEHAVIOR == "fallback_to_normal":
+                    return RoutedChatPolicy(
+                        feature_name=FeatureName.FLASH_TEXT,
+                        wallet_type=WalletType.NORMAL,
+                        cost=normal_cost,
+                        depleted_vip_fallback=True,
+                        notice=t(lang, "chat.vip_fallback"),
+                    )
+                return RoutedChatPolicy(
+                    feature_name=FeatureName.PRO_TEXT,
+                    wallet_type=WalletType.VIP,
+                    cost=vip_cost,
+                    notice=t(lang, "chat.vip_depleted"),
+                )
+
             if settings.VIP_DEPLETION_BEHAVIOR == "fallback_to_normal":
                 return RoutedChatPolicy(
                     feature_name=FeatureName.FLASH_TEXT,
                     wallet_type=WalletType.NORMAL,
                     cost=normal_cost,
                     depleted_vip_fallback=True,
-                    notice=t(lang, "chat.vip_fallback"),
+                    notice=t(lang, "chat.free_pro_exhausted_fallback"),
                 )
             return RoutedChatPolicy(
                 feature_name=FeatureName.PRO_TEXT,
                 wallet_type=WalletType.VIP,
                 cost=vip_cost,
-                notice=t(lang, "chat.vip_depleted"),
+                notice=t(lang, "chat.free_pro_exhausted"),
             )
 
         return RoutedChatPolicy(
@@ -345,52 +374,54 @@ class ChatOrchestrator:
                     await self.session.rollback()
         else:
             # ── Flat per-message: reserve credits before generation, refund on failure ──
-            try:
-                await self.billing.deduct_credits(
-                    user_id=user_id,
-                    amount=cost,
-                    reference_type="chat_message",
-                    reference_id=reference_id,
-                    description=f"AI Chat ({policy.feature_name.value})",
-                    wallet_type=policy.wallet_type,
-                )
-            except InsufficientCreditsError:
-                await self.session.rollback()
-                key = "errors.insufficient_vip" if policy.wallet_type == WalletType.VIP else "errors.insufficient_normal"
-                return ChatResult(
-                    text=t(lang, key, cost=cost),
-                    success=False,
-                    error_message="insufficient_funds",
-                    feature_name=policy.feature_name,
-                    wallet_type=policy.wallet_type,
-                )
-            except Exception as exc:
-                logger.error("Billing deduction error: %s", exc, exc_info=True)
-                await self.session.rollback()
-                return ChatResult(
-                    text=t(lang, "errors.wallet_check_failed"),
-                    success=False,
-                    error_message="billing_error",
-                    feature_name=policy.feature_name,
-                    wallet_type=policy.wallet_type,
-                )
+            if cost > 0:
+                try:
+                    await self.billing.deduct_credits(
+                        user_id=user_id,
+                        amount=cost,
+                        reference_type="chat_message",
+                        reference_id=reference_id,
+                        description=f"AI Chat ({policy.feature_name.value})",
+                        wallet_type=policy.wallet_type,
+                    )
+                except InsufficientCreditsError:
+                    await self.session.rollback()
+                    key = "errors.insufficient_vip" if policy.wallet_type == WalletType.VIP else "errors.insufficient_normal"
+                    return ChatResult(
+                        text=t(lang, key, cost=cost),
+                        success=False,
+                        error_message="insufficient_funds",
+                        feature_name=policy.feature_name,
+                        wallet_type=policy.wallet_type,
+                    )
+                except Exception as exc:
+                    logger.error("Billing deduction error: %s", exc, exc_info=True)
+                    await self.session.rollback()
+                    return ChatResult(
+                        text=t(lang, "errors.wallet_check_failed"),
+                        success=False,
+                        error_message="billing_error",
+                        feature_name=policy.feature_name,
+                        wallet_type=policy.wallet_type,
+                    )
 
             try:
                 response = await self._invoke_model(config, prompt, history, conversation, image_bytes)
             except SafetyBlockedError as exc:
                 logger.warning("AI safety block for user_id=%s category=%s ref=%s", user_id, exc.category, reference_id)
                 await self.session.rollback()
-                try:
-                    await self.billing.refund_credits(
-                        user_id=user_id,
-                        original_reference_id=reference_id,
-                        amount=cost,
-                        description="Refund: Content blocked by safety filter",
-                        wallet_type=policy.wallet_type,
-                    )
-                except Exception as refund_exc:
-                    logger.error("Safety-block refund failure for %s: %s", reference_id, refund_exc, exc_info=True)
-                    await self.session.rollback()
+                if cost > 0:
+                    try:
+                        await self.billing.refund_credits(
+                            user_id=user_id,
+                            original_reference_id=reference_id,
+                            amount=cost,
+                            description="Refund: Content blocked by safety filter",
+                            wallet_type=policy.wallet_type,
+                        )
+                    except Exception as refund_exc:
+                        logger.error("Safety-block refund failure for %s: %s", reference_id, refund_exc, exc_info=True)
+                        await self.session.rollback()
                 return ChatResult(
                     text=t(lang, "abuse.content_blocked"),
                     success=False,
@@ -403,17 +434,18 @@ class ChatOrchestrator:
                 # tell the user it's a temporary service issue (not their wallet).
                 logger.error("AI quota exhausted user_id=%s ref=%s: %s", user_id, reference_id, exc)
                 await self.session.rollback()
-                try:
-                    await self.billing.refund_credits(
-                        user_id=user_id,
-                        original_reference_id=reference_id,
-                        amount=cost,
-                        description="Refund: AI service quota exhausted",
-                        wallet_type=policy.wallet_type,
-                    )
-                except Exception as refund_exc:
-                    logger.error("Quota refund failure for %s: %s", reference_id, refund_exc, exc_info=True)
-                    await self.session.rollback()
+                if cost > 0:
+                    try:
+                        await self.billing.refund_credits(
+                            user_id=user_id,
+                            original_reference_id=reference_id,
+                            amount=cost,
+                            description="Refund: AI service quota exhausted",
+                            wallet_type=policy.wallet_type,
+                        )
+                    except Exception as refund_exc:
+                        logger.error("Quota refund failure for %s: %s", reference_id, refund_exc, exc_info=True)
+                        await self.session.rollback()
                 return ChatResult(
                     text=t(lang, "errors.service_unavailable"),
                     success=False,
@@ -424,17 +456,18 @@ class ChatOrchestrator:
             except Exception as exc:
                 logger.error("AI generation failed: %s", exc, exc_info=True)
                 await self.session.rollback()
-                try:
-                    await self.billing.refund_credits(
-                        user_id=user_id,
-                        original_reference_id=reference_id,
-                        amount=cost,
-                        description="Refund: AI generation failed",
-                        wallet_type=policy.wallet_type,
-                    )
-                except Exception as refund_exc:
-                    logger.error("Critical refund failure for %s: %s", reference_id, refund_exc, exc_info=True)
-                    await self.session.rollback()
+                if cost > 0:
+                    try:
+                        await self.billing.refund_credits(
+                            user_id=user_id,
+                            original_reference_id=reference_id,
+                            amount=cost,
+                            description="Refund: AI generation failed",
+                            wallet_type=policy.wallet_type,
+                        )
+                    except Exception as refund_exc:
+                        logger.error("Critical refund failure for %s: %s", reference_id, refund_exc, exc_info=True)
+                        await self.session.rollback()
                 return ChatResult(
                     text=t(lang, "errors.ai_failed_refunded"),
                     success=False,
@@ -491,11 +524,18 @@ class ChatOrchestrator:
                 conversation.last_summary_job_id = result.job_id
                 await self.session.commit()
 
+        if policy.feature_name == FeatureName.PRO_TEXT and policy.cost == 0:
+            try:
+                from app.services.usage.quota_service import QuotaService
+                await QuotaService(self.session).consume_free_pro_for_user(user_id)
+            except Exception as q_err:
+                logger.warning("Could not consume free pro quota user_id=%s: %s", user_id, q_err)
+
         text = response.text.strip() if response.text else ""
         if not text:
             text = t(lang, "chat.empty_response")
 
-        if policy.notice and policy.depleted_vip_fallback:
+        if policy.notice:
             text = f"{policy.notice}\n\n{text}"
 
         return ChatResult(

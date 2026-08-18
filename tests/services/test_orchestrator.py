@@ -96,3 +96,20 @@ async def test_orchestrator_ai_failure_refunds_credits(db_session, setup_base_da
     assert "Any deducted credits were refunded" in res.text
     # Refund SAGA strictly initiated correctly recovering state!
     billing.refund_credits.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_free_pro_quota(db_session, setup_base_data, mock_router):
+    billing = BillingService(db_session)
+    memory = AsyncMock(spec=MemoryManager)
+    memory.get_conversation_history.return_value = []
+    queue = AsyncMock()
+
+    orchestrator = ChatOrchestrator(db_session, billing, mock_router, memory, queue)
+    user_id = setup_base_data["user_id"]
+
+    # User is free and requests PRO_TEXT
+    res = await orchestrator.process_message(user_id=user_id, prompt="Explain physics", feature_name=FeatureName.PRO_TEXT)
+    assert res.success is True
+    assert "Powered by Pro" in res.text or "3.7 Flash" in res.text
+

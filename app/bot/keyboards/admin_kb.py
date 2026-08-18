@@ -66,6 +66,7 @@ CONFIG_SECTIONS: dict[str, list[str]] = {
     "limits": [
         "search_daily_free", "search_daily_paid", "search_daily_vip", "search_daily_group",
         "free_daily_image", "free_weekly_image_edit", "inline_daily", "daily_free_credits",
+        "free_daily_pro",
     ],
     "context": [
         "history_max_tokens", "history_max_messages",

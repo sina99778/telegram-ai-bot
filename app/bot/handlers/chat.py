@@ -5,6 +5,7 @@ import io
 import logging
 
 from aiogram import Bot, F, Router
+from aiogram.filters import Command
 from aiogram.types import Message, ReplyKeyboardRemove
 
 from app.bot.keyboards.inline import get_topup_keyboard
@@ -170,6 +171,74 @@ def _failure_markup(result, lang: str):
     if getattr(result, "error_message", None) in _BILLING_ERRORS:
         return get_topup_keyboard(lang, getattr(result, "wallet_type", None))
     return None
+
+
+@chat_router.message(Command("pro") & (F.chat.type == "private"))
+async def handle_user_pro_command(
+    message: Message,
+    db_user: User,
+    chat_orchestrator: ChatOrchestrator,
+) -> None:
+    lang = _lang(db_user)
+    raw_text = message.text or ""
+    parts = raw_text.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        return await message.reply(
+            t(lang, "chat.pro_usage"),
+            parse_mode="HTML",
+        )
+
+    prompt = parts[1].strip()
+    prompt_check = AbuseGuardService.enforce_prompt_length(prompt=prompt, limit=settings.PRIVATE_MAX_PROMPT_LENGTH, lang=lang)
+    if not prompt_check.allowed:
+        return await message.reply(prompt_check.reason, parse_mode="HTML")
+
+    content_check = ContentFilterService.check_text_prompt(prompt)
+    if not content_check.allowed:
+        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+        return await message.reply(t(lang, "abuse.content_blocked"), parse_mode="HTML")
+
+    throttle = await AbuseGuardService.check_private_chat(user_id=db_user.id, lang=lang)
+    if not throttle.allowed:
+        return await message.reply(throttle.reason, parse_mode="HTML")
+
+    logger.info("Private pro command accepted user_id=%s chat_id=%s", db_user.id, message.chat.id)
+    processing_msg = await message.reply(t(lang, "chat.thinking"), parse_mode="HTML")
+
+    try:
+        result = await asyncio.wait_for(
+            chat_orchestrator.process_message(
+                user_id=db_user.id,
+                prompt=prompt,
+                feature_name=FeatureName.PRO_TEXT,
+            ),
+            timeout=settings.AI_REQUEST_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Private pro: AI timeout user_id=%s chat_id=%s", db_user.id, message.chat.id)
+        await _safe_edit(processing_msg, t(lang, "errors.ai_timeout"))
+        await _record_failure_safe(db_user.id)
+        return
+    except Exception:
+        logger.exception("Private pro: unexpected error user_id=%s chat_id=%s", db_user.id, message.chat.id)
+        await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
+        await _record_failure_safe(db_user.id)
+        return
+
+    try:
+        if not result.success:
+            await _safe_edit(
+                processing_msg,
+                result.text or result.error_message or t(lang, "errors.delivery_failed"),
+                reply_markup=_failure_markup(result, lang),
+            )
+            await _record_failure_safe(db_user.id)
+            return
+
+        await _deliver_smart_response(message, processing_msg, result.text)
+    except Exception:
+        await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
+        await _record_failure_safe(db_user.id)
 
 
 @chat_router.message(F.text & ~F.text.startswith("/") & (F.chat.type == "private"))

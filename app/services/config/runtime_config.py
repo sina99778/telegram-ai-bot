@@ -75,6 +75,7 @@ class RuntimeConfig:
         "image_credit_cost":      ConfigSpec("IMAGE_CREDIT_COST", 0, 100000, "VIP credits charged per generated image"),
         "image_edit_credit_cost": ConfigSpec("IMAGE_EDIT_CREDIT_COST", 0, 100000, "VIP credits charged per image edit"),
         "daily_free_credits":     ConfigSpec("DEFAULT_DAILY_NORMAL_CREDITS", 0, 100000, "Free normal credits granted per day"),
+        "free_daily_pro":         ConfigSpec("FREE_DAILY_PRO_LIMIT", 0, 1000, "Free Pro messages granted per day"),
         # ── Context size (biggest input-token cost lever) ──
         "history_max_tokens":   ConfigSpec("HISTORY_MAX_TOKENS", 256, 32000, "Context window re-sent per message (tokens)"),
         "history_max_messages": ConfigSpec("HISTORY_MAX_MESSAGES", 2, 50, "Recent messages loaded as context"),
