@@ -4,6 +4,7 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, ReplyKeyboardRemove
 
+from app.bot.handlers.chat import _deliver_smart_response
 from app.core.config import settings
 from app.core.i18n import t
 from app.db.models import User
@@ -49,7 +50,7 @@ async def handle_private_search(
     result = await search_service.search_for_user(user=db_user, query=query)
     if not result.success:
         await AbuseGuardService.record_failure(subject="user_search", subject_id=db_user.id)
-    await processing_msg.edit_text(result.text, parse_mode="HTML")
+    await _deliver_smart_response(message, processing_msg, result.text)
 
 
 @search_router.message(Command("search"), F.chat.type.in_({"group", "supergroup"}))
@@ -94,4 +95,4 @@ async def handle_group_search(
         group_policy_service.record_cooldown(group_id=message.chat.id, user_id=db_user.id)
     else:
         await AbuseGuardService.record_failure(subject="group_search", subject_id=message.chat.id)
-    await processing_msg.edit_text(result.text, parse_mode="HTML")
+    await _deliver_smart_response(message, processing_msg, result.text)

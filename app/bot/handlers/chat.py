@@ -8,6 +8,7 @@ from aiogram import Bot, F, Router
 from aiogram.types import Message, ReplyKeyboardRemove
 
 from app.bot.keyboards.inline import get_topup_keyboard
+from app.bot.utils.html_splitter import split_html_message
 from app.core.config import settings
 from app.core.enums import FeatureName
 from app.core.i18n import t
@@ -21,20 +22,17 @@ chat_router = Router()
 logger = logging.getLogger(__name__)
 
 
-async def send_chunked_message(message: Message, text: str, parse_mode: str = "HTML", chunk_size: int = 4050):
-    if len(text) <= chunk_size:
-        try:
-            return await message.answer(text, parse_mode=parse_mode)
-        except Exception as exc:
-            logger.warning("HTML send failed; retrying as plain text chat_id=%s err=%s", message.chat.id, exc)
-            return await message.answer(text)
-    for i in range(0, len(text), chunk_size):
-        chunk = text[i:i + chunk_size]
+async def send_chunked_message(message: Message, text: str, parse_mode: str = "HTML", chunk_size: int = 4000):
+    chunks = split_html_message(text, max_chunk_size=chunk_size)
+    for chunk in chunks:
         try:
             await message.answer(chunk, parse_mode=parse_mode)
         except Exception as exc:
             logger.warning("HTML chunk send failed; retrying as plain text chat_id=%s err=%s", message.chat.id, exc)
-            await message.answer(chunk)
+            try:
+                await message.answer(chunk)
+            except Exception:
+                logger.exception("Plain text chunk send also failed chat_id=%s", message.chat.id)
 
 
 async def _safe_edit(message: Message, text: str, *, parse_mode: str = "HTML", reply_markup=None) -> None:
@@ -46,6 +44,35 @@ async def _safe_edit(message: Message, text: str, *, parse_mode: str = "HTML", r
             await message.edit_text(text, reply_markup=reply_markup)
         except Exception:
             logger.warning("Plain-text edit also failed chat_id=%s", message.chat.id, exc_info=True)
+
+
+async def _deliver_smart_response(
+    trigger_message: Message,
+    processing_msg: Message,
+    text: str,
+    *,
+    parse_mode: str = "HTML",
+    reply_markup=None,
+    chunk_size: int = 4000,
+) -> None:
+    """Deliver response: edit placeholder with chunk 1, send remaining chunks sequentially."""
+    chunks = split_html_message(text, max_chunk_size=chunk_size)
+    if not chunks:
+        chunks = [text]
+
+    first_chunk = chunks[0]
+    first_markup = reply_markup if len(chunks) == 1 else None
+    await _safe_edit(processing_msg, first_chunk, parse_mode=parse_mode, reply_markup=first_markup)
+
+    for chunk in chunks[1:]:
+        try:
+            await trigger_message.answer(chunk, parse_mode=parse_mode)
+        except Exception as exc:
+            logger.warning("HTML chunk delivery failed; retrying as plain text chat_id=%s err=%s", trigger_message.chat.id, exc)
+            try:
+                await trigger_message.answer(chunk)
+            except Exception:
+                logger.exception("Plain text chunk delivery also failed chat_id=%s", trigger_message.chat.id)
 
 
 async def finalize_group_response(
@@ -206,11 +233,7 @@ async def handle_user_message(message: Message, db_user: User, chat_orchestrator
             await _record_failure_safe(db_user.id)
             return
 
-        if len(result.text) <= 4050:
-            await _safe_edit(processing_msg, result.text)
-        else:
-            await processing_msg.delete()
-            await send_chunked_message(message, result.text)
+        await _deliver_smart_response(message, processing_msg, result.text)
     except Exception:
         await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
         await _record_failure_safe(db_user.id)
@@ -365,11 +388,7 @@ async def handle_user_photo(message: Message, db_user: User, chat_orchestrator: 
             await _record_failure_safe(db_user.id)
             return
 
-        if len(result.text) <= 4050:
-            await _safe_edit(processing_msg, result.text)
-        else:
-            await processing_msg.delete()
-            await send_chunked_message(message, result.text)
+        await _deliver_smart_response(message, processing_msg, result.text)
     except Exception:
         await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
         await _record_failure_safe(db_user.id)

@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     VIP_DEPLETION_BEHAVIOR: str = "fallback_to_normal"
     # Free tier is intentionally a small "taste" to drive conversion to paid:
     # a few Flash messages a day, no free images (image is a premium feature).
-    DEFAULT_DAILY_NORMAL_CREDITS: int = 5
+    DEFAULT_DAILY_NORMAL_CREDITS: int = 8
     VIP_DEFAULT_PLAN_NAME: str = "vip"
     # ── Daily usage caps ──────────────────────
     # NOTE: these are the conservative defaults. They are runtime-editable
@@ -80,8 +80,8 @@ class Settings(BaseSettings):
     # ── Per-feature output token caps (cost control) ──
     # Output tokens are the expensive half of a request. These hard-cap the
     # model's response length unless an admin raises them via /setconfig.
-    MAX_OUTPUT_TOKENS_FLASH: int = 600
-    MAX_OUTPUT_TOKENS_PRO: int = 1000
+    MAX_OUTPUT_TOKENS_FLASH: int = 2500
+    MAX_OUTPUT_TOKENS_PRO: int = 4096
 
     # ── Pay-as-you-go (token-metered billing) ──
     # Credits charged per 1000 tokens of real usage when a user opts into PAYG.

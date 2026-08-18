@@ -127,10 +127,11 @@ async def _ensure_feature_configs() -> None:
                 feature.provider = values["provider"]
             if feature.credit_cost is None:
                 feature.credit_cost = values["credit_cost"]
-            # Backfill an output-token cap on text features that have none yet,
-            # so existing deployments inherit the cost control without a wipe.
-            if feature_name in (FeatureName.FLASH_TEXT, FeatureName.PRO_TEXT) and feature.max_output_tokens is None:
-                feature.max_output_tokens = values["max_output_tokens"]
+            # Backfill or upgrade output-token cap on text features so existing deployments
+            # inherit generous limits without responses getting cut off.
+            if feature_name in (FeatureName.FLASH_TEXT, FeatureName.PRO_TEXT):
+                if feature.max_output_tokens is None or feature.max_output_tokens <= 1000:
+                    feature.max_output_tokens = values["max_output_tokens"]
 
         await session.commit()
 

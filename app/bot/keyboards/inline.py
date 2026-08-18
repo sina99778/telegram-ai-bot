@@ -119,10 +119,16 @@ def get_topup_keyboard(lang: str, wallet_type=None) -> object:
     routes straight to the relevant buy screen for one-tap conversion."""
     is_vip = getattr(wallet_type, "value", wallet_type) == "VIP"
     if is_vip:
-        rows = [[InlineKeyboardButton(text=t(lang, "buttons.buy_vip"), callback_data="wallet:buy_vip")]]
+        rows = [
+            [InlineKeyboardButton(text=t(lang, "buttons.buy_vip"), callback_data="wallet:buy_vip")],
+            [InlineKeyboardButton(text=t(lang, "buttons.buy_vip_access"), callback_data="wallet:buy_access")],
+        ]
     else:
-        rows = [[InlineKeyboardButton(text=t(lang, "buttons.buy_normal"), callback_data="wallet:buy_normal")]]
-    rows.append([InlineKeyboardButton(text=t(lang, "buttons.top_up"), callback_data="wallet:open")])
+        rows = [
+            [InlineKeyboardButton(text=t(lang, "buttons.buy_normal"), callback_data="wallet:buy_normal")],
+            [InlineKeyboardButton(text=t(lang, "buttons.buy_vip_access"), callback_data="wallet:buy_access")],
+        ]
+    rows.append([InlineKeyboardButton(text=t(lang, "buttons.wallet"), callback_data="wallet:open")])
     return markup(rows)
 
 

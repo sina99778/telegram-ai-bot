@@ -10,14 +10,24 @@ from app.services.ai.prompt_mgr import PromptBuilder
 
 logger = logging.getLogger(__name__)
 
+_CODE_BLOCK_RE = re.compile(r"```(?:([a-zA-Z0-9_-]+)\n)?(.*?)```", re.DOTALL)
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 
 
 def sanitize_telegram_html(text: str) -> str:
     """Sanitization layer to ensure AI model HTML output is legally parseable by Telegram."""
-    # Convert the markdown patterns we explicitly ask the model for into
-    # Telegram-supported HTML while leaving already-valid HTML untouched.
+    if not text:
+        return ""
+    # Convert code blocks first so inner characters are preserved
+    def _replace_code_block(match: re.Match) -> str:
+        lang = match.group(1)
+        code = match.group(2)
+        if lang:
+            return f'<pre><code class="language-{lang}">{code}</code></pre>'
+        return f'<pre><code>{code}</code></pre>'
+
+    text = _CODE_BLOCK_RE.sub(_replace_code_block, text)
     text = _BOLD_RE.sub(r"<b>\1</b>", text)
     text = _INLINE_CODE_RE.sub(r"<code>\1</code>", text)
     return text
