@@ -121,8 +121,16 @@ def _group_help_text(lang: str, *, group_search: int) -> str:
     )
 
 
+from aiogram.fsm.context import FSMContext
+from app.bot.states import ActionStates
+from app.bot.keyboards.styling import colorize_inline_markup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from app.services.usage.quota_service import QuotaService
+
+
 @menu_router.message(F.text.in_(LANG_BTNS), F.chat.type == "private")
-async def toggle_lang(message: Message, chat_repo: ChatRepository, db_user: User) -> None:
+async def toggle_lang(message: Message, chat_repo: ChatRepository, db_user: User, state: FSMContext) -> None:
+    await state.clear()
     next_lang = "en" if _user_lang(db_user) == "fa" else "fa"
     user = await chat_repo.set_user_language(message.from_user.id, next_lang)
     lang = _user_lang(user)
@@ -133,7 +141,8 @@ async def toggle_lang(message: Message, chat_repo: ChatRepository, db_user: User
 
 
 @menu_router.message(F.text.in_(ADMIN_BTNS), F.chat.type == "private")
-async def menu_admin_entry(message: Message, db_user: User) -> None:
+async def menu_admin_entry(message: Message, db_user: User, state: FSMContext) -> None:
+    await state.clear()
     if not is_configured_admin(message.from_user.id):
         return
     lang = _user_lang(db_user)
@@ -145,7 +154,8 @@ async def menu_admin_entry(message: Message, db_user: User) -> None:
 
 
 @menu_router.message(F.text.in_(INVITE_BTNS), F.chat.type == "private")
-async def menu_invite(message: Message, chat_repo: ChatRepository) -> None:
+async def menu_invite(message: Message, chat_repo: ChatRepository, state: FSMContext) -> None:
+    await state.clear()
     user = await chat_repo.get_user_by_telegram_id(message.from_user.id)
     lang = _user_lang(user)
     bot_info = await message.bot.get_me()
@@ -163,7 +173,8 @@ async def menu_invite(message: Message, chat_repo: ChatRepository) -> None:
 
 
 @menu_router.message(F.text.in_(WALLET_BTNS), F.chat.type == "private")
-async def menu_wallet(message: Message, chat_repo: ChatRepository) -> None:
+async def menu_wallet(message: Message, chat_repo: ChatRepository, state: FSMContext) -> None:
+    await state.clear()
     user = await chat_repo.ensure_daily_credits(message.from_user.id)
     if not user:
         return
@@ -176,7 +187,8 @@ async def menu_wallet(message: Message, chat_repo: ChatRepository) -> None:
 
 
 @menu_router.message(F.text.in_(PROFILE_BTNS), F.chat.type == "private")
-async def menu_profile(message: Message, chat_repo: ChatRepository) -> None:
+async def menu_profile(message: Message, chat_repo: ChatRepository, state: FSMContext) -> None:
+    await state.clear()
     user = await chat_repo.ensure_daily_credits(message.from_user.id)
     if not user:
         return
@@ -190,25 +202,36 @@ async def menu_profile(message: Message, chat_repo: ChatRepository) -> None:
 
 
 @menu_router.message(F.text.in_(PRO_BTNS), F.chat.type == "private")
-async def menu_pro(message: Message, db_user: User) -> None:
+async def menu_pro(message: Message, db_user: User, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
     lang = _user_lang(db_user)
-    await message.answer(t(lang, "chat.pro_usage"), parse_mode="HTML")
+    db_user.preferred_text_model = "PRO"
+    await session.commit()
+    pro_status = await QuotaService(session).get_free_pro_status_for_user(db_user.id)
+    rem = pro_status.remaining
+    kb = colorize_inline_markup(InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=t(lang, "buttons.switch_to_flash"), callback_data="switch_model_flash")]]
+    ))
+    await message.answer(t(lang, "chat.pro_mode_activated", remaining=rem), parse_mode="HTML", reply_markup=kb)
 
 
 @menu_router.message(F.text.in_(VIP_BTNS), F.chat.type == "private")
-async def show_vip_menu(message: Message, db_user: User) -> None:
+async def show_vip_menu(message: Message, db_user: User, state: FSMContext) -> None:
+    await state.clear()
     lang = _user_lang(db_user)
     await message.answer(t(lang, "vip.menu"), reply_markup=get_vip_menu_keyboard(lang), parse_mode="HTML")
 
 
 @menu_router.message(F.text.in_(SUPPORT_BTNS), F.chat.type == "private")
-async def menu_support(message: Message, db_user: User) -> None:
+async def menu_support(message: Message, db_user: User, state: FSMContext) -> None:
+    await state.clear()
     lang = _user_lang(db_user)
     await message.answer(t(lang, "support.menu"), parse_mode="HTML", reply_markup=get_support_menu_keyboard(lang))
 
 
 @menu_router.message(F.text.in_(GUIDE_BTNS), F.chat.type == "private")
-async def menu_private_help(message: Message, db_user: User, session: AsyncSession) -> None:
+async def menu_private_help(message: Message, db_user: User, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
     lang = _user_lang(db_user)
     free_images = await RuntimeConfig.get_int(session, "free_daily_image")
     await message.answer(
@@ -218,39 +241,42 @@ async def menu_private_help(message: Message, db_user: User, session: AsyncSessi
 
 
 @menu_router.message(F.text.in_(SEARCH_BTNS), F.chat.type == "private")
-async def menu_search_help(message: Message, db_user: User) -> None:
+async def menu_search_help(message: Message, db_user: User, state: FSMContext) -> None:
+    await state.set_state(ActionStates.waiting_for_search_query)
     lang = _user_lang(db_user)
-    await message.answer(t(lang, "search.helper"), parse_mode="HTML")
+    cancel_kb = colorize_inline_markup(InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=t(lang, "buttons.cancel"), callback_data="cancel_action")]]
+    ))
+    await message.answer(t(lang, "search.prompt_input_title"), parse_mode="HTML", reply_markup=cancel_kb)
 
 
 @menu_router.message(F.text.in_(IMAGE_BTNS), F.chat.type == "private")
-async def menu_image_help(message: Message, chat_repo: ChatRepository) -> None:
-    user = await chat_repo.get_user_by_telegram_id(message.from_user.id)
-    lang = _user_lang(user)
-    if user and (user.has_active_vip or user.is_premium or user.vip_credits > 0):
-        await message.answer(
-            t(lang, "tools.image_private"),
-            parse_mode="HTML",
-            reply_markup=get_vip_menu_keyboard(lang),
-        )
-    else:
-        await message.answer(
-            t(lang, "tools.image_locked"),
-            parse_mode="HTML",
-            reply_markup=get_wallet_menu_keyboard(lang),
-        )
+async def menu_image_help(message: Message, db_user: User, state: FSMContext) -> None:
+    await state.set_state(ActionStates.waiting_for_image_prompt)
+    lang = _user_lang(db_user)
+    cancel_kb = colorize_inline_markup(InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=t(lang, "buttons.cancel"), callback_data="cancel_action")]]
+    ))
+    await message.answer(t(lang, "image.prompt_input_title"), parse_mode="HTML", reply_markup=cancel_kb)
 
 
 @menu_router.message(F.text.in_(IMAGE_EDIT_BTNS), F.chat.type == "private")
-async def menu_image_edit_help(message: Message, db_user: User) -> None:
+async def menu_image_edit_help(message: Message, db_user: User, state: FSMContext) -> None:
+    await state.set_state(ActionStates.waiting_for_image_edit)
     lang = _user_lang(db_user)
-    await message.answer(t(lang, "image.edit_usage"), parse_mode="HTML")
+    cancel_kb = colorize_inline_markup(InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=t(lang, "buttons.cancel"), callback_data="cancel_action")]]
+    ))
+    await message.answer(t(lang, "image.edit_prompt_input_title"), parse_mode="HTML", reply_markup=cancel_kb)
 
 
 @menu_router.message(F.text.in_(TOOLS_BTNS), F.chat.type == "private")
-async def menu_chat_hint(message: Message, db_user: User) -> None:
+async def menu_chat_hint(message: Message, db_user: User, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
     lang = _user_lang(db_user)
-    await message.answer(t(lang, "tools.chat_hint"), parse_mode="HTML")
+    db_user.preferred_text_model = "FLASH"
+    await session.commit()
+    await message.answer(t(lang, "chat.flash_mode_activated"), parse_mode="HTML")
 
 
 @menu_router.message(F.text.in_(CODES_BTNS), F.chat.type == "private")

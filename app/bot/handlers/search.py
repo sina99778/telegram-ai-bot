@@ -13,6 +13,9 @@ from app.services.security.abuse_guard import AbuseGuardService
 from app.services.search.search_service import SearchService
 from app.services.security.content_filter import ContentFilterService
 
+from aiogram.fsm.context import FSMContext
+from app.bot.states import ActionStates
+
 search_router = Router(name="search")
 
 
@@ -20,18 +23,13 @@ def _lang(user: User | None) -> str:
     return user.language if user and user.language else "fa"
 
 
-@search_router.message(Command("search"), F.chat.type == "private")
-async def handle_private_search(
+async def _execute_search(
     message: Message,
-    command: CommandObject,
+    query: str,
     db_user: User,
     search_service: SearchService,
 ) -> None:
     lang = _lang(db_user)
-    query = (command.args or "").strip()
-    if not query:
-        await message.reply(t(lang, "search.usage"), parse_mode="HTML")
-        return
     length_check = AbuseGuardService.enforce_prompt_length(prompt=query, limit=settings.SEARCH_MAX_QUERY_LENGTH, lang=lang)
     if not length_check.allowed:
         await message.reply(length_check.reason, parse_mode="HTML")
@@ -51,6 +49,32 @@ async def handle_private_search(
     if not result.success:
         await AbuseGuardService.record_failure(subject="user_search", subject_id=db_user.id)
     await _deliver_smart_response(message, processing_msg, result.text)
+
+
+@search_router.message(ActionStates.waiting_for_search_query, F.text, F.chat.type == "private")
+async def handle_search_query_state(
+    message: Message,
+    state: FSMContext,
+    db_user: User,
+    search_service: SearchService,
+):
+    await state.clear()
+    await _execute_search(message, message.text.strip(), db_user, search_service)
+
+
+@search_router.message(Command("search"), F.chat.type == "private")
+async def handle_private_search(
+    message: Message,
+    command: CommandObject,
+    db_user: User,
+    search_service: SearchService,
+) -> None:
+    lang = _lang(db_user)
+    query = (command.args or "").strip()
+    if not query:
+        await message.reply(t(lang, "search.usage"), parse_mode="HTML")
+        return
+    await _execute_search(message, query, db_user, search_service)
 
 
 @search_router.message(Command("search"), F.chat.type.in_({"group", "supergroup"}))

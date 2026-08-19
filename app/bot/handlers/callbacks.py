@@ -476,3 +476,27 @@ async def resume_chat(callback: CallbackQuery, chat_repo: ChatRepository, sessio
     await session.commit()
     await callback.answer(t(lang, "chat.history.resumed"), show_alert=True)
     await callback.message.delete()
+
+
+@callback_router.callback_query(F.data == "cancel_action")
+async def cancel_action_cb(callback: CallbackQuery, state: FSMContext, db_user: User):
+    await state.clear()
+    lang = _lang(db_user)
+    await callback.answer()
+    try:
+        await callback.message.edit_text(t(lang, "buttons.action_cancelled"), parse_mode="HTML")
+    except Exception:
+        await callback.message.delete()
+
+
+@callback_router.callback_query(F.data == "switch_model_flash")
+async def switch_model_flash_cb(callback: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User):
+    await state.clear()
+    lang = _lang(db_user)
+    db_user.preferred_text_model = "FLASH"
+    await session.commit()
+    await callback.answer(t(lang, "chat.flash_mode_activated"))
+    try:
+        await callback.message.edit_text(t(lang, "chat.flash_mode_activated"), parse_mode="HTML")
+    except Exception:
+        pass
