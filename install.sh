@@ -60,7 +60,6 @@ PLACEHOLDER_VALUES=(
     "your-gemini-api-key-here"
     "change-me-to-a-random-string"
     "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
-    "secure_password"
     "https://your-domain.example.com/webhook"
 )
 
