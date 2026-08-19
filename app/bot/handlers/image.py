@@ -176,6 +176,18 @@ async def handle_image_edit_state(
     await _execute_image_edit(message, photo, prompt, db_user, image_orchestrator, bot)
 
 
+@image_router.message(ActionStates.waiting_for_image_edit, F.text, F.chat.type == "private")
+async def handle_image_edit_text_fallback(
+    message: Message,
+    state: FSMContext,
+    db_user: User,
+    chat_orchestrator: ChatOrchestrator,
+):
+    from app.bot.handlers.chat import handle_user_message
+    await state.clear()
+    await handle_user_message(message, db_user, chat_orchestrator, state)
+
+
 @image_router.message(Command("image"), F.chat.type == "private")
 async def handle_image_command(message: Message, command: CommandObject, db_user: User, image_orchestrator: ImageOrchestrator):
     lang = _lang(db_user)

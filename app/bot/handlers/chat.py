@@ -241,8 +241,22 @@ async def handle_user_pro_command(
         await _record_failure_safe(db_user.id)
 
 
-@chat_router.message(F.text & ~F.text.startswith("/") & (F.chat.type == "private"))
-async def handle_user_message(message: Message, db_user: User, chat_orchestrator: ChatOrchestrator):
+from aiogram.fsm.context import FSMContext
+
+
+@chat_router.message(F.text, ~F.text.startswith("/"), F.chat.type == "private")
+async def handle_user_message(
+    message: Message,
+    db_user: User,
+    chat_orchestrator: ChatOrchestrator,
+    state: FSMContext | None = None,
+):
+    if state is not None:
+        current_state = await state.get_state()
+        if current_state:
+            logger.info("Auto-clearing dangling state %s for user_id=%s", current_state, db_user.id)
+            await state.clear()
+
     lang = _lang(db_user)
     prompt = message.text or ""
     prompt_check = AbuseGuardService.enforce_prompt_length(prompt=prompt, limit=settings.PRIVATE_MAX_PROMPT_LENGTH, lang=lang)
