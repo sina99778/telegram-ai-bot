@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import html
 import io
 import logging
@@ -12,6 +14,7 @@ from app.core.config import settings
 from app.core.i18n import t
 from app.db.models import User
 from app.services.chat.image_orchestrator import ImageOrchestrator
+from app.services.chat.orchestrator import ChatOrchestrator
 from app.services.security.abuse_guard import AbuseGuardService
 from app.services.security.content_filter import ContentFilterService
 
