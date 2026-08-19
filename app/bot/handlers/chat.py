@@ -251,75 +251,83 @@ async def handle_user_message(
     chat_orchestrator: ChatOrchestrator,
     state: FSMContext | None = None,
 ):
-    if state is not None:
-        current_state = await state.get_state()
-        if current_state:
-            logger.info("Auto-clearing dangling state %s for user_id=%s", current_state, db_user.id)
-            await state.clear()
-
-    lang = _lang(db_user)
-    prompt = message.text or ""
-    prompt_check = AbuseGuardService.enforce_prompt_length(prompt=prompt, limit=settings.PRIVATE_MAX_PROMPT_LENGTH, lang=lang)
-    if not prompt_check.allowed:
-        return await message.reply(prompt_check.reason, parse_mode="HTML")
-
-    content_check = ContentFilterService.check_text_prompt(prompt)
-    if not content_check.allowed:
-        await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
-        return await message.reply(t(lang, "abuse.content_blocked"), parse_mode="HTML")
-
-    throttle = await AbuseGuardService.check_private_chat(user_id=db_user.id, lang=lang)
-    if not throttle.allowed:
-        return await message.reply(throttle.reason, parse_mode="HTML")
-
-    logger.info("Private chat accepted user_id=%s chat_id=%s", db_user.id, message.chat.id)
-    processing_msg = await message.reply(t(lang, "chat.thinking"), parse_mode="HTML")
-
-    raw_mode = db_user.preferred_text_model or getattr(db_user, "subscription_plan", None) or "flash"
-    preferred_mode = raw_mode.lower()
-    feature_mapping = {
-        "premium": FeatureName.PRO_TEXT,
-        "pro": FeatureName.PRO_TEXT,
-        "flash": FeatureName.FLASH_TEXT,
-    }
-    feature_name = feature_mapping.get(preferred_mode, FeatureName.FLASH_TEXT)
-
     try:
-        result = await asyncio.wait_for(
-            chat_orchestrator.process_message(
-                user_id=db_user.id,
-                prompt=prompt,
-                feature_name=feature_name,
-            ),
-            timeout=settings.AI_REQUEST_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError:
-        logger.warning("Private chat: AI timeout user_id=%s chat_id=%s", db_user.id, message.chat.id)
-        await _safe_edit(processing_msg, t(lang, "errors.ai_timeout"))
-        await _record_failure_safe(db_user.id)
-        return
-    except Exception:
-        # Any non-timeout failure must still update the placeholder — never
-        # leave the user staring at a frozen "thinking…" message.
-        logger.exception("Private chat: unexpected error user_id=%s chat_id=%s", db_user.id, message.chat.id)
-        await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
-        await _record_failure_safe(db_user.id)
-        return
+        logger.info("Private chat incoming user_id=%s text=%r", getattr(db_user, 'id', None), message.text)
+        if state is not None:
+            current_state = await state.get_state()
+            if current_state:
+                logger.info("Auto-clearing dangling state %s for user_id=%s", current_state, db_user.id)
+                await state.clear()
 
-    try:
-        if not result.success:
-            await _safe_edit(
-                processing_msg,
-                result.text or result.error_message or t(lang, "errors.delivery_failed"),
-                reply_markup=_failure_markup(result, lang),
+        lang = _lang(db_user)
+        prompt = message.text or ""
+        prompt_check = AbuseGuardService.enforce_prompt_length(prompt=prompt, limit=settings.PRIVATE_MAX_PROMPT_LENGTH, lang=lang)
+        if not prompt_check.allowed:
+            return await message.reply(prompt_check.reason, parse_mode="HTML")
+
+        content_check = ContentFilterService.check_text_prompt(prompt)
+        if not content_check.allowed:
+            await AbuseGuardService.record_failure(subject="private_chat", subject_id=db_user.id)
+            return await message.reply(t(lang, "abuse.content_blocked"), parse_mode="HTML")
+
+        throttle = await AbuseGuardService.check_private_chat(user_id=db_user.id, lang=lang)
+        if not throttle.allowed:
+            return await message.reply(throttle.reason, parse_mode="HTML")
+
+        logger.info("Private chat accepted user_id=%s chat_id=%s", db_user.id, message.chat.id)
+        processing_msg = await message.reply(t(lang, "chat.thinking"), parse_mode="HTML")
+
+        raw_mode = db_user.preferred_text_model or getattr(db_user, "subscription_plan", None) or "flash"
+        preferred_mode = raw_mode.lower()
+        feature_mapping = {
+            "premium": FeatureName.PRO_TEXT,
+            "pro": FeatureName.PRO_TEXT,
+            "flash": FeatureName.FLASH_TEXT,
+        }
+        feature_name = feature_mapping.get(preferred_mode, FeatureName.FLASH_TEXT)
+
+        try:
+            result = await asyncio.wait_for(
+                chat_orchestrator.process_message(
+                    user_id=db_user.id,
+                    prompt=prompt,
+                    feature_name=feature_name,
+                ),
+                timeout=settings.AI_REQUEST_TIMEOUT_SECONDS,
             )
+        except asyncio.TimeoutError:
+            logger.warning("Private chat: AI timeout user_id=%s chat_id=%s", db_user.id, message.chat.id)
+            await _safe_edit(processing_msg, t(lang, "errors.ai_timeout"))
+            await _record_failure_safe(db_user.id)
+            return
+        except Exception:
+            # Any non-timeout failure must still update the placeholder — never
+            # leave the user staring at a frozen "thinking…" message.
+            logger.exception("Private chat: unexpected error user_id=%s chat_id=%s", db_user.id, message.chat.id)
+            await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
             await _record_failure_safe(db_user.id)
             return
 
-        await _deliver_smart_response(message, processing_msg, result.text)
-    except Exception:
-        await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
-        await _record_failure_safe(db_user.id)
+        try:
+            if not result.success:
+                await _safe_edit(
+                    processing_msg,
+                    result.text or result.error_message or t(lang, "errors.delivery_failed"),
+                    reply_markup=_failure_markup(result, lang),
+                )
+                await _record_failure_safe(db_user.id)
+                return
+
+            await _deliver_smart_response(message, processing_msg, result.text)
+        except Exception:
+            await _safe_edit(processing_msg, t(lang, "errors.delivery_failed"))
+            await _record_failure_safe(db_user.id)
+    except Exception as outer_err:
+        logger.exception("Fatal error in handle_user_message for user_id=%s: %s", getattr(db_user, 'id', None), outer_err)
+        try:
+            await message.reply(t(_lang(db_user), "errors.delivery_failed"))
+        except Exception:
+            pass
 
 
 @chat_router.message(F.text & ~F.text.startswith("/") & F.chat.type.in_({"group", "supergroup"}))

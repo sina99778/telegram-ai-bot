@@ -422,10 +422,14 @@ async def telegram_webhook(
         logger.warning("Webhook request rejected: invalid JSON")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
     update = Update.model_validate(payload, context={"bot": bot})
-    logger.info("Telegram webhook accepted update_id=%s", getattr(update, "update_id", None))
+    # Feed the update into aiogram's dispatcher pipeline with full error logging.
+    async def _process_update(b: Bot, u: Update) -> None:
+        try:
+            await dp.feed_update(bot=b, update=u)
+        except Exception as exc:
+            logger.exception("Error processing update_id=%s: %s", getattr(u, "update_id", None), exc)
 
-    # Feed the update into aiogram's dispatcher pipeline.
-    background_tasks.add_task(dp.feed_update, bot=bot, update=update)
+    background_tasks.add_task(_process_update, b=bot, u=update)
 
     return {"status": "ok"}
 
