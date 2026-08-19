@@ -311,19 +311,17 @@ class ChatOrchestrator:
             # history_max_tokens is the most direct lever on input-token spend.
             history = self._apply_sliding_window(history, prompt, hist_max_tokens)
 
-        if is_payg:
+        if is_payg and cost > 0:
             # ── Pay-as-you-go: charge the REAL token usage after generation ──
             rate = await self._payg_rate(policy.feature_name)
             min_charge = await RuntimeConfig.get_int(self.session, "payg_min_charge")
-            est_input = self._tokenizer.estimate_tokens(prompt) + self._tokenizer.estimate_messages(history)
-            max_out = config.max_output_tokens or settings.MAX_OUTPUT_TOKENS_PRO
-            max_cost = self._metered_cost(est_input + max_out, rate, min_charge)
             balance = user.vip_credits if policy.wallet_type == WalletType.VIP else user.normal_credits
-            if balance < max_cost:
-                # Reject up-front so usage can never push the wallet negative.
+            required_min = max(1, min_charge)
+            if balance < required_min:
+                # Reject up-front if wallet cannot even cover minimum charge.
                 key = "errors.insufficient_vip" if policy.wallet_type == WalletType.VIP else "errors.insufficient_normal"
                 return ChatResult(
-                    text=t(lang, key, cost=max_cost),
+                    text=t(lang, key, cost=required_min),
                     success=False,
                     error_message="insufficient_funds",
                     feature_name=policy.feature_name,
@@ -373,7 +371,7 @@ class ChatOrchestrator:
                     logger.error("PAYG deduction failed ref=%s: %s", reference_id, exc, exc_info=True)
                     await self.session.rollback()
         else:
-            # ── Flat per-message: reserve credits before generation, refund on failure ──
+            # ── Flat per-message or Free path (cost == 0) ──
             if cost > 0:
                 try:
                     await self.billing.deduct_credits(
