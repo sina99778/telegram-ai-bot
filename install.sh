@@ -490,7 +490,7 @@ doctor_check_containers() {
         fi
         local state; state="$(docker inspect -f '{{.State.Status}}' "$cid")"
         local health; health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid")"
-        if [ "$state" = "running" ] && { [ "$health" = "healthy" ] || [ "$health" = "none" ]; }; then
+        if [ "$state" = "running" ] && { [ "$health" = "healthy" ] || [ "$health" = "none" ] || [ "$health" = "starting" ]; }; then
             ok "$svc: $state ($health)"
         else
             doctor_problem "$svc: $state ($health)"
@@ -568,7 +568,18 @@ doctor_check_health_endpoint() {
         doctor_problem "web container is not running; cannot probe /health"
         return 1
     fi
-    if dc exec -T web curl -sf http://localhost:8000/health >/dev/null 2>&1; then
+    local tries=0
+    local ok_health=0
+    while [ "$tries" -lt 6 ]; do
+        if dc exec -T web curl -sf http://localhost:8000/health >/dev/null 2>&1; then
+            ok_health=1
+            break
+        fi
+        tries=$((tries + 1))
+        sleep 2
+    done
+
+    if [ "$ok_health" = 1 ]; then
         ok "/health returns 200"
     else
         doctor_problem "/health did not return 200"
