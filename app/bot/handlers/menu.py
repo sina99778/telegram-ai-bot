@@ -91,17 +91,27 @@ def _private_help_text(lang: str, *, is_admin: bool, free_images: int) -> str:
         t(lang, "help.private.subtitle"),
         "",
         t(lang, "help.private.chat"),
-        t(lang, "help.private.search"),
+        "",
+        t(lang, "help.private.pro"),
+        "",
         t(lang, "help.private.image", free_images=free_images),
+        "",
+        t(lang, "help.private.search"),
+        "",
+        t(lang, "help.private.image_edit"),
+        "",
         t(lang, "help.private.wallet"),
+        "",
         t(lang, "help.private.vip"),
+        "",
         t(lang, "help.private.invite"),
+        "",
         t(lang, "help.private.support"),
+        "",
         t(lang, "help.private.language"),
-        t(lang, "help.private.antispam"),
     ]
     if is_admin:
-        lines.append(t(lang, "help.private.admin"))
+        lines.extend(["", t(lang, "help.private.admin")])
     return "\n".join(lines)
 
 
