@@ -251,6 +251,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(text="🚀 Open App", web_app=WebAppInfo(url=_webapp_url))
             )
+            logger.info("Mini App menu button set  ·  url=%s", _webapp_url)
+    except Exception as mb_err:
+        logger.warning("Could not set Mini App menu button: %s", mb_err)
+
     try:
         from aiogram.types import BotCommand, BotCommandScopeDefault
 
