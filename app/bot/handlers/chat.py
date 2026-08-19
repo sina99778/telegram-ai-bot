@@ -173,7 +173,7 @@ def _failure_markup(result, lang: str):
     return None
 
 
-@chat_router.message(Command("pro") & (F.chat.type == "private"))
+@chat_router.message(Command("pro"), F.chat.type == "private")
 async def handle_user_pro_command(
     message: Message,
     db_user: User,
@@ -330,7 +330,7 @@ async def handle_user_message(
             pass
 
 
-@chat_router.message(F.text & ~F.text.startswith("/") & F.chat.type.in_({"group", "supergroup"}))
+@chat_router.message(F.text, ~F.text.startswith("/"), F.chat.type.in_({"group", "supergroup"}))
 async def handle_group_message(
     message: Message,
     db_user: User,
@@ -413,7 +413,7 @@ def _photo_prompt(message: Message, lang: str) -> str:
     return t(lang, "chat.vision_default_prompt")
 
 
-@chat_router.message(F.photo & (F.chat.type == "private"))
+@chat_router.message(F.photo, F.chat.type == "private")
 async def handle_user_photo(message: Message, db_user: User, chat_orchestrator: ChatOrchestrator, bot: Bot):
     """Handle photo messages in private chat — run vision analysis."""
     lang = _lang(db_user)
@@ -485,7 +485,7 @@ async def handle_user_photo(message: Message, db_user: User, chat_orchestrator: 
         await _record_failure_safe(db_user.id)
 
 
-@chat_router.message(F.photo & F.chat.type.in_({"group", "supergroup"}))
+@chat_router.message(F.photo, F.chat.type.in_({"group", "supergroup"}))
 async def handle_group_photo(
     message: Message,
     db_user: User,
